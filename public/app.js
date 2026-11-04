@@ -1,4 +1,5 @@
 import { dtf } from "./dtf.mjs";
+import {memberColor} from './member-colors.mjs';
 import { addDays, eventStartDay, eventsOnDay, mondayOf, monthDays, osloDay, shiftMonth, weekDays } from "./calendar-data.mjs";
 import { installKiosk, createRefresh, fetchTimed, fetchOptional } from "./kiosk.mjs";
 import * as kioskHome from "./kiosk-home.mjs";
@@ -18,7 +19,7 @@ const dayDate = (day) => new Date(`${day}T12:00:00Z`);
 const displayDay = (day, options) => dtf("nb-NO", { timeZone:"Europe/Oslo", ...options }).format(dayDate(day));
 const displayMoment = (value, options = { dateStyle:"medium", timeStyle:"short" }) => value ? dtf("nb-NO", { timeZone:"Europe/Oslo", ...options }).format(new Date(value)) : "Dato mangler";
 const isCalendarTab = (value) => ["overview", "week", "month"].includes(value);
-const personColors = new Proxy({}, {get:(_,id)=>state?.profile?.members.find(m=>m.id===id)?.color ?? ['#c57b84','#668db5','#749a7b','#d5a557','#808789','#987b9a'][Math.max(0,state?.profile?.members.findIndex(m=>m.id===id)??0)%6]});
+const personColors = new Proxy({}, {get:(_,id)=>memberColor(state?.profile?.members??[],id)});
 
 const profileRequest = async (path, data) => { const response=await fetch(path,data?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)}:{}); const result=await response.json(); if(!response.ok)throw Error(result.error||"Kunne ikke lagre profilen.");return result; };
 let houseView;

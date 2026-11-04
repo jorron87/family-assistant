@@ -2,14 +2,15 @@ import {osloDay,addDays,eventStartDay,eventsOnDay,weekDays,monthDays,shiftMonth}
 import {cleanTitle,isFollowUp,noteFor} from './event-display.mjs';
 import {celebrateTick,celebrateComplete,celebrationFor,pop} from './celebrate.mjs';
 import {isHomework} from './home-tasks.mjs';
+import {memberColor} from './member-colors.mjs';
 const $=s=>document.querySelector(s);
 const node=(tag,text,cls)=>{const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(cls)el.className=cls;return el;};
 const dayText=(day,opts={weekday:'long',day:'numeric',month:'long'})=>new Intl.DateTimeFormat('nb-NO',{timeZone:'Europe/Oslo',...opts}).format(new Date(day+'T12:00:00Z'));
-const colors=new Proxy({}, {get:(_,id)=>['#c57b84','#668db5','#749a7b','#d5a557','#808789','#987b9a'][String(id).split('').reduce((n,c)=>n+c.charCodeAt(0),0)%6]});
 export function installFamily({api,post,status}) {
  let editor;
  async function refreshProfile(){try{if(!editor){const {installProfileEditor}=await import('./profile-editor.mjs?v='+Date.now());editor=installProfileEditor($('#mobile-profile-cards'),{read:()=>api('/profile'),save:data=>post('/profile/edit',data),onSaved:()=>refresh()});}await editor.refresh();}catch{$('#mobile-profile-cards').textContent='Profilredigeringen blir tilgjengelig når den pågående kjøringen er ferdig.';}}
  let data={members:[],events:[]},person='all',view='home',mode='agenda',day=osloDay(),showLater=false,signature='',openedId=null;
+ const colors=new Proxy({}, {get:(_,id)=>memberColor(data.members,id)});
  const expanded=new Set();
  const name=id=>data.members.find(x=>x.id===id)?.name??id;
  const matching=()=>data.events.filter(e=>person==='all'||e.members.includes(person));

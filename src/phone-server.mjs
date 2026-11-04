@@ -13,6 +13,7 @@ export function phoneHandler({store,root,send,body,json,onQueued=()=>{},weather=
       if(req.method==='GET') {
         const assets={'/send/profile-editor.mjs':['profile-editor.mjs','text/javascript; charset=utf-8'],'/send/profile-editor.css':['profile-editor.css','text/css; charset=utf-8'],'/send/':['phone.html','text/html; charset=utf-8'],'/send/phone.js':['phone.js','text/javascript; charset=utf-8'],'/send/phone-family.js':['phone-family.js','text/javascript; charset=utf-8'],'/send/calendar-data.mjs':['calendar-data.mjs','text/javascript; charset=utf-8'],'/send/event-display.mjs':['event-display.mjs','text/javascript; charset=utf-8'],'/send/phone.css':['phone.css','text/css; charset=utf-8'],'/send/manifest.webmanifest':['phone.webmanifest','application/manifest+json'],'/send/icon.svg':['phone-icon.svg','image/svg+xml']};
         assets['/send/dtf.mjs']=['dtf.mjs','text/javascript; charset=utf-8'];
+        assets['/send/member-colors.mjs']=['member-colors.mjs','text/javascript; charset=utf-8'];
         assets['/send/celebrate.mjs']=['celebrate.mjs','text/javascript; charset=utf-8'];
         assets['/send/home-tasks.mjs']=['home-tasks.mjs','text/javascript; charset=utf-8'];
         assets['/send/phone-boot.js']=['phone-boot.js','text/javascript; charset=utf-8'];
@@ -38,7 +39,7 @@ export function phoneHandler({store,root,send,body,json,onQueued=()=>{},weather=
       if(path==='/send/api/family'&&req.method==='GET') {
         const snapshot=store.snapshot();
         const letters=weeklyLetters(snapshot).map(letter=>({...letter,url:letter.attachmentId?`/send/api/documents/${letter.rawId}/${letter.attachmentId}`:null}));
-        const members=store.profile().members.map(({id,name})=>({id,name}));
+        const members=store.profile().members.map(({id,name,role,color})=>({id,name,role,color}));
         const events=Object.values(snapshot.events).map(({id,title,kind,start,end,allDay,provisional,timeNote,cancelled,members,details,reason,checklist,task,taskSplit,visibility,calendar,sourceRefs})=>({id,title,kind,start,end,allDay,provisional,timeNote,cancelled,members,details,reason,checklist,task,taskSplit:taskSplit?{eventIds:taskSplit.eventIds}:null,visibility:visibility?{hidden:visibility.hidden,sync:visibility.sync}:null,calendarUrl:calendar?.removedAt?null:calendar?.eventUrl,sources:sourceRefs.map(rawId=>{const raw=snapshot.rawItems[rawId];return {id:rawId,title:raw.title,source:raw.source,url:raw.sourceUrl,driveUrl:raw.driveUrl,attachments:raw.attachments.map(file=>({id:file.id,name:file.fileName,url:`/send/api/documents/${rawId}/${file.id}`}))};})}));
         const login=loginSummary(loginProblems({sourceStatus:snapshot.sourceStatus,surfaces:snapshot.surfaces,session:sessionMaintenance?.snapshot()??null}));
         return send(res,200,{members,events,login,weeklyLetters:letters,childIds:store.profile().members.filter(member=>member.role==='child').map(member=>member.id)});

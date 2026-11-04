@@ -1,6 +1,13 @@
 import {spawn} from 'node:child_process';
-import {readdirSync} from 'node:fs';
+import {readdirSync,mkdtempSync,rmSync} from 'node:fs';
 import {resolve} from 'node:path';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
 const files=readdirSync('test').filter(n=>n.endsWith('.test.mjs')).map(n=>'test/'+n);
-const child=spawn(process.execPath,['--test',...process.argv.slice(2),...files],{stdio:'inherit',env:{...process.env,FAMILIEN_CONFIG_DIR:resolve('test/config')}});
-child.on('exit',code=>process.exit(code??1));
+const isolated=mkdtempSync(join(tmpdir(),'family-assistant-tests-'));
+const env={...process.env,FAMILIEN_CONFIG_DIR:resolve('test/config'),FAMILIEN_DATA_DIR:isolated,CODEX_HOME:join(isolated,'codex'),FAMILIEN_API:'http://127.0.0.1:1',FAMILIEN_NO_DISPATCH:'1'};
+delete env.FAMILIEN_PROFILE_CONFIG;delete env.FAMILIEN_HOME_ASSISTANT_CONFIG;
+const child=spawn(process.execPath,['--test',...process.argv.slice(2),...files],{stdio:'inherit',env});
+const cleanup=()=>{if(!resolve(isolated).startsWith(resolve(tmpdir(),'family-assistant-tests-')))throw Error('Unexpected test directory');rmSync(isolated,{recursive:true,force:true});};
+child.on('error',()=>{cleanup();process.exit(1);});
+child.on('exit',code=>{cleanup();process.exit(code??1);});

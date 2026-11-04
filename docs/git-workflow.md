@@ -23,6 +23,8 @@ Ship legger til endringer i allerede sporede filer, kontrollerer faktisk staging
 
 En lokal konfigurasjonsendring skal ikke gi Git-endring. Dersom noe privat likevel blir staged: unstage filen og flytt valget til lokal konfigurasjon. Har det blitt commitet, må historikken repareres **før** push. Ikke omgå hookene med `--no-verify`.
 
+Tester bruker en egen midlertidig datamappe, syntetisk konfigurasjon og deaktivert bakgrunnsdispatch. Ikke pek tester på produksjonsdata. På Windows kan en pakket skrivebordsapp og en planlagt tjeneste se ulike virtuelle AppData-mapper selv når stien ser lik ut. Kontroller faktisk tjenestetilstand og ta sikkerhetskopi i tjenestens Windows-kontekst; anta ikke at et vilkårlig direkte filoppslag er produksjonsarkivet.
+
 ## Flytting fra eldre installasjon
 
 Ta privat sikkerhetskopi av kode, lokale instrukser og konfigurasjon. Bevar dataområdet, DPAPI-bruker, canonicalKeys og familievalg. Ikke publiser den gamle arbeidsmappens historikk. Legg de offentlige sporede filene over i eksisterende tjenestemappe, mens private filer bevares ignorert. Konfigurer egen profil, agentmodell/tillatelser og eventuelle API-nøkler lokalt. Fullfør tester og en isolert oppstart med kopi av arkivet før skånsom omstart. Verifiser mobil, kiosk, samler og eksisterende data etterpå. Et uendret tjenestefilsted sparer omlegging av planlagte oppgaver og Chrome-utvidelsen.

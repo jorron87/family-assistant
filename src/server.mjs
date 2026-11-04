@@ -36,6 +36,7 @@ const ingestionDispatcher=createIngestionDispatcher({store,resources,root,dataDi
 // Nye visningsfiler serveres fra public/ etter navn (ingen stier fra klienten).
 const PUBLIC_FILES=new Map([['kiosk.css','text/css; charset=utf-8'],['kiosk-home.mjs','text/javascript; charset=utf-8'],['event-display.mjs','text/javascript; charset=utf-8'],['weather-widget.mjs','text/javascript; charset=utf-8'],['login-status.mjs','text/javascript; charset=utf-8'],['sun.mjs','text/javascript; charset=utf-8'],['dtf.mjs','text/javascript; charset=utf-8'],['home-tasks.mjs','text/javascript; charset=utf-8'],['celebrate.mjs','text/javascript; charset=utf-8']]);
 PUBLIC_FILES.set('doorbell-view.mjs','text/javascript; charset=utf-8');PUBLIC_FILES.set('doorbell.css','text/css; charset=utf-8');
+PUBLIC_FILES.set('member-colors.mjs','text/javascript; charset=utf-8');
 let wasteRefresh;
 let restarting=false;
 const servers=[];
