@@ -1,5 +1,7 @@
 # Arkitektur
 
+Familien har to innholdsspor: nødvendige avtaler og oppgaver fra skole/fritidsgrupper, og forslag til opplevelser i nærområdet. Aktivitetsinnhentingen kombinerer blant annet kommunale kalendere, bibliotekprogrammer, kulturhus, museer, arrangørsider og lokale Facebook-grupper. Agenten vurderer alder, familiens interesser og praktiske rammer fra profilen, og lager personlige forslag. Et forslag blir først en kalenderavtale når familien velger det.
+
 ![Systemkart med laptop, Chrome, review og familiens flater](images/system-map.svg)
 
 ## Maskinen hjemme er motoren

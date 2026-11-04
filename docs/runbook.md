@@ -2,6 +2,12 @@
 
 Les AGENTS.md og docs/setup.md før bruk. Alle lokale konfigurasjoner tilhører den nye familien. Eksempler er syntetiske; opprett aldri ekte hendelser fra eksempeldatoer.
 
+## Tekstkoding og kontrollert restaurering
+
+Skriv agentens JSON direkte til en UTF-8-fil og gi filstien til CLI-en. Windows PowerShell 5 bruker normalt ASCII ved piping til native programmer: `æøå` kan bli `???` før JSON leses. `Set-Content -Encoding utf8` til fil fungerer (også med BOM); ved nødvendig piping må `$OutputEncoding` først settes til UTF-8. Kontroller returteksten. Importen avviser vanlige tegnskademønstre i visningstekst, uten å endre originalfiler eller gjette bokstaver.
+
+For eldre lagret tegnskade: ta `/api/maintenance/backup`, les originalbelegget og lag en eksplisitt liste med `collection` (`events`, `rawItems`, `activities`), `id`, `path`, `before`, `after`. Send til `POST /api/maintenance/text-repair` med `X-Family-Request:1`, egen aktiv lease `token` og først `dryRun:true`. Bare tegnrestaurering i angitte tekstfelt tillates; datoer, identiteter, familievalg og avkryssinger bevares. Hele listen valideres før skriving. Endrede råkort får ny revisjon, kalenderfingerprints beregnes på nytt, og faktiske Drive-/Calendar-oppdateringer må kvitteres etterpå. Originaler og lesekvitteringer gjenbrukes. Rett ikke kanoniske nøkler eller historiske kildebevis for å pynte visningstekst.
+
 ## Datahenting og endringskjøringer
 
 Tjenesten gjør innhenting, originalcache og tekstuttrekk før agenten. Bruk begin-run (eller dispatcherens eksisterende lease), next og telefoninnboksen først. collected ID gir kildeinnhold; resources EKSTERN_ID og resource ID gir originalstatus. resource-export ID tmp/agent/filnavn gir lokal kopi for visuell lesing. Uendrede native fil-ID-er og dokumentkvitteringer gjenbrukes. Les alltid nye sider/vedlegg før mark-reviewed.

@@ -87,6 +87,10 @@ async function handle(req, res) {
       if(req.headers['x-family-request']!=='1'||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host))return send(res,403,{error:'Ugyldig avsender.'});
       return send(res,200,store.backupArchive(await json(req)));
     }
+    if(path==='/api/maintenance/text-repair'&&method==='POST') {
+      if(req.headers['x-family-request']!=='1'||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host))return send(res,403,{error:'Ugyldig avsender.'});
+      return send(res,200,store.repairText(await json(req)));
+    }
     if(path==='/api/maintenance/restart'&&method==='POST') {
       if(req.headers['x-family-request']!=='1'||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host))return send(res,403,{error:'Ugyldig avsender.'});
       // Independent ingestion retains its lease; a child agent needs this parent.

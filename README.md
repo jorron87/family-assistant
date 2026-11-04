@@ -4,7 +4,9 @@
 
 Familien leser Vigilo, Spond, relevante Facebook-grupper og det dere sender inn fra telefonen. Agenten finner datoer, lekser og ting som må huskes — og oppdaterer familiekalenderen og personlige oppgaver, med originalen tilgjengelig.
 
-![Konseptskisse av familieoversikten på dashboard og mobil](docs/images/dashboard-preview.svg)
+![Familiedashboard som et møbel i hjemmet — AI-generert konseptillustrasjon med fiktive data](docs/images/dashboard-at-home-detailed.png)
+
+Designet rundt en **vakker 24-tommers touchskjerm, 16:9 i Full HD**, på et sentralt sted i huset. Et rolig, felles holdepunkt i hverdagen: i dag, i morgen og det som kommer — med personlige oppgaver, ukeplaner og kalender ett trykk unna. Telefonen gir samme familieoversikt og en rask vei inn med bilder og beskjeder.
 
 En ukeplan med «turdag tirsdag — husk kakao» blir en kalenderoppføring med pakkeliste og lenke til ukeplanen. Søsken kan ha samme lekseplan og likevel krysse av oppgavene hver for seg.
 
@@ -18,6 +20,8 @@ En ukeplan med «turdag tirsdag — husk kakao» blir en kalenderoppføring med 
 4. **Familien får resultatet.** Avtaler havner i Google Calendar, originaler i privat Drive og oppgaver på dashboard og mobil. Bilder, PDF-er og korte telefonbeskjeder går inn i samme flyt og behandles så snart agenten er ledig.
 
 Review er agentens gjennomgang; vanlige kalenderfunn trenger ikke en ekstra manuell godkjenning. Forslag til fritidsaktiviteter blir først avtaler når familien velger dem.
+
+**Hva skjer rundt oss?** Agenten gjennomgår også kommunale arrangementskalendere, bibliotekprogrammer, kulturhus, museer, lokale Facebook-grupper og arrangørsider. Gamingkvelder, kreative verksteder, konserter, teater, teknologiaktiviteter og loppemarkeder vurderes mot akkurat deres familieprofil: alder, interesser, preferanser og praktiske rammer. Resultatet er personlige forslag med korte, fristende beskrivelser — noe familien kan glede seg til sammen.
 
 Øktkontrollen reduserer avbrudd, men portalene kan fortsatt kreve ny innlogging. Systemet viser slike hull. Arkivet er lokalt og kryptert; modellen og Google er eksterne tjenester.
 

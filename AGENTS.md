@@ -34,6 +34,8 @@ Activities remain suggestions until the household explicitly selects calendar in
 
 End with completion, run report and end-run. Use UTF-8 JSON files under tmp/agent rather than fragile Windows inline JSON. Report partial truthfully with specific blockers and resumeHint. Stay quiet for unchanged healthy operation or an unchanged already-reported issue; notify material changes and required household action.
 
+On Windows PowerShell 5, piping Unicode text to a native program defaults to ASCII and can turn æ/ø/å into literal question marks. Prefer a JSON file written with explicit UTF-8, read directly by the CLI. If piping is necessary, set `$OutputEncoding` to UTF-8 first. Inspect returned display text; the import guard catches common damage but cannot recover missing letters. Restore from evidence, never guess globally or alter stable IDs/checkmarks.
+
 ## Development and release
 
 Keep production data separate. Run focused tests for changes and `npm run privacy-check` before commits. Do not commit local configs, secrets, screenshots, raw school documents, logs, archives, browser profiles or operational incident history. Use synthetic fixtures and generic examples. Update setup, agent instructions and runbook when contracts change. Review all staged files before public pushes; the automated check is only one layer.

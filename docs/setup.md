@@ -15,6 +15,8 @@ Sett en HTTPS-tunnel/reverse proxy til **bare port4320** og `/send/`; bruk egen 
 
 ## Windows og Raspberry Pi
 
+Familievisningen er laget for en permanent **24-tommers touchskjerm i 16:9, 1920 × 1080**, sentralt i huset: et vakkert og nyttig møbel familien bruker sammen. Monter i en høyde barna kan nå. Store trykkflater, touchrulling og tilbakeføring til oversikten etter inaktivitet er tilpasset denne bruken. En separat laptop/mini-PC driver løsningen; skjermen eller Pi-en viser den. Mobilvisningen fungerer i tillegg.
+
 `scripts/install-web.ps1` installerer en lokal Windows-oppgave under den nåværende brukeren. Kjør bare fra den nye installasjonen. Oppgavene må ha tilgang til samme DPAPI-bruker. Pi-en kan kjøre `scripts/dashboard-kiosk.sh` som bruker-tjeneste fra `scripts/dashboard-kiosk.service`. Kopier skriptet til `~/.local/bin/familien-kiosk` og gjør det kjørbart. Tilpass display/Wayland/X11 til Pi-OS. Installer et SSH-alias `dashboard` med verifisert vertsnøkkel; `install-dashboard-tunnel.ps1` videresender kiosk/gateway til loopback på Pi. Ikke eksponer agentporten som kiosk. Oppsettet er et utgangspunkt; display- og tunneloppsett må testes på den faktiske maskinen.
 
 ## Akseptanse før automatikk

@@ -14,6 +14,7 @@ import {recoveredSpondDiscovery} from './collector.mjs';
 import {hsiaHref,hsiaOccurrenceToken} from './activity-feeds.mjs';
 import {inspectOriginalResponse} from './original-response.mjs';
 import {reconcileSourceReviews} from './source-reviews.mjs';
+import {assertDisplayText,prepareTextRepairs} from './text-integrity.mjs';
 import {normalizeChildren,normalizeVigiloNews,normalizeVigiloThreads,normalizeVigiloThreadDetail,normalizeSpondPosts,normalizeSpondEvents,normalizeFacebookPosts,normalizeFacebookEvents,mergeFacebookPost,facebookPostToken,normalizeSupplemental,collectorIsFresh,isoDay,normalizeTitle,VIGILO_ORIGIN} from './collector.mjs';
 
 export const DATA_DIR = process.env.FAMILIEN_DATA_DIR ?? join(process.env.LOCALAPPDATA ?? homedir(), "Familien", "data");
@@ -145,6 +146,26 @@ export function createStore(dataDir = DATA_DIR) {
 
   function refreshEvents(rawId) {
     for (const event of currentEvents()) if (event.sourceRefs.includes(rawId)) event.fingerprint = eventFingerprint(event);
+  }
+
+  function repairText(input) {
+    if(!state.runLease || input.token!==state.runLease.token || Date.parse(state.runLease.expiresAt)<=Date.now())throw Error('Tekstretting krever egen aktiv kjøringslås.');
+    const records=prepareTextRepairs(state,input.changes);
+    const receipt={at:now(),fields:input.changes.length,records:records.map(({collection,id})=>({collection,id}))};
+    if(input.dryRun)return {...receipt,dryRun:true};
+    // All comparisons succeed before any mutation. Checkmarks, stable keys,
+    // source receipts, hidden state and dates are copied, never re-imported.
+    for(const {collection,id,record} of records) {
+      if(collection==='rawItems' && (record.body!==state.rawItems[id].body||record.title!==state.rawItems[id].title)) {
+        const old=state.rawItems[id];record.revision=old.revision+1;
+        record.contentHash=hash(JSON.stringify([record.title,record.body,record.sourceUrl,record.groupName,record.publishedAt,record.memberIds,...(record.expectedOriginals?.length?[record.expectedOriginals]:[])]));
+        if(old.profileReviewedRevision===old.revision)record.profileReviewedRevision=record.revision;
+      }
+      record.updatedAt=receipt.at;state[collection][id]=record;
+    }
+    for(const event of currentEvents())event.fingerprint=eventFingerprint(event);
+    state.textRepairs??=[];state.textRepairs.push({...receipt,changes:structuredClone(input.changes)});
+    save();return receipt;
   }
 
   const currentEvents = () => Object.values(state.events).filter(event=>!event.mergedInto);
@@ -280,6 +301,7 @@ export function createStore(dataDir = DATA_DIR) {
   }
 
   function upsertRaw(input) {
+    assertDisplayText(input);
     input={...input,externalId:resolveExternalId(input.source,input.externalId)};
     if (!SOURCES.has(input.source) && !['aktiviteter','telefon','familie'].includes(input.source)) throw new Error("Ukjent kilde.");
     if (!words(input.externalId, 500)) throw new Error("externalId kreves.");
@@ -328,6 +350,7 @@ export function createStore(dataDir = DATA_DIR) {
   }
 
   function upsertFinding(rawId, input, persist = true) {
+    assertDisplayText(input);
     const raw = state.rawItems[rawId];
     if (!raw) throw new Error("Ukjent råelement.");
     if(raw.discardedAt)throw new Error('Forkastet kildeelement kan ikke få kalenderfunn.');
@@ -1351,6 +1374,7 @@ export function createStore(dataDir = DATA_DIR) {
     } catch { return null; }
   }
   function upsertActivity(input) {
+    assertDisplayText(input);
     if (!words(input.canonicalKey,300) || !words(input.title,300) || !words(input.reason,1000) || !words(input.evidence,6000)) throw new Error("Aktivitet krever canonicalKey, title, reason og kildebelegg i evidence.");
     const start=validDate(input.start,"start"), end=validDate(input.end,"end");
     if (Date.parse(end)<=Date.parse(start)) throw new Error("Aktivitet må ha slutt etter start.");
@@ -1560,5 +1584,6 @@ export function createStore(dataDir = DATA_DIR) {
   }
   const phone=phoneStore(state,{save,upsertRaw,addAttachment});
   if(reconcileSourceReviews(state.sourceStatus,state.runs))save();
-  return { backupArchive, eventHistory, event, mergeEvents, splitHomework, activityFacebook, changeCompletion, collectedItems, collectedList, sourceItems, editProfile, phone, calendarActions, calendarAction, setEventVisibility, upsertActivity, activityReaction, activityPlan, activitySource, snapshot, runHistory, profile: () => profileView(state.profile), profileFact, reviewProfile, documentStatus, reviewDocument, checkTask, upsertRaw, upsertFinding, updateSource, observeListing, markReviewed, updateSurface, reviewQueue, completionReport, addAttachment, getAttachment, linkDrive, linkCalendar, updateProfile, recordRun, beginRun, renewRun, endRun, collectorIngest, collectorConfig, collectorStatus, collectorRefresh, collectorFacebookSweep, collectedItem, activityFeedHsia, activityFeedCandidates, activityFeedNeedsDetail, activityFeedDetail, activityFeedPage, activityFeedError, activityFeedPageText, activityFeedStatus };
+  return { repairText, backupArchive, eventHistory, event, mergeEvents, splitHomework, activityFacebook, changeCompletion, collectedItems, collectedList, sourceItems, editProfile, phone, calendarActions, calendarAction, setEventVisibility, upsertActivity, activityReaction, activityPlan, activitySource, snapshot, runHistory, profile: () => profileView(state.profile), profileFact, reviewProfile, documentStatus, reviewDocument, checkTask, upsertRaw, upsertFinding, updateSource, observeListing, markReviewed, updateSurface, reviewQueue, completionReport, addAttachment, getAttachment, linkDrive, linkCalendar, updateProfile, recordRun, beginRun, renewRun, endRun, collectorIngest, collectorConfig, collectorStatus, collectorRefresh, collectorFacebookSweep, collectedItem, activityFeedHsia, activityFeedCandidates, activityFeedNeedsDetail, activityFeedDetail, activityFeedPage, activityFeedError, activityFeedPageText, activityFeedStatus };
 }
+
