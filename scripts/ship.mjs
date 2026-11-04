@@ -1,0 +1,20 @@
+import {readFileSync,existsSync} from 'node:fs';
+import {spawnSync,execFileSync} from 'node:child_process';
+import {inspectReleaseText} from '../src/release-privacy.mjs';
+const cfg=existsSync('.local/development.json')?JSON.parse(readFileSync('.local/development.json','utf8')):{};
+if(cfg.publishAuthorized!==true||!cfg.expectedRepository)throw Error('Configure explicit repository-owner authorization in ignored .local/development.json first.');
+const remote=execFileSync('git',['remote','get-url','origin'],{encoding:'utf8'}).trim();
+const name=remote.replace(/^https:\/\/github\.com\//,'').replace(/^git@github\.com:/,'').replace(/\.git$/,'');
+if(name!==cfg.expectedRepository)throw Error('Origin does not match the authorized repository.');
+const message=process.argv[process.argv.indexOf('--message')+1];
+if(!process.argv.includes('--message')||!message||message.length<12)throw Error('Usage: npm run ship -- --message "Describe the general code change"');
+const policy=existsSync('.local/privacy.json')?JSON.parse(readFileSync('.local/privacy.json','utf8')):{};
+if(inspectReleaseText(message,policy).length)throw Error('Commit message failed privacy review.');
+const run=(cmd,args)=>{const r=spawnSync(cmd,args,{stdio:'inherit'});if(r.status!==0)process.exit(r.status??1);};
+run('git',['add','-u']); // New files must be reviewed and explicitly staged first.
+run(process.execPath,['scripts/privacy-check.mjs','--staged']);
+run(process.execPath,['scripts/test.mjs','--test-reporter=dot']);
+const changes=execFileSync('git',['diff','--cached','--name-only'],{encoding:'utf8'}).trim();
+if(changes)run('git',['commit','-m',message]);
+run(process.execPath,['scripts/privacy-check.mjs','--head']);
+run('git',['push']);

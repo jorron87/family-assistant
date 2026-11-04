@@ -8,7 +8,9 @@
     "test": "node scripts/test.mjs",
     "setup": "node scripts/setup.mjs",
     "doctor": "node scripts/doctor.mjs",
-    "privacy-check": "node scripts/privacy-check.mjs"
+    "privacy-check": "node scripts/privacy-check.mjs",
+    "hooks": "node scripts/install-git-hooks.mjs",
+    "ship": "node scripts/ship.mjs"
   },
   "engines": {
     "node": ">=24"

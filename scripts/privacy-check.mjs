@@ -1,21 +1,39 @@
-import {readdirSync,readFileSync,existsSync} from 'node:fs';
-import {join,relative} from 'node:path';
+import {readFileSync,existsSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
-const root=process.cwd(),skip=new Set(['.git','node_modules','tmp','.runtime','.family-data','coverage','artifacts']);
-function walk(dir){return readdirSync(dir,{withFileTypes:true}).flatMap(e=>skip.has(e.name)?[]:e.isDirectory()?walk(join(dir,e.name)):[relative(root,join(dir,e.name)).replaceAll('\\','/')]);}
-let files;
-try{files=execFileSync('git',['ls-files','-z'],{encoding:'utf8'}).split('\0').filter(Boolean);}catch{files=[];}
-if(!files.length)files=walk(root).filter(p=>!/^config\/[^/]+\.json$/.test(p)||p.endsWith('.example.json'));
-const problems=[];
-for(const p of files){
- if(/^config\/[^/]+\.json$/.test(p)&&!p.endsWith('.example.json'))problems.push(p+': local deployment config');
- if(/(?:^|\/)(?:\.env(?:\..*)?|key\.dpapi)$/.test(p)||/\.(?:enc|dpapi|pem|pfx|p12|pdf|docx?|png|jpe?g)$/i.test(p))problems.push(p+': private/binary artifact requires explicit release review');
- if(!existsSync(p))continue;
- const s=readFileSync(p,'utf8');
- const secret=/(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AIza[A-Za-z0-9_-]{30,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)/;
- if(secret.test(s))problems.push(p+': possible credential');
- if(/C:[\\/]+Users[\\/]+[^\\/"'\s]+|\/home\/(?!dashboard\b|user\b)[a-z][a-z0-9_-]+/i.test(s))problems.push(p+': personal home path');
- const emails=s.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)??[];
- if(emails.some(e=>!/@(?:[\w.-]*example\.(?:com|org|net)|[\w.-]+\.(?:test|invalid|local))$/i.test(e)))problems.push(p+': non-example email address');
+import {allowedReleasePath,inspectReleaseText} from '../src/release-privacy.mjs';
+const git=(...args)=>execFileSync('git',args,{encoding:'utf8',maxBuffer:32*1024*1024});
+const policy=existsSync('.local/privacy.json')?JSON.parse(readFileSync('.local/privacy.json','utf8')):{};
+const problems=[],seen=new Set();
+const blobs=new Map();
+let checked=0;
+const inspect=(path,text)=>{checked++;for(const reason of inspectReleaseText(text,policy))problems.push(path+': '+reason);};
+function entries(output){return output.split('\0').filter(Boolean).map(row=>{const tab=row.indexOf('\t');const meta=row.slice(0,tab).split(' ');return {path:row.slice(tab+1),sha:meta[meta.length-2]??meta[1],meta};});}
+function loadBlobs(shas){
+ const needed=[...new Set(shas)].filter(sha=>!blobs.has(sha));if(!needed.length)return;
+ const output=execFileSync('git',['cat-file','--batch'],{input:needed.join('\n')+'\n',maxBuffer:32*1024*1024});
+ let offset=0;
+ for(const sha of needed){const end=output.indexOf(10,offset);const [actual,type,size]=output.subarray(offset,end).toString().split(' ');if(actual!==sha||type!=='blob'||!/^\d+$/.test(size))throw Error('Cannot verify a Git blob');offset=end+1;blobs.set(sha,output.subarray(offset,offset+Number(size)).toString('utf8'));offset+=Number(size)+1;}
 }
-if(problems.length){console.error(problems.join('\n'));process.exitCode=1;}else console.log('Privacy guard passed for '+files.length+' release files. Review the diff too; this is not a proof of anonymity.');
+function scan(rows,tree=false){
+ if(!process.argv.includes('--worktree'))loadBlobs(rows.filter(row=>allowedReleasePath(row.path)).map(row=>tree?row.meta[2]:row.meta[1]));
+ for(const row of rows){
+ const sha=tree?row.meta[2]:row.meta[1];
+ if(!allowedReleasePath(row.path)){problems.push(row.path+': disallowed release path');continue;}
+ for(const reason of inspectReleaseText(row.path,policy))problems.push(row.path+': '+reason);
+ const key=row.path+':'+sha;if(seen.has(key))continue;seen.add(key);
+ if(process.argv.includes('--worktree')){if(existsSync(row.path))inspect(row.path,readFileSync(row.path,'utf8'));}
+ else inspect(row.path,blobs.get(sha));
+}}
+if(process.argv.includes('--message'))inspect('commit message',readFileSync(process.argv[process.argv.indexOf('--message')+1],'utf8'));
+else if(process.argv.includes('--push')){
+ const commits=new Set();
+ for(const line of readFileSync(0,'utf8').trim().split('\n').filter(Boolean)){
+  const [,local,,remote]=line.trim().split(/\s+/);if(/^0+$/.test(local))continue;
+  if(!/^[a-f0-9]{40,64}$/.test(local)||!/^[a-f0-9]{40,64}$/.test(remote))throw Error('Invalid push revision');
+  commits.add(local);
+  for(const sha of git('rev-list',local,...(/^0+$/.test(remote)?['--not','--remotes=origin']:['^'+remote])).trim().split('\n').filter(Boolean))commits.add(sha);
+ }
+ for(const sha of commits){inspect('commit message',git('show','-s','--format=%B',sha));scan(entries(git('ls-tree','-rz',sha)),true);}
+}else if(process.argv.includes('--head'))scan(entries(git('ls-tree','-rz','HEAD')),true);
+else scan(entries(git('ls-files','-s','-z')));
+if(problems.length){console.error([...new Set(problems)].join('\n'));process.exitCode=1;}else console.log('Privacy guard passed ('+checked+' blobs/messages). Local policy values are never printed. Review the diff too.');
