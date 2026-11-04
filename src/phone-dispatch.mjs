@@ -96,4 +96,3 @@ Sjekk calendar-actions og phone-inbox på nytt før slutt. Registrer run med sco
   function renew() {if(running && store.snapshot().runLease?.token===leaseToken)store.renewRun(leaseToken);}
   return {tick,renew,status:()=>({running,pending:pending().length,calendarActions:store.calendarActions().length})};
 }
-

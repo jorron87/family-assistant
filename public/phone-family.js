@@ -75,4 +75,3 @@ export function installFamily({api,post,status}) {
  function update(next){const json=JSON.stringify(next)+osloDay();data=next;showLogin();if(json!==signature){signature=json;render();if(openedId)openEvent(openedId);}}
  return {update,setView,refresh,openEvent,get view(){return view;}};
 }
-

@@ -10,4 +10,3 @@ test('known date and unknown duration do not make an appointment provisional; da
  const conflict=store.upsertFinding(b.id,{canonicalKey:'known-date',title:'Legetime',start:'2026-10-02T09:00:00+02:00',end:'2026-10-02T10:00:00+02:00',dateConfirmed:false});assert.equal(conflict.provisional,true);
  }finally{assert.ok(resolve(dir).startsWith(resolve(tmpdir())+'\\'));rmSync(dir,{recursive:true,force:true});}
 });
-
