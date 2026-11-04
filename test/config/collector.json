@@ -1,0 +1,49 @@
+{
+  "enabled": true,
+  "supplemental": true,
+  "dispatch": {
+    "enabled": false,
+    "minGapMinutes": 15,
+    "dailyFullFallback": false
+  },
+  "vigilo": {
+    "probeMinutes": 15,
+    "fullMinutes": 30
+  },
+  "spond": {
+    "probeMinutes": 15,
+    "fullMinutes": 30
+  },
+  "quiet": {
+    "from": "23:00",
+    "to": "05:30",
+    "factor": 4
+  },
+  "limits": {
+    "minSpacingMs": 1500,
+    "cycleCalls": 20
+  },
+  "facebook": {
+    "enabled": true,
+    "sweepTimes": [
+      "06:20",
+      "07:20",
+      "08:20",
+      "09:20",
+      "10:20",
+      "11:20",
+      "12:20",
+      "13:20",
+      "14:20",
+      "15:20",
+      "16:20",
+      "17:20",
+      "18:20",
+      "19:20",
+      "20:20",
+      "21:20",
+      "22:20"
+    ],
+    "maxScrolls": 14
+  }
+}

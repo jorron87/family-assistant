@@ -1,0 +1,66 @@
+{
+  "url": "http://homeassistant.example.org:8123",
+  "dashboardUrl": "http://homeassistant.example.org:8123",
+  "entities": [
+    {
+      "id": "person.parent1",
+      "name": "Test entity 0",
+      "group": "presence"
+    },
+    {
+      "id": "person.parent2",
+      "name": "Test entity 1",
+      "group": "presence"
+    },
+    {
+      "id": "person.child1",
+      "name": "Test entity 2",
+      "group": "presence"
+    },
+    {
+      "id": "sensor.temperatur_ute",
+      "name": "Test entity 3",
+      "group": "weather"
+    },
+    {
+      "id": "cover.forste_etasje",
+      "name": "Test entity 4",
+      "group": "covers"
+    },
+    {
+      "id": "media_player.forste_etasje",
+      "name": "Test entity 5",
+      "group": "media"
+    },
+    {
+      "id": "media_player.kino",
+      "name": "Test entity 6",
+      "group": "media"
+    },
+    {
+      "id": "input_datetime.stovsuging_pa_hverdager",
+      "name": "Test entity 7",
+      "group": "schedule"
+    },
+    {
+      "id": "vacuum.roborock_vacuum",
+      "name": "Test entity 8",
+      "group": "vacuums"
+    },
+    {
+      "id": "vacuum.roborock_vacuum_s5e",
+      "name": "Test entity 9",
+      "group": "vacuums"
+    },
+    {
+      "id": "vacuum.nilus",
+      "name": "Test entity 10",
+      "group": "vacuums"
+    },
+    {
+      "id": "switch.copy",
+      "name": "Test entity 11",
+      "group": "switches"
+    }
+  ]
+}

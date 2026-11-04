@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="no">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Familien – valgfri Google-tilkobling</title>
+<style>
+body{font:17px/1.5 system-ui;max-width:760px;margin:40px auto;padding:24px;background:#f5f3ee;color:#183429}
+h1{font-size:30px;line-height:1.2}h2{font-size:21px;margin-top:34px}li{margin:10px 0}
+.notice{padding:18px;border-radius:10px;background:#e3efdf;border:1px solid #9dbb95}
+.caution{padding:16px;border-left:4px solid #a06126;background:#fff3e5}
+button{font:inherit;padding:11px 16px;margin:16px 0;background:#183429;color:white;border:0;border-radius:8px;cursor:pointer}
+code{overflow-wrap:anywhere}a{color:#135d40}input{display:block;margin-top:16px;font:inherit}
+</style>
+<h1>Valgfri direkte Google-tilkobling</h1>
+<p class="notice"><strong>Du trenger ikke gjøre noe her nå.</strong> Familieassistenten kan allerede lagre i Drive og oppdatere kalenderen gjennom de tilkoblede Google-verktøyene. Denne siden er bare for å la den lokale tjenesten gjøre publiseringen direkte.</p>
+<p id="status" role="status"></p>
+<h2>Hvis du ønsker direkte publisering senere</h2>
+<p>Dette er et utvikleroppsett i Google Cloud, ikke en vanlig Google-innlogging. Bruk en konto som kan redigere både familiens Drive-mappe og kalenderen «For barn».</p>
+<ol>
+<li>Opprett et prosjekt i <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">Google Cloud Console</a>. Aktiver <strong>Google Drive API</strong> og <strong>Google Calendar API</strong> i prosjektets API-bibliotek.</li>
+<li>Under <strong>Google Auth Platform</strong> konfigurerer du appnavn, målgruppe og datatilgang. Hvis målgruppen er «External» i testmodus, må Google-kontoen legges til som testbruker.</li>
+<li>Under <strong>Clients → Create client</strong> velger du <strong>Web application</strong>. Legg til denne eksakte adressen under <strong>Authorized redirect URIs</strong>:<br><code>http://127.0.0.1:4318/api/google/callback</code></li>
+<li>Last ned klientens JSON-fil fra Google Cloud. Velg filen nedenfor og trykk <strong>Koble til Google</strong>. Google viser tilgangene før du godkjenner.</li>
+</ol>
+<p class="caution">Den nåværende løsningen ber om tilgang til <strong>alle Drive-filene dine</strong>, selv om Familien-koden bare skriver til den konfigurerte private familiemappen. Dette er en omfattende Google-tillatelse. Google kan vise varsel om en ubekreftet app. En ekstern app i «Testing» får dessuten normalt en innlogging som utløper etter sju dager. Det er derfor ikke et godt oppsett for varig, automatisk drift.</p>
+<p>Klientopplysninger og tilgang lagres kryptert under Windows-brukeren. Siden sender JSON-filen bare til tjenesten på denne PC-en.</p>
+<input type="file" id="client" accept="application/json,.json" aria-label="Google OAuth-klient JSON">
+<button id="connect">Koble til Google</button>
+<p><small>Veiledning: <a href="https://developers.google.com/workspace/guides/create-credentials" target="_blank" rel="noopener noreferrer">opprett Google OAuth-klient</a> · <a href="https://developers.google.com/identity/protocols/oauth2" target="_blank" rel="noopener noreferrer">Googles regler for testtilgang</a>.</small></p>
+<script>
+const status=document.querySelector('#status');
+let configured=false;
+async function request(path,body){const r=await fetch(path,body?{method:'POST',headers:{'Content-Type':'application/json','X-Family-Request':'1'},body:JSON.stringify(body)}:{});const data=await r.json();if(!r.ok)throw Error(data.error);return data;}
+async function show(){const s=await request('/api/google/status');configured=s.configured;status.textContent=s.connected?'Direkte Google-publisering er tilkoblet.':s.configured?'Google-klienten er lagret, men du må fortsatt godkjenne tilgang hos Google.':'Direkte Google-publisering er ikke satt opp. Den vanlige agentpubliseringen fungerer fortsatt.';}
+document.querySelector('#connect').onclick=async()=>{try{const file=document.querySelector('#client').files[0];if(!file&&!configured)throw Error('Velg først JSON-filen for en Web application OAuth-klient fra Google Cloud.');if(file)await request('/api/google/configure',JSON.parse(await file.text()));const {url}=await request('/api/google/authorize',{});location.href=url;}catch(e){status.textContent=e.message;}};
+show().catch(e=>status.textContent=e.message);
+</script>
+</html>

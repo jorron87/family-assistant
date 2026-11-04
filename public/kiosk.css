@@ -1,0 +1,444 @@
+/* Stue-modus: lesbar på tre meters avstand, rolig, uten scrollbarer på forsiden. Alt er avgrenset til body.kiosk. */
+
+body.kiosk {
+  --k-time: 26px;
+  --k-title: 27px;
+  --k-note: 19px;
+  --k-label: 17px;
+  --p-child1: #c57b84; --p-child2: #668db5; --p-max: #749a7b; --p-child4: #d5a557; --p-parent1: #808789; --p-parent2: #987b9a;
+  --k-warn-bg: #f6e9dc; --k-warn-ink: #8a5f38;
+  --k-alert-bg: #e7eef6; --k-alert-ink: #2f5578; --k-alert-line: #b9cde2;
+  color: var(--ink);
+  font-size: 18px;
+  transition: background-color .8s ease, color .8s ease;
+}
+body.kiosk[data-theme="night"] {
+  --paper: #0e1411; --white: #151d19; --ink: #e2ddd2; --muted: #93a096; --line: #26312b; --green: #93bca0; --soft-green: #1b2922;
+  --k-warn-bg: #3a2c1e; --k-warn-ink: #e0b98c;
+  --k-alert-bg: #172633; --k-alert-ink: #a9cbe8; --k-alert-line: #2b4257;
+  background: var(--paper);
+  color: var(--ink);
+  color-scheme: dark;
+}
+html:has(body.kiosk[data-theme="night"]) { background: #0e1411; }
+
+/* Header: merke, faner og personfilter i én rolig rad. Klokken bor i «Nå»-sonen på forsiden. */
+body.kiosk .site-header { flex-basis: 84px; grid-template-columns: auto minmax(0, 1fr) auto; gap: 22px; padding: 12px 32px; border-bottom-color: var(--line); }
+body.kiosk .dashboard-home { display: none; }
+body.kiosk .brand { grid-column: 1; grid-row: 1; cursor: pointer; }
+body.kiosk .brand h1 { font-size: 38px; }
+body.kiosk .main-nav { grid-column: 2; grid-row: 1; justify-content: center; gap: 4px; overflow: visible; }
+body.kiosk .main-nav button { flex: none; min-height: 56px; padding: 10px 18px; font-size: 21px; color: var(--muted); border-radius: 12px; }
+body.kiosk .main-nav button:hover, body.kiosk .main-nav button.active { background: var(--soft-green); color: var(--green); }
+body.kiosk .main-nav button.active { font-weight: 700; }
+body.kiosk[data-theme="night"] .main-nav button:hover, body.kiosk[data-theme="night"] .main-nav button.active { background: var(--soft-green); color: var(--ink); }
+body.kiosk .site-header > .person-filter { grid-column: 3; grid-row: 1; display: flex; gap: 8px; margin: 0; justify-content: flex-end; }
+body.kiosk .header-date { display: none; }
+body.kiosk .header-temperature { display: none; }
+body.kiosk footer, body.kiosk #calendar-sync-status, body.kiosk #house-rail, body.kiosk .filter-bar { display: none !important; }
+body.kiosk .nearby-coverage { display: none; }
+
+/* Personfilter: små runde knapper i personfarge. Antall vises bare når noe gjenstår. */
+body.kiosk .person-controls { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; background: var(--white); overflow: hidden; }
+body.kiosk .person-controls button { min-height: 52px; border: 0; background: transparent; color: var(--ink); padding: 0 12px; font-size: 19px; display: inline-flex; align-items: center; gap: 8px; }
+body.kiosk .person-controls.is-selected { border-color: var(--green); background: var(--soft-green); }
+body.kiosk .person-controls .person-tasks { min-width: 44px; padding: 0 12px 0 4px; font-size: 18px; font-weight: 700; color: var(--green); }
+body.kiosk .person-controls .person-tasks.has-deadline { color: #b0544a; }
+body.kiosk .person-controls button.active { font-weight: 700; }
+body.kiosk .person-dot { width: 12px; height: 12px; }
+body.kiosk .person-dots { gap: 3px; }
+
+/* Forsiden: tre soner i ett bilde. */
+body.kiosk[data-view="overview"] main { padding: 0 32px 20px; display: flex; flex-direction: column; overflow: hidden; }
+body.kiosk[data-view="overview"] #calendar, body.kiosk[data-view="overview"] #calendar-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+body.kiosk[data-view="overview"] .calendar-toolbar, body.kiosk[data-view="overview"] #week-strip { display: none; }
+.k-home { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(400px, 24fr) minmax(0, 42fr) minmax(0, 34fr); gap: 40px; padding-top: 22px; }
+.k-now, .k-days, .k-right { min-height: 0; display: flex; flex-direction: column; min-width: 0; }
+.k-night { display: none; }
+
+.k-now { gap: 22px; padding-right: 36px; border-right: 1px solid var(--line); overflow: hidden; }
+.k-clock { display: flex; flex-direction: column; gap: 4px; }
+.k-clock strong { font-family: var(--serif); font-size: 128px; font-weight: 400; letter-spacing: -.055em; line-height: .95; font-variant-numeric: tabular-nums; }
+.k-clock span { font-size: 26px; color: var(--muted); }
+.k-weather { min-height: 0; }
+.k-presence { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: auto; }
+.k-person { display: inline-flex; align-items: center; gap: 9px; font-size: 20px; }
+.k-person i { width: 11px; height: 11px; border-radius: 50%; background: #aab0a9; }
+.k-person.is-home i { background: #79967a; }
+.k-person small { color: var(--muted); font-size: 17px; }
+.k-dim { color: var(--muted); font-size: 16px; }
+.k-stale { margin: 0; color: var(--muted); font-size: 16px; min-height: 0; }
+.k-stale:empty { display: none; }
+.k-nearby { text-align: left; border: 1px solid var(--line); border-radius: 16px; background: var(--white); color: var(--ink); padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; min-height: 64px; }
+.k-nearby strong { color: var(--green); font-size: 20px; }
+.k-nearby span { color: var(--muted); font-size: 17px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.k-waste { text-align: left; border: 1px solid var(--line); border-radius: 16px; background: var(--white); color: var(--ink); padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
+.k-waste.is-urgent { border-color: var(--green); background: var(--soft-green); }
+.k-waste-title { font-size: 19px; font-weight: 600; }
+.k-fractions { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.k-fraction { display: inline-flex; align-items: center; gap: 7px; font-size: 18px; color: var(--muted); }
+.k-fraction i { width: 13px; height: 13px; border-radius: 4px; }
+
+/* Vær */
+.w-widget { display: flex; flex-direction: column; gap: 14px; }
+.w-head { display: flex; align-items: center; gap: 16px; }
+.w-icon { display: inline-flex; color: var(--green); }
+.w-values { display: flex; flex-direction: column; }
+.w-temp { font-family: var(--serif); font-size: 60px; font-weight: 400; line-height: 1; letter-spacing: -.04em; }
+.w-sub { color: var(--muted); font-size: 19px; }
+.w-alert { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 16px; border: 1px solid var(--k-alert-line); background: var(--k-alert-bg); color: var(--k-alert-ink); font-size: 22px; line-height: 1.25; font-weight: 600; }
+.w-alert .w-icon { color: inherit; flex: none; }
+.w-nowcast { margin: 0; font-size: 20px; color: var(--muted); }
+.w-strip { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 2px; }
+.w-hour { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0 6px; border-radius: 10px; }
+.w-hour.in-school { background: var(--soft-green); }
+.w-hour .w-icon { color: var(--muted); }
+.w-time { font-size: 15px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.w-h-temp { font-size: 18px; }
+.w-bar { display: block; width: 8px; min-height: 2px; margin-top: auto; border-radius: 3px 3px 0 0; background: #6f97c2; opacity: .85; align-self: center; }
+.w-hour { min-height: 118px; }
+.w-stale { margin: 0; font-size: 15px; color: var(--muted); }
+.w-widget.compact .w-temp { font-size: 72px; }
+.w-widget.compact .w-alert { font-size: 28px; }
+
+/* Rader: stor tid, tittel og én linje «husk». */
+.k-days { gap: 18px; }
+.k-day { min-height: 0; display: flex; flex-direction: column; min-width: 0; }
+.k-today { flex: 0 1 auto; max-height: 62%; }
+.k-tomorrow { flex: 1 1 0; }
+.k-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.k-head h2 { margin: 0; font-family: var(--serif); font-size: 52px; font-weight: 400; letter-spacing: -.045em; line-height: 1.05; }
+.k-sub { color: var(--muted); font-size: var(--k-label); }
+.k-sub::first-letter, .k-clock span::first-letter, .k-night-clock span::first-letter, .k-day-label::first-letter { text-transform: uppercase; }
+.k-list { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.k-today .k-list { flex: 0 1 auto; }
+.k-group { display: flex; flex-direction: column; }
+.k-day-label { margin: 18px 0 2px; color: var(--green); font-size: 19px; font-weight: 700; letter-spacing: .01em; }
+.k-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 16px; width: 100%; min-height: 84px; padding: 12px 6px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink); text-align: left; border-radius: 0; }
+.k-row:active { background: var(--soft-green); }
+.k-time { font-size: var(--k-time); font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; font-weight: 500; }
+.k-time--soft { font-size: 19px; color: var(--muted); font-weight: 400; }
+.k-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.k-title-line { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px 12px; min-width: 0; }
+.k-title-line .person-dots { flex: none; }
+.k-badge { flex: none; }
+.k-title-line strong { font-family: var(--serif); font-size: var(--k-title); font-weight: 400; line-height: 1.15; }
+.k-note { color: var(--muted); font-size: var(--k-note); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.k-badge { font-style: normal; font-size: 15px; padding: 2px 10px; border-radius: 999px; border: 1px dashed var(--k-warn-ink); color: var(--k-warn-ink); white-space: nowrap; }
+.k-badge--cancel { background: var(--k-warn-bg); border-style: solid; }
+.k-row.is-cancelled .k-title-line strong { text-decoration: line-through; opacity: .6; }
+.k-empty { margin: 22px 0; color: var(--muted); font-size: 22px; }
+.k-more { padding: 10px 6px; color: var(--muted); font-size: 19px; }
+.k-row[hidden], .k-group[hidden] { display: none; }
+.k-later { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.k-later .k-row { grid-template-columns: 1fr; min-height: 72px; gap: 0; padding: 10px 6px; }
+.k-later .k-time { display: none; }
+.k-later .k-title-line strong { font-size: 25px; }
+.k-later .k-note { font-size: 18px; }
+
+.k-right { padding-left: 4px; gap: 16px; }
+.k-deadlines { flex: none; display: flex; flex-direction: column; gap: 8px; padding-top: 14px; margin-top: auto; border-top: 1px solid var(--line); }
+.k-deadlines h3 { margin: 0; font-size: 19px; color: var(--green); letter-spacing: .01em; }
+.k-task { display: flex; flex-direction: column; gap: 8px; text-align: left; padding: 11px 16px 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--white); color: var(--ink); }
+.k-task-top { display: flex; align-items: center; gap: 12px; }
+.k-task-top strong { flex: 1; min-width: 0; font-size: 21px; font-weight: 600; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-task-count { color: var(--green); font-size: 21px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.k-task-due { color: var(--muted); font-size: 17px; white-space: nowrap; }
+.k-task.is-overdue { border-color: #c98b83; }
+.k-task.is-overdue .k-task-due { color: #b0544a; }
+.k-progress { display: block; height: 7px; border-radius: 99px; background: var(--soft-green); overflow: hidden; }
+.k-progress i { display: block; height: 100%; background: var(--green); border-radius: 99px; }
+.k-link { align-self: flex-start; border: 0; background: transparent; color: var(--green); font-size: 19px; font-weight: 600; min-height: 48px; padding: 0 4px; }
+
+/* Nattvisning: bare klokke, vær og morgendagen. */
+.k-home--night { display: block; padding-top: 0; }
+.k-home--night .k-now, .k-home--night .k-days, .k-home--night .k-todo, .k-home--night .k-right { display: none; }
+.k-home--night .k-night { display: flex; height: 100%; align-items: center; justify-content: center; transform: translate(var(--shift-x, 0), var(--shift-y, 0)); transition: transform 2s ease; cursor: pointer; }
+.k-night-inner { width: min(1500px, 100%); display: grid; grid-template-columns: 1.1fr 1fr; grid-template-areas: "clock list" "weather list"; gap: 30px 90px; align-items: start; }
+.k-night-clock { grid-area: clock; display: flex; flex-direction: column; }
+.k-night-clock strong { font-family: var(--serif); font-size: 240px; font-weight: 400; line-height: .95; letter-spacing: -.06em; font-variant-numeric: tabular-nums; color: #cfc9bc; }
+.k-night-clock span { font-size: 34px; color: var(--muted); margin-top: 8px; }
+.k-night-weather { grid-area: weather; }
+.k-night-list { grid-area: list; display: flex; flex-direction: column; padding-top: 30px; }
+.k-night-list h2 { margin: 0 0 6px; font-family: var(--serif); font-size: 48px; font-weight: 400; color: var(--muted); }
+.k-row--large { min-height: 104px; grid-template-columns: 130px minmax(0, 1fr); }
+.k-row--large .k-time { font-size: 38px; }
+.k-row--large .k-title-line strong { font-size: 36px; }
+.k-night-tasks { margin: 18px 0 0; font-size: 22px; color: var(--muted); }
+.k-night-pack { margin: 22px 0 0; font-size: 26px; color: var(--green); line-height: 1.35; }
+body.kiosk[data-theme="night"] .k-night-list .k-note { font-size: 22px; }
+
+/* Uke og måned */
+body.kiosk .calendar-toolbar { margin: 4px 0 12px; align-items: center; }
+body.kiosk .calendar-toolbar h2 { font-size: 40px; }
+body.kiosk .calendar-layout { display: block; }
+body.kiosk .focus-rail { display: none; }
+body.kiosk .period-controls button { min-width: 64px; min-height: 56px; font-size: 22px; }
+body.kiosk .week-tasks { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 14px; }
+body.kiosk .week-task { display: inline-flex; align-items: center; gap: 12px; padding: 10px 16px; border: 1px solid var(--line); border-radius: 999px; background: var(--white); color: var(--ink); font-size: 19px; text-align: left; }
+body.kiosk .week-task strong { font-weight: 600; }
+body.kiosk .week-task .meta { font-size: 17px; }
+body.kiosk .week-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); overflow: visible; background: var(--white); border-color: var(--line); }
+body.kiosk .week-cell { min-height: 620px; padding: 12px 10px; border-right-color: var(--line); }
+body.kiosk .week-cell.is-today, body.kiosk .month-cell.is-today { background: var(--soft-green); }
+body.kiosk .week-cell.is-past, body.kiosk .month-cell.is-past { opacity: .55; }
+body.kiosk .calendar-day-heading span { font-size: 18px; text-transform: capitalize; }
+body.kiosk .calendar-day-heading strong { font-size: 40px; }
+body.kiosk .event-chip { font-size: 19px; line-height: 1.22; padding: 10px 10px; white-space: normal; overflow: hidden; margin: 7px 0; border-radius: 8px; color: var(--ink); background: color-mix(in srgb, var(--chip-color) 16%, var(--white)); }
+body.kiosk .event-chip.is-followup { background: transparent; border-left-style: dashed; color: var(--muted); }
+body.kiosk .due-chip { border-left-color: #c98b83; background: color-mix(in srgb, #c98b83 16%, var(--white)); }
+body.kiosk .month-weekdays { font-size: 16px; }
+body.kiosk .month-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); overflow: visible; border-color: var(--line); background: var(--white); }
+body.kiosk .month-cell { min-height: 150px; padding: 8px; border-color: var(--line); }
+body.kiosk .month-cell .event-chip { font-size: 16px; padding: 6px 8px; margin: 4px 0; }
+body.kiosk .month-day-number { font-size: 24px; min-height: 40px; }
+body.kiosk .month-more { font-size: 17px; min-height: 40px; }
+body.kiosk .selected-day .event-row { min-height: 78px; }
+
+/* Oppgaver, rundt oss */
+body.kiosk #tasks .section-heading p { display: none; }
+body.kiosk #tasks .section-heading h2, body.kiosk #nearby .section-heading h2 { font-size: 56px; }
+body.kiosk #tasks .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
+body.kiosk .task-group { padding: 20px 24px; border-radius: 16px; }
+body.kiosk .task-group-heading strong { font-size: 26px; font-family: var(--serif); font-weight: 400; }
+body.kiosk .task-group-heading .meta { font-size: 18px; }
+body.kiosk .task-group-heading .k-progress { grid-column: 1 / -1; }
+body.kiosk .task-item { font-size: 22px; }
+body.kiosk .task-group > p { font-size: 17px; }
+body.kiosk .activity-card { padding: 26px 28px; border-radius: 18px; }
+body.kiosk .nearby-controls { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+body.kiosk .nearby-controls select { display: none; }
+body.kiosk .nearby-touch-controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+body.kiosk .nearby-touch-group { display: flex; gap: 6px; padding: 5px; border: 1px solid var(--line); border-radius: 14px; background: var(--white); }
+body.kiosk .nearby-touch-group button { min-height: 56px; padding: 8px 18px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); font-size: 20px; }
+body.kiosk .nearby-touch-group button[aria-pressed="true"] { background: var(--green); color: var(--white); font-weight: 700; }
+body.kiosk .nearby-touch-group button:focus-visible { outline: 3px solid var(--green); outline-offset: 2px; }
+body.kiosk .activity-card h3 { font-size: 30px; }
+body.kiosk .activity-card .meta { font-size: 17px; }
+body.kiosk .activity-pitch { font-size: 19px; }
+body.kiosk .activity-card .eyebrow, body.kiosk .eyebrow { font-size: 15px; }
+body.kiosk .tag { font-size: 16px; padding: 5px 10px; }
+
+/* Mer-ark og dialoger */
+.more-dialog { width: min(680px, 92vw); padding: 32px; border: 1px solid var(--line); border-radius: 22px; background: var(--white); color: var(--ink); }
+.more-dialog::backdrop { background: #0e1411cc; }
+.more-dialog h2 { margin: 0 0 18px; font-family: var(--serif); font-size: 42px; font-weight: 400; }
+.more-dialog .dialog-close { position: static; width: auto; height: auto; min-height: 56px; margin-top: 18px; padding: 8px 24px; border-radius: 12px; border: 1px solid var(--line); background: var(--soft-green); color: var(--ink); font-size: 20px; }
+.more-list { display: flex; flex-direction: column; gap: 10px; }
+.more-list button { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 16px 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); color: var(--ink); text-align: left; min-height: 72px; }
+.more-list strong { font-size: 24px; }
+.more-list span { color: var(--muted); font-size: 18px; }
+body.kiosk .event-dialog { border-radius: 22px; }
+body.kiosk .event-dialog h2 { font-size: 46px; }
+body.kiosk .dialog-when { font-size: 22px; }
+body.kiosk .dialog-details, body.kiosk .dialog-reason { font-size: 20px; }
+body.kiosk .task-checklist .task-item { font-size: 24px; }
+
+/* Nattlig tema for eksisterende komponenter som har faste farger i app.css */
+body.kiosk[data-theme="night"] .event-row:hover { background: var(--soft-green); }
+body.kiosk[data-theme="night"] .event-dialog, body.kiosk[data-theme="night"] .document-dialog { background: var(--paper); color: var(--ink); border-color: var(--line); }
+body.kiosk[data-theme="night"] .dialog-navigation, body.kiosk[data-theme="night"] .pdf-controls { background: var(--paper); border-color: var(--line); }
+body.kiosk[data-theme="night"] .dialog-close, body.kiosk[data-theme="night"] .dialog-navigation .dialog-close, body.kiosk[data-theme="night"] .dialog-navigation .return-home, body.kiosk[data-theme="night"] .source-button { background: var(--soft-green); color: var(--ink); border-color: var(--line); }
+body.kiosk[data-theme="night"] .tag { background: var(--soft-green); color: var(--green); }
+body.kiosk[data-theme="night"] .tag.warn { background: var(--k-warn-bg); color: var(--k-warn-ink); }
+body.kiosk[data-theme="night"] .card, body.kiosk[data-theme="night"] .activity-card, body.kiosk[data-theme="night"] .house-card, body.kiosk[data-theme="night"] .profile-card { background: var(--white); border-color: var(--line); color: var(--ink); }
+body.kiosk[data-theme="night"] .house-icon, body.kiosk[data-theme="night"] .house-card button { background: var(--soft-green); color: var(--green); border-color: var(--line); }
+body.kiosk[data-theme="night"] .event-chip { color: var(--ink); }
+body.kiosk[data-theme="night"] .month-cell.outside-month { background: var(--paper); }
+body.kiosk[data-theme="night"] .event-provisional { background: var(--k-warn-bg); color: var(--k-warn-ink); }
+body.kiosk[data-theme="night"] select, body.kiosk[data-theme="night"] input { background: var(--white); color: var(--ink); border-color: var(--line); }
+body.kiosk[data-theme="night"] .k-clock strong { color: #d5cfc2; }
+body.kiosk[data-theme="night"] .brand h1 { color: var(--ink); }
+body.kiosk[data-theme="night"] a { color: var(--green); }
+body.kiosk[data-theme="night"] .k-time { color: #d9d3c6; }
+body.kiosk[data-theme="night"] .w-bar { background: #6087b3; }
+
+/* Dagtemaet under 1500 px bredde (f.eks. testvindu): stabl sonene */
+@media (max-width: 1500px) {
+  .k-home { grid-template-columns: minmax(340px, 30fr) minmax(0, 40fr) minmax(0, 30fr); gap: 28px; }
+  .k-clock strong { font-size: 96px; }
+  .k-head h2 { font-size: 42px; }
+  body.kiosk .main-nav button { padding: 8px 12px; font-size: 18px; }
+}
+@media (max-width: 1100px) {
+  body.kiosk[data-view="overview"] main { overflow: auto; }
+  .k-home { grid-template-columns: 1fr; }
+  .k-now { border-right: 0; padding-right: 0; }
+}
+
+/* Værvarsel for skolevei: tydelig felt under toppfeltet på alle faner */
+.weather-banner { display: none; }
+body.kiosk .weather-banner { display: flex; flex: none; align-items: center; justify-content: center; gap: 14px; margin: 0; min-height: 64px; padding: 10px 32px; font-size: 32px; font-weight: 700; letter-spacing: .005em; background: var(--k-alert-bg); color: var(--k-alert-ink); border-bottom: 2px solid var(--k-alert-line); white-space: pre; }
+body.kiosk .weather-banner[hidden] { display: none; }
+body.kiosk .weather-banner-snow { background: #e9eef2; color: #3d5567; }
+body.kiosk[data-theme="night"] .weather-banner-snow { background: #1c2833; color: #bcd3e6; }
+body.kiosk .w-alert { font-size: 26px; padding: 18px 20px; border-width: 2px; }
+
+/* Utlogget kilde: rødt felt øverst; mildere gult for «ikke kontrollert» og stille øktkontroll */
+.login-banner { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 24px; text-align: center; background: #f6dcd8; color: #7c2a22; border-bottom: 2px solid #d9a49d; font-size: 18px; }
+.login-banner[hidden] { display: none; }
+.login-banner strong { font-size: 22px; }
+.login-banner-stale, .login-banner-watch { background: #f6ead2; color: #6d4c14; border-bottom-color: #dcc38a; }
+body.kiosk .login-banner { flex: none; min-height: 84px; justify-content: center; padding: 10px 32px; font-size: 22px; }
+body.kiosk .login-banner strong { font-size: 34px; }
+body.kiosk[data-theme="night"] .login-banner { background: #3b1f1c; color: #f0b8b0; border-bottom-color: #6b342f; }
+body.kiosk[data-theme="night"] .login-banner-stale, body.kiosk[data-theme="night"] .login-banner-watch { background: #3a2c14; color: #e6c98a; border-bottom-color: #62491f; }
+
+/* Justert etter test på den ekte stueskjermen (Chromium på Pi, bredere skrift enn Windows) */
+body.kiosk .site-header { grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 14px; padding: 12px 24px; }
+body.kiosk .brand { flex: none; }
+body.kiosk .brand h1 { font-size: 34px; white-space: nowrap; }
+body.kiosk .main-nav { justify-content: flex-start; flex-wrap: nowrap; min-width: 0; gap: 2px; }
+body.kiosk .main-nav button { padding: 8px 12px; font-size: 19px; min-height: 52px; }
+body.kiosk .site-header > .person-filter { gap: 6px; flex-wrap: nowrap; }
+body.kiosk .person-controls button { padding: 0 9px; font-size: 18px; gap: 6px; }
+body.kiosk .person-controls .person-tasks, body.kiosk .person-controls .person-tasks.has-deadline { min-width: 34px; padding: 0 10px 0 2px; font-size: 17px; background: transparent !important; }
+body.kiosk .person-controls .person-tasks.has-deadline { color: #c4584c; }
+.k-row--large { grid-template-columns: 150px minmax(0, 1fr); }
+.k-row--large .k-time--soft { font-size: 24px; }
+.k-title-line .person-dots { margin-right: 4px; }
+
+/* Trykk-respons: ingen ventetid på berøring og umiddelbar visuell kvittering før noe annet skjer. */
+body.kiosk button, body.kiosk summary, body.kiosk label, body.kiosk .event-row, body.kiosk .k-row, body.kiosk .month-cell, body.kiosk .card { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+body.kiosk button:active, body.kiosk .event-row:active, body.kiosk .k-row:active, body.kiosk .month-cell:active, body.kiosk summary:active { transform: scale(.975); filter: brightness(.93); transition: none; }
+body.kiosk button, body.kiosk .event-row, body.kiosk .k-row { transition: transform .12s ease-out, filter .12s ease-out; }
+.k-stale.is-disconnected{color:#c4584b!important;font-size:17px;font-weight:600}
+
+/* ---- Forsiden i fire soner: Nå · I dag/I morgen · Lekser og frister · Kommende (8. oktober) ----
+   Ingenting viktig skal ligge bak «+N»: radene trykkes sammen før noe kuttes, og leksene har egen fast sone. */
+.k-home { grid-template-columns: 330px minmax(0, 31fr) minmax(0, 30fr) minmax(0, 25fr); gap: 34px; }
+.k-now { padding-right: 30px; }
+.k-clock strong { font-size: 116px; }
+.k-head h2 { font-size: 46px; }
+
+/* Trinnvis komprimering (settes av fitAll når innholdet ikke får plass) */
+.is-dense .k-row { min-height: 0; padding: 8px 6px; }
+.is-dense .k-note { display: none; }
+.is-dense .k-day-label { margin-top: 12px; }
+.is-tight .k-row { padding: 5px 6px; }
+.is-tight .k-title-line strong { font-size: 23px; }
+.is-tight .k-time { font-size: 21px; }
+.is-tight .k-head h2 { font-size: 38px; }
+.k-days .k-title-line { flex-wrap: nowrap; align-items: flex-start; }
+.k-days .k-title-line .person-dots { margin-top: 13px; }
+.is-tight .k-days .k-title-line .person-dots, .k-days.is-tight .k-title-line .person-dots { margin-top: 9px; }
+.k-days .k-title-line strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.k-days .k-row { grid-template-columns: 108px minmax(0, 1fr); }
+
+/* Kommende: tette rader, dagnavn som små overskrifter */
+.k-later .k-row { min-height: 0; padding: 8px 6px; }
+.k-later .k-title-line strong { font-size: 23px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.k-later .k-note { font-size: 17px; }
+.k-later .k-day-label { margin: 14px 0 0; font-size: 18px; }
+
+/* Lekser og frister */
+.k-todo { min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+.k-hw-list { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; }
+.k-hw { display: flex; flex-direction: column; gap: 8px; width: 100%; text-align: left; padding: 12px 16px 12px; border: 1px solid var(--line); border-radius: 16px; background: var(--white); color: var(--ink); }
+.k-hw-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.k-hw-head strong { font-size: 24px; font-weight: 700; }
+.k-hw-due { margin-left: auto; color: var(--muted); font-size: 18px; white-space: nowrap; }
+.k-hw-count { color: var(--green); font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.k-hw-status { margin-left: auto; color: var(--muted); font-size: 19px; }
+.k-hw-items { margin: 2px 0 0; padding: 0 0 0 22px; display: flex; flex-direction: column; gap: 3px; }
+.k-hw-items li { font-size: 19px; line-height: 1.3; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.k-hw-items li::marker { color: var(--muted); }
+.k-hw-items li[hidden] { display: none; }
+.k-hw-more { color: var(--muted); font-size: 17px; padding-left: 22px; }
+.k-hw-more:empty { display: none; }
+.k-hw.is-done { flex-direction: row; padding: 10px 16px; background: var(--soft-green); border-color: transparent; }
+.k-hw.is-done .k-hw-status { color: var(--green); font-weight: 700; }
+.k-hw.is-none { padding: 8px 16px; background: transparent; border-style: dashed; }
+.k-hw.is-none strong { font-size: 21px; font-weight: 600; color: var(--muted); }
+.k-hw.is-overdue { border-color: #c98b83; }
+.k-hw.is-overdue .k-hw-due { color: #b0544a; font-weight: 600; }
+
+.k-due { flex: none; display: flex; flex-direction: column; gap: 2px; margin-bottom: 18px; }
+.k-due .k-head { margin-bottom: 2px; }
+.k-due .k-link { min-height: 40px; }
+.k-due-list { display: flex; flex-direction: column; }
+.k-due-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 6px 4px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink); text-align: left; }
+.k-due-row .person-dots { flex: none; }
+.k-due-row strong { flex: 1; min-width: 0; font-size: 20px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.k-due-when { color: var(--muted); font-size: 17px; white-space: nowrap; }
+.k-due-count { color: var(--green); font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.k-due-row.is-soon .k-due-when { color: var(--ink); font-weight: 600; }
+.k-due-row.is-overdue .k-due-when { color: #b0544a; font-weight: 600; }
+.k-due-row[hidden] { display: none; }
+.k-empty--small { margin: 8px 0; font-size: 19px; }
+
+body.kiosk[data-theme="night"] .k-hw { background: var(--white); border-color: var(--line); color: var(--ink); }
+body.kiosk[data-theme="night"] .k-hw.is-done { background: var(--soft-green); border-color: transparent; }
+body.kiosk[data-theme="night"] .k-hw.is-none { background: transparent; }
+
+/* Justering etter skjermtest: frister får hele bredden til tittelen, lekser får to linjer når det er plass. */
+.k-hw-items li { white-space: normal; display: list-item; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.k-hw-items li[hidden] { display: none; }
+.k-todo.is-dense .k-hw-items li { -webkit-line-clamp: 1; }
+.k-hw-items { list-style: none; padding-left: 0; gap: 6px; }
+.k-hw-items li { position: relative; padding-left: 22px; }
+.k-hw-items li::before { content: ""; position: absolute; left: 4px; top: .55em; width: 7px; height: 7px; border-radius: 50%; border: 2px solid var(--muted); }
+.k-hw-more { padding-left: 22px; }
+.k-due-row { align-items: flex-start; padding: 8px 4px; }
+.k-due-row .person-dots { margin-top: 9px; }
+.k-due-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.k-due-text strong { font-size: 20px; line-height: 1.25; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.k-due-meta { display: flex; gap: 12px; align-items: baseline; }
+
+/* ---- Samlet dag (25. oktober): avtaler og oppgaver på samme sted, avkrysning rett på skjermen ---- */
+.k-item[hidden] { display: none; }
+/* «Nå»-sonen: delene krymper ikke inn i hverandre (timestripen tegnet oppå søppelkortet); fitNow skjuler valgfrie deler i stedet. */
+.k-now > * { flex-shrink: 0; }
+
+.k-ring { position: relative; flex: none; width: 42px; height: 42px; padding: 0; border-radius: 50%; border: 3px solid var(--muted); background: transparent; display: grid; place-items: center; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: background .15s, border-color .15s; }
+.k-ring::before { content: ""; position: absolute; inset: -14px; border-radius: 50%; } /* større trykkflate enn det synlige */
+.k-ring::after { content: ""; width: 11px; height: 20px; margin-top: -4px; border: solid #fff; border-width: 0 4px 4px 0; transform: rotate(45deg) scale(0); transition: transform .22s cubic-bezier(.2, 1.6, .4, 1); }
+.k-ring.is-checked { background: var(--green); border-color: var(--green); }
+.k-ring.is-checked::after { transform: rotate(45deg) scale(1); }
+.k-ring:active { transform: scale(.9); }
+
+.k-task-row { display: grid; grid-template-columns: 108px minmax(0, 1fr); align-items: center; gap: 4px 16px; padding: 12px 6px; border-bottom: 1px solid var(--line); }
+.k-lead { display: flex; align-items: center; padding-left: 20px; }
+.k-count { font-size: 21px; font-weight: 700; color: var(--green); font-variant-numeric: tabular-nums; }
+.k-task-main { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.k-task-main .k-title-line strong { font-family: inherit; font-size: 24px; font-weight: 600; line-height: 1.2; }
+.k-task-due { font-size: 17px; color: var(--muted); }
+.k-task-row.is-done .k-task-main strong { text-decoration: line-through; opacity: .5; }
+
+.k-checks { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; }
+.k-check { display: inline-flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; font-size: 20px; }
+.k-check .k-ring { width: 32px; height: 32px; border-width: 2.5px; }
+.k-check .k-ring::before { inset: -10px; }
+.k-check .k-ring::after { width: 8px; height: 15px; margin-top: -3px; border-width: 0 3px 3px 0; }
+.k-check-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.k-check.is-done .k-check-text { text-decoration: line-through; opacity: .5; }
+.k-check-more { font-size: 18px; color: var(--muted); }
+
+.k-entry { border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+.k-entry > .k-row { border-bottom: 0; }
+.k-husk { padding-left: 130px; }
+.k-husk-label { font-size: 15px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--green); }
+.is-dense .k-task-row { padding: 7px 6px; }
+.is-dense .k-entry { padding-bottom: 8px; }
+.is-tight .k-task-main .k-title-line strong { font-size: 21px; }
+.is-tight .k-check { font-size: 18px; }
+
+/* Kommende: smalere førstekolonne */
+.k-later .k-task-row { grid-template-columns: 44px minmax(0, 1fr); gap: 2px 12px; padding: 8px 6px; }
+.k-later .k-lead { padding-left: 0; }
+.k-later .k-ring { width: 34px; height: 34px; }
+.k-later .k-task-main .k-title-line strong { font-size: 21px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.k-later .k-husk { padding-left: 34px; }
+.k-later .k-check { font-size: 18px; }
+
+/* Ikke gjort ennå */
+.k-overdue { flex: none; display: flex; flex-direction: column; margin-bottom: 20px; }
+.k-overdue .k-head h2 { color: #b0544a; }
+.k-overdue .k-task-row { grid-template-columns: 44px minmax(0, 1fr); gap: 2px 12px; padding: 9px 6px; }
+.k-overdue .k-lead { padding-left: 0; }
+.k-overdue .k-ring { width: 34px; height: 34px; border-color: #c98b83; }
+.k-overdue .k-task-main .k-title-line strong { font-size: 21px; }
+.k-overdue .k-task-due { color: #b0544a; font-weight: 600; }
+.k-overdue .k-link { min-height: 40px; }
+body.kiosk[data-theme="night"] .k-overdue .k-head h2, body.kiosk[data-theme="night"] .k-overdue .k-task-due { color: #e39a90; }

@@ -1,0 +1,10 @@
+{
+  "enabled": false,
+  "userAgent": "FamilyAssistant/0.1 (configure contact before enabling)",
+  "lat": 59.91,
+  "lon": 10.75,
+  "place": "Eksempelsted",
+  "rainThresholdMm": 0.3,
+  "nowcastWetMmPerHour": 0.2,
+  "windows": []
+}

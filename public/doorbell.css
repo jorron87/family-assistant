@@ -1,0 +1,86 @@
+/* Ringeklokke: stort vindu for ringing, kompakt direktekort for personer. Følger lys/mørkt tema. */
+.doorbell-dialog{
+  --bg:#faf9f6;--ink:#252924;--sub:#5f7062;--line:#d6dcd5;--btn:#e5eee5;--btn-ink:#254732;--stage:#101b17;--accent:#cf7a2b;
+  --s:min(90vh,940px);
+  position:fixed;inset:0;margin:auto;z-index:1000;padding:0;border:0;border-radius:28px;background:var(--bg);color:var(--ink);
+  box-shadow:0 24px 120px #0007;overflow:hidden;
+  width:calc(var(--s) + 460px);height:var(--s);max-width:97vw;max-height:97vh;
+  grid-template-columns:var(--s) minmax(0,1fr);
+}
+.doorbell-dialog[open]{display:grid}
+.doorbell-dialog[data-kind="person"]{--accent:#4d86b8}
+body[data-theme="night"] .doorbell-dialog{--bg:#17211c;--ink:#e8e3d6;--sub:#a1b2a4;--line:#33443a;--btn:#25382d;--btn-ink:#d3e8d6;--stage:#0b120f;box-shadow:0 24px 120px #000b}
+.doorbell-dialog::backdrop{background:rgba(13,23,20,.74)}
+body[data-theme="night"] .doorbell-dialog::backdrop{background:rgba(4,8,6,.84)}
+
+/* Bilde */
+.db-picture{position:relative;width:var(--s);height:var(--s);background:var(--stage);display:grid;place-items:center;overflow:hidden}
+.db-picture video{width:100%;height:100%;object-fit:contain;display:block}
+.doorbell-failed video{visibility:hidden}
+.db-live{position:absolute;left:20px;top:18px;display:flex;align-items:center;gap:9px;padding:8px 14px;border-radius:999px;background:#000a;color:#fff;font:600 16px system-ui;letter-spacing:.03em}
+.db-live i{width:10px;height:10px;border-radius:50%;background:#e5484d;animation:db-blink 1.4s ease-in-out infinite}
+.db-x{display:none;position:absolute;right:14px;top:12px;width:60px;height:60px;border:0;border-radius:50%;background:#000a;color:#fff;font:600 26px system-ui;cursor:pointer}
+
+/* Kobler til / feil */
+.db-status{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:22px;padding:32px;text-align:center;color:#fff;font:500 26px/1.4 system-ui;background:var(--stage)}
+.db-status[hidden]{display:none}
+.db-message{margin:0;max-width:22em}
+.db-icon{position:relative;width:104px;height:104px;border-radius:50%;display:grid;place-items:center;background:#ffffff14;color:#fff}
+.db-icon::after{content:"";position:absolute;inset:0;border-radius:50%;border:2px solid var(--accent);animation:db-ripple 1.7s ease-out infinite}
+.doorbell-dialog[data-kind="ring"] .db-icon svg{animation:db-ring .9s ease-in-out infinite;transform-origin:50% 8%}
+.db-failed .db-icon{background:#e5484d33;font:700 54px system-ui}
+.db-failed .db-icon::after{animation:none;border-color:#e5484d}
+.db-retry{min-height:72px;padding:0 36px;border:0;border-radius:16px;background:#fff;color:#1b2b22;font:600 24px system-ui;cursor:pointer}
+
+/* Sidepanel */
+.db-side{display:flex;flex-direction:column;justify-content:space-between;gap:28px;padding:48px 44px 44px}
+.db-eyebrow{display:flex;align-items:center;gap:14px;margin:0;font:600 18px system-ui;letter-spacing:.07em;text-transform:uppercase;color:var(--sub)}
+.db-eyebrow::before{content:"";width:14px;height:14px;border-radius:50%;background:var(--accent);flex:none}
+.db-time{font-variant-numeric:tabular-nums;margin-left:auto;letter-spacing:0;text-transform:none;font-size:22px}
+.doorbell-dialog h2{margin:22px 0 0;font:400 clamp(40px,4.6vw,68px)/1.06 Georgia,serif;color:var(--ink)}
+.db-hint{display:none;margin:12px 0 0;font:18px system-ui;color:var(--sub)}
+.db-count{display:grid;gap:12px;margin-bottom:26px}
+.db-bar{height:12px;border-radius:6px;background:var(--line);overflow:hidden}
+.db-bar i{display:block;height:100%;background:var(--accent);transform-origin:left;transform:scaleX(1);transition:transform .22s linear}
+.doorbell-countdown{font:500 22px system-ui;color:var(--sub);font-variant-numeric:tabular-nums}
+.db-actions{display:grid;gap:16px}
+.db-actions button{min-height:92px;border-radius:20px;font:600 30px system-ui;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.doorbell-close{border:0;background:var(--btn);color:var(--btn-ink)}
+.db-more{border:2px solid var(--line);background:transparent;color:var(--ink)}
+.db-actions button:active,.db-retry:active,.db-x:active{transform:scale(.97);filter:brightness(.92)}
+.doorbell-dialog button:focus-visible{outline:4px solid var(--accent);outline-offset:3px}
+
+/* Kompakt kort (person): ligger nederst til høyre, stjeler ikke fokus og lar resten av skjermen være brukbar */
+.doorbell-dialog[data-mode="compact"]{inset:auto 28px 28px auto;margin:0;width:540px;height:auto;max-width:none;border-radius:24px;--s:540px;grid-template-columns:1fr;box-shadow:0 14px 60px #0008}
+.doorbell-dialog[data-mode="compact"] .db-picture{cursor:pointer}
+.doorbell-dialog[data-mode="compact"] .db-x{display:block}
+.doorbell-dialog[data-mode="compact"] .db-side{padding:22px 26px 24px;gap:14px}
+.doorbell-dialog[data-mode="compact"] h2{margin:12px 0 0;font-size:40px}
+.doorbell-dialog[data-mode="compact"] .db-hint{display:block}
+.doorbell-dialog[data-mode="compact"] .db-actions{display:none}
+.doorbell-dialog[data-mode="compact"] .db-count{margin-bottom:0}
+.doorbell-dialog[data-mode="compact"] .db-status{font-size:22px}
+.doorbell-dialog[data-mode="compact"] .db-icon{width:84px;height:84px}
+
+/* Smal eller stående skjerm: bilde over, kontroller under */
+@media (max-aspect-ratio:13/10){
+  .doorbell-dialog:not([data-mode="compact"]){--s:min(94vw,820px,64vh);width:min(94vw,820px);height:auto;grid-template-columns:1fr}
+  .doorbell-dialog:not([data-mode="compact"]) .db-picture{width:100%}
+  .doorbell-dialog:not([data-mode="compact"]) .db-side{padding:26px 28px 28px}
+  .doorbell-dialog:not([data-mode="compact"]) .db-actions{grid-template-columns:1fr 1fr}
+  .doorbell-dialog:not([data-mode="compact"]) .db-actions button{min-height:76px;font-size:24px}
+  .doorbell-dialog[data-mode="compact"]{width:min(92vw,540px);--s:min(92vw,540px)}
+}
+
+/* Bevegelse */
+.doorbell-dialog[open]{animation:db-in .22s ease-out}
+.doorbell-dialog[open][data-kind="ring"][data-mode="full"]{animation:db-in .22s ease-out,db-glow 1.5s ease-out 2}
+.doorbell-dialog[open][data-mode="compact"]{animation:db-slide .26s ease-out}
+@keyframes db-in{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:none}}
+@keyframes db-slide{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:none}}
+@keyframes db-glow{from{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 70%,transparent),0 24px 120px #0007}to{box-shadow:0 0 0 34px transparent,0 24px 120px #0007}}
+@keyframes db-ripple{from{transform:scale(1);opacity:.9}to{transform:scale(1.7);opacity:0}}
+@keyframes db-ring{0%,100%{transform:rotate(0)}15%{transform:rotate(14deg)}30%{transform:rotate(-12deg)}45%{transform:rotate(9deg)}60%{transform:rotate(-6deg)}75%{transform:rotate(0)}}
+@keyframes db-blink{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.doorbell-dialog,.doorbell-dialog *{animation:none!important;transition:none!important}}
+.doorbell-failed .db-live{display:none}

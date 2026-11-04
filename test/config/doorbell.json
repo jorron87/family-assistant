@@ -1,0 +1,14 @@
+{
+  "cameraName": "Inngang",
+  "neolinkUrl": "http://127.0.0.1:8655",
+  "streamPath": "/Inngang/subStream",
+  "personEntity": "",
+  "ringEntity": "",
+  "localAlarmEntity": "",
+  "smtp": {
+    "host": "127.0.0.1",
+    "cameraIp": "192.0.2.28",
+    "port": 2525
+  },
+  "displaySeconds": 30
+}

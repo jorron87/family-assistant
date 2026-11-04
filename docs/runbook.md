@@ -1,0 +1,190 @@
+# Kjøringsbok
+
+Les AGENTS.md og docs/setup.md før bruk. Alle lokale konfigurasjoner tilhører den nye familien. Eksempler er syntetiske; opprett aldri ekte hendelser fra eksempeldatoer.
+
+## Datahenting og endringskjøringer
+
+Tjenesten gjør innhenting, originalcache og tekstuttrekk før agenten. Bruk begin-run (eller dispatcherens eksisterende lease), next og telefoninnboksen først. collected ID gir kildeinnhold; resources EKSTERN_ID og resource ID gir originalstatus. resource-export ID tmp/agent/filnavn gir lokal kopi for visuell lesing. Uendrede native fil-ID-er og dokumentkvitteringer gjenbrukes. Les alltid nye sider/vedlegg før mark-reviewed.
+
+Full gjennomgang og kildeendringer er ulike scope. change-completion er kravet for scope kildeendringer; det beviser ikke full kildedekning. Telefon/familievalg bruker scope familiehandlinger og venter ikke på kildehull. En ny innsendt melding har prioritet. Ingen overlapping av agentkjøringer; aldri frigjør en annens lease.
+
+## Google
+
+Kjør google-status. Hvis direkte Google OAuth er konfigurert: bruk publish. Ellers brukes agentens autoriserte Google-verktøy. connected:false gjelder tjenestens egen OAuth, ikke nødvendigvis appens verktøy. Prøv den konkrete nødvendige handlingen før tilgang erklæres blokkert. Hold familien sin Drive privat og verifiser deling til konfigurerte mottakere.
+
+## Telefon
+
+phone-inbox viser ferdige innsendinger og deres senderMemberId/senderName/tidspunkt. uploading er ikke klar. Les alle originaler, arkiver, vurder profil og opprett/rett lokal event før Calendar. phone-review done krever result:{type:"calendar",eventIds:[ALLE_LOKALE_EVENT_IDER]} når kalenderen er endret; bruk no_calendar bare uten kalenderhandling. Sjekk innboksen igjen før slutt.
+
+## Kildegjennomgang
+
+### Rask kontroll uten å miste endringer
+
+Behandle hver synlig liste/side som en overflate, for eksempel `vigilo:max:news`, `vigilo:child1:messages`, `spond:group-123:events` eller `facebook:group-123:posts`. Les hele synlige listen og noter stabile kilde-ID-er, titler, korte utdrag, kilde-URL, publiserings- og endringstid og tegn på vedlegg. Skriv ett JSON-dokument og kjør `node src/cli.mjs observe-list <fil>`:
+
+```json
+{"source":"vigilo","surface":"max:news","items":[{"externalId":"vigilo:news:123","title":"Ukeplan uke 42","summary":"Plan for 3A","sourceUrl":"https://web-parent.prod.vigilo-oas.no/news","publishedAt":"2026-10-09T12:00:00+02:00","updatedAt":null,"attachmentHint":"ukeplan.pdf"}]}
+```
+
+Responsen gir `reason`: `new`, `changed`, `upcoming-check`, `periodic-check` eller `unchanged`. Åpne og les elementer som trenger gjennomgang, inkludert alle nye/endrede vedlegg og sider. Etter full gjennomgang og `intake`, kjør `node src/cli.mjs mark-reviewed <fil>` med `{"source":"vigilo","surface":"child2:news","externalId":"vigilo:news:123","rawId":"RAW_ID","relevance":"relevant"}`. `surface` er viktig når samme innlegg vises for flere barn; hver barneliste har egen gjennomgangsstatus. For irrelevante elementer kan `rawId` utelates, men angi `relevance:"irrelevant"` og en konkret `reviewNote`. Et element regnes aldri som gjennomgått bare fordi det er sett i listen.
+
+Listene kontrolleres med minst 72 timers overlapp ved hver kjøring. Uendrede elementer gjenbrukes uten detaljåpning, også ferske innlegg. Synlige endringer gir `changed` straks. Elementets `reviewPolicy` er `once` (standard), `before-start` (én kontroll innen 72 timer før avtale/frist) eller `watch` (ukentlig og før frist). Spond-events får `before-start` automatisk, polls/payments får `watch`; merk bare andre konkret endringsutsatte tråder med en strengere policy i `observe-list`. En avsluttet sak kan eksplisitt settes til `once`, og merkingen bevares når feltet utelates senere. Irrelevante elementer får ingen tidsbasert detaljkontroll. Se [kildegjennomgang-policy.md](kildegjennomgang-policy.md) for vurdering per kildetype. Registrer `changeTracking:"reliable"` og `changeToken` bare når kilden dokumentert varsler endringer i tekst, kommentarer og vedlegg; token må identifisere gjeldende versjon og kan spare tidsbasert kontroll. Et vanlig oppdateringstidspunkt er ikke en slik token, men en faktisk endret `updatedAt` i listekortet gir fortsatt `changed`. Skjulte/avlyste avtaler og ferdige oppgaver utløser ikke før-frist-kontroll. Gjenbruk identiske dokumentkvitteringer; publiser bare faktisk endret materiale eller reparer manglende publisering. Ved ufullstendig liste eller neste side, lagre status med `node src/cli.mjs surface <fil>`, eksempel:
+
+```json
+{"source":"vigilo","surface":"max:news","health":"partial","backfillFrom":"2026-08-01","nextPageHint":"Side 3 gjenstår","seenCount":20,"details":"Side 1–2 lest","complete":false}
+```
+
+Sett `complete:true` først når alle sider, relevante kort, meldingstråder og vedlegg i området faktisk er sett. For Vigilo må listen observeres i samme kjøring og alle åpne listeelementer gjennomgås før en overflate kan merkes `ok`. `review-queue` viser også lagret `nextPageHint`, slik at neste kjøring kan fortsette. Sjekk `vigiloCoverage`: alle åtte kombinasjonene må være uten `issues` før Vigilo kan rapporteres `ok`. Et tomt elementkø betyr ikke at uregistrerte overflater er dekket.
+
+- **Vigilo:** Velg Barn En, Barn To, Barn Tre og Barn Fire hver for seg. For hvert barn: observer både `Siste nytt` og `Meldinger`; åpne lekse-/ukeplaner og andre kort, les meldingstråder, lenker og hvert vedlegg. Ta inneværende og neste uke for alle barna først, deretter resten av aktivt vindu (30 dager). Bruk publiseringsdato og ukeangivelse før relative frister tolkes. Registrer separat dekningsstatus for `barn:news` og `barn:messages`. Ikke sett status `ok` for et barn når bare listen er sett eller PDF-/meldingsdetaljer gjenstår.
+- **Spond:** Start fra `https://spond.com/client`. Oppdag grupper/undergrupper, og se innlegg, arrangementer, betalinger, avstemninger, filer og kommentarer. Bevar påmeldings- og betalingsstatus sammen med frister. Les hele detaljsiden når kortvisningen er forkortet.
+- **Facebook:** Besøk bare gruppene i `config/sources.json`. Bruk stabile permalenker til innlegg og kommentarer. Utvid tekst og kommentarer før vurdering. Messenger-chatter og DM-er er utenfor første bølge.
+- **Dokumenter:** Last ned originalen når kilden tillater det. Les hvert PDF-ark, med visuell gjennomgang når tekstuttrekk ikke fanger tabeller, illustrasjoner eller skannede ark. Bevar originalfilen kryptert lokalt og last opp en kopi til Drive. Hvis et dokument ikke kan leses komplett, sett kilden `partial` og si hvilke sider/vedlegg som mangler.
+
+Historisk start 2026-08-01 gjelder bare første innhenting; i dag styrer «Rullerende cutoff». I ordinære kjøringer brukes sist dekket område pluss minst 72 timers overlapp, og morgenkjøringen kl. 07 kontrollerer de siste ukene grundigere. Antall elementer alene er ikke bevis på full dekning.
+
+## Importkontrakt
+
+Skriv JSON-filen på en midlertidig lokal sti og kjør `node src/cli.mjs intake <fil>`. Ett element per kall:
+
+```json
+{
+  "source": "vigilo",
+  "externalId": "vigilo:weekplan:3A:2026-W42",
+  "title": "Ukeplan 3A uke 42",
+  "body": "Fullt kildeinnhold, inkludert relevante tekster fra alle sider.",
+  "sourceUrl": "https://web-parent.prod.vigilo-oas.no/news",
+  "publishedAt": "2026-10-09T12:00:00+02:00",
+  "groupName": "3A",
+  "memberIds": ["child3", "child4"],
+  "findings": [{
+    "canonicalKey": "2026-10-13:turdag:3A",
+    "title": "Turdag 3A",
+    "kind": "event",
+    "start": "2026-10-13T08:00:00+02:00",
+    "end": "2026-10-13T14:00:00+02:00",
+    "allDay": false,
+    "provisional": false,
+    "members": ["child3", "child4"],
+    "checklist": ["Ved", "Kakao"],
+    "details": "Turdag. Ta med ved og kakao.",
+    "reason": "Ukeplan for uke 42 sier tirsdag; 13. oktober er tirsdagen den uken."
+  }]
+}
+```
+
+Responsen inneholder `item.id` og `findings[].id`. Samme `source + externalId` oppdaterer eksisterende råelement; samme `canonicalKey` slår sammen samme aktivitet på tvers av kilder. Angi `correctsPrevious: true` på et funn bare når ny kilde eksplisitt korrigerer datoen. Motstridende datoer uten korrigering blir foreløpige alternativer. Hvert funn må ha `start` og `end`. Når kilden ikke gir hendelsesdato, lag en datert oppfølgingspåminnelse (`provisional:true`) for å få datoen avklart, og skriv uttrykkelig at påminnelsens dato er valgt og ikke er hendelsesdatoen. Kildeelementer uten en konkret familiehandling kan lagres uten funn.
+
+Lag et lesbart rådatakort uten mellomlagring av egen parser: `node src/cli.mjs export-card RAW_ID C:\sti\kort.txt`.
+
+`node src/cli.mjs attach RAW_ID C:\sti\ukeplan.pdf` lagrer vedlegget kryptert. `node src/cli.mjs source status.json` oppdaterer kildedekning, for eksempel:
+
+```json
+{"source":"vigilo","health":"ok","scope":"Barn En, Barn To, Barn Tre og Barn Fire: Siste nytt, Meldinger og alle tilgjengelige PDF-er fra 2026-08-01","details":"Alle synlige sider lest.","seenCount":42,"oldestCoveredAt":"2026-08-01T00:00:00+02:00","newestCoveredAt":"2026-09-24T22:00:00+02:00"}
+```
+
+## Drive og kalender
+
+Forelder A har godkjent deling av alle kildeoriginaler i den private familie-Drive-mappen, også når de inneholder personopplysninger om tredjepersoner. Del bare med kontoene i `config/sources.json`, aldri som offentlig fil. Ikke lag en redigert erstatning for originalen på grunn av personopplysninger. Bevar eventuelt et eget kort med utdrag, men last også opp originalen. Tidligere tilbakeholdte originaler skal tas igjen fra den krypterte lokale lagringen.
+
+Google Drive-mappen og kalender-ID-en står i `config/sources.json`. Lag et lesbart rådatakort per relevant kildeelement (kilde, tittel, dato, full tekst/uttrekk, kilde-URL og berørte personer) og last det opp til mappen. Last også opp hver original PDF/fil. Del hver fil med familiekontoene i konfigurasjonen dersom mappen ikke allerede arver tilgangen. Kontroller resultatet med Drive-metadata; registrer lenken med `node src/cli.mjs drive RAW_ID - URL` for rådatakortet, eller `node src/cli.mjs drive RAW_ID ATTACHMENT_ID URL` for vedlegg.
+
+Når `raw.revision` er høyere enn `raw.driveRevision`, oppdater rådatakortet i Drive og registrer lenken igjen. Behold helst samme Drive-fil-ID slik at eksisterende kalenderlenker fortsatt virker. Nye vedlegg sammenlignes på SHA-256 og lastes opp bare én gang.
+
+For hvert funn: søk først etter eksisterende Google-kalenderoppføringer på samme dato og i arkivets `event.calendar`. Bygg tittelen som `[Foreløpig] <tittel>` når `provisional` er sann. Beskrivelsen skal ha personer, detaljer, pakkeliste, begrunnelse, original kilde-URL og Drive-lenker. Opprett eller oppdater oppføringen. Registrer resultatet i en JSON-fil og kjør `node src/cli.mjs calendar EVENT_ID <fil>`:
+
+```json
+{"calendarId":"reader@example.org","eventId":"GOOGLE_EVENT_ID","eventUrl":"https://calendar.google.com/calendar/event?eid=...","fingerprint":"FINGERPRINT_FRA_ARKIVET"}
+```
+
+Google Calendar-verktøyet krever start og slutt med klokkeslett (dato alene ga HTTP 400 i pilot). Når kilden bare gir dato, opprett en heldagsoppføring (`allDay:true`, se «Ekte heldagsavtaler i Google Calendar» og «Dato er bekreftet, tidspunkt mangler»); ikke bruk et oppdiktet kl. 08-punkt som selve hendelsen. En kort påminnelse kl. 08:00 brukes bare for egne, tydelig merkede oppfølgingsdatoer. Når kun starttid finnes, bruk en forsiktig varighet på én time og merk sluttiden foreløpig. Bruk `Europe/Oslo` ved datokonvertering. Sett `add_google_meet: false` eksplisitt.
+
+## Sluttrapport
+
+Kjør `node src/cli.mjs completion` etter hver arbeidsbolk. `complete:true` krever tom gjennomgangskø, ingen delvise overflater eller kilder, Drive-lenke til hvert råkort og vedlegg, synkroniserte kalenderfingeravtrykk og full Vigilo-dekning i denne kjøringen. En tom elementkø alene er ikke nok. Fortsett til dette er oppfylt. Ved en faktisk ekstern blokkering (for eksempel tapt innlogging eller mislykket Drive-/Calendar-kall), gjør ferdig alt annet tilgjengelig arbeid og rapporter presist hva som er udekket. Gi aldri opp fordi første historiske gjennomgang er stor.
+
+Skriv JSON med `outcome` (`ok`, `partial`, `needs_login`, `error`), `summary` og `sources`, og kjør `node src/cli.mjs run <fil>`. For ufullstendig utfall kreves `blockers` (liste med konkrete årsaker, minst 12 tegn per oppføring) og `resumeHint` (hvor arbeidet skal fortsette). Eksempel: `{"outcome":"needs_login","summary":"Spond krever ny innlogging; øvrige kilder er ferdige.","sources":[{"source":"spond","health":"needs_login"}],"blockers":["Spond viste innloggingssiden ved åpning av arrangementer."],"resumeHint":"Etter innlogging: fortsett spond:grunntrening:events fra lagret nextPageHint."}`. Frigjør låsen med `node src/cli.mjs end-run TOKEN` selv ved feil. Varsle brukeren om blokkering og udekket område; ellers bare ved nye viktige funn.
+# Gjenbruk av ferdig leste dokumenter
+
+Gjennomgang av innleggsoversikter skal fortsatt gjøres per kilde og barn. Kommentarer leses ved første gjennomgang, ved synlige nye kommentarer eller etter elementets strengere reviewPolicy. Selve dokumentlesingen deles på tvers av råelementer via SHA-256 av filens faktiske bytes. Samme fil med annet navn har samme lesekvittering; endrede bytes krever ny lesing. En kjent vedleggs-ID uten endringstegn hentes ikke ned kun for å beregne ny checksum.
+
+1. Hent en original én gang per synlig vedleggs-ID/versjon. Hent igjen ved ny fil/ID/versjon, synlig rettelse eller eksplisitt beskjed om erstattet innhold. Før åpning/rendering av en **hentet** fil: `node src/cli.mjs document-check FILE`. For et kjent, nå verifisert filhash: `node src/cli.mjs document-status SHA256`.
+2. Ved `needsReading:false`: bruk `receipt.pages` som bevart tekst/visuell beskrivelse, og `references` til tidligere råelementer/Drive-kopier. Ikke les filen visuelt igjen. Vurder fortsatt aktivitet, dato, mottaker og endringer i omgivende beskjed for det aktuelle barnet. Samme dokument er ikke automatisk samme kalenderaktivitet.
+3. Ved `needsReading:true`: kontroller først `references`. Gamle fullstendige og dokumenterte sideuttrekk kan brukes til å etablere kvittering uten ny PDF-rendering. Vedlegg eller Drive-lenke alene beviser ikke at alle sider er lest. Når fullstendig sidebelegg mangler, les alle sider og bevar innholdet.
+4. Etter fullstendig lesing og arkivering med `attach`: `node src/cli.mjs document-review RAW_ID ATTACHMENT_ID RECEIPT_JSON`.
+
+```json
+{
+  "pageCount": 2,
+  "method": "mixed",
+  "pages": [
+    {"page": 1, "text": "Full sidetekst, inkludert uke, datoer og oppgaver …"},
+    {"page": 2, "text": "Full sidetekst og beskrivelse av relevante visuelle opplysninger …"}
+  ]
+}
+```
+
+`method` er `text`, `visual` eller `mixed`. Hver side må ha ett unikt nummer og innhold; beskriv tomme sider eksplisitt. Oppsummeringer som utelater detaljer er ikke tilstrekkelige for gjenbruk. Kvitteringen lagres kryptert og godtas først når alle oppgitte sider er med. Nye nested vedlegg må kontrolleres separat. En tidligere lest vedleggs-ID/versjon beholdes som kvittert uten ny nedlasting. Ved synlig ny fil/ID/versjon, rettet dokument eller eksplisitt erstatningsbeskjed hentes den aktuelle filen; da avgjør SHA-256 om den eksisterende lesekvitteringen kan gjenbrukes. Filnavn alene brukes ikke som identitet for en ny fil.
+
+## Rullerende cutoff fra 27. september 2026
+
+Denne seksjonen erstatter eldre krav om å fullføre alle hull tilbake til 1. august ved hver kjøring. Aktiv cutoff er `completion.cutoffAt` (30 dager). Eldre kildeelementer/filer beholdes i arkivet og vises separat som historikk. Fremtidige aktiviteter, ferske kildeendringer og eksplisitt beholdte oppgaver har fortsatt prioritet. `retainUntil` kan gis i intake og på listeelementer i observe-list. Kontroller synlige fremtidige datoer også i eldre listekort før de avskrives. Ikke rull utdaterte, foreløpige påminnelser fremover automatisk.
+
+Historisk feed-gap utenfor aktivt vindu registreres slik etter full kontroll av nåværende vindu:
+
+```json
+{"source":"facebook","surface":"group-951081777302696:posts","health":"partial","currentComplete":true,"scanFrom":"2026-08-28T00:00:00+02:00","scanTo":"FAKTISK KONTROLLTID","historicalGap":{"from":"2026-08-01T00:00:00+02:00","to":"2026-08-27T23:59:59+02:00","reason":"Eldre innlegg kunne ikke gjenfinnes i feeden."},"details":"Aktuelt vindu og kommentarer faktisk gjennomgått; historisk hull bevart."}
+```
+
+Dette skal ikke brukes på aktuelle vedleggsfeil, innloggingsfeil eller ufullstendig aktuell innhenting. currentComplete nullstilles ved ny observe-list; bekreft på nytt hver kjøring. completion kan være true innen gjeldende scope samtidig som separat historikk har hull. Oppgi dette presist, ikke påstå at historikkgapet er fylt.
+
+## Dashboard i stua og Vigilo-øktkontroll
+
+## Kalenderarkivering
+
+### Kontrollert sammenslåing
+
+En aktiv Google-hendelse har én lokal eier. Ved eldre lokale dubletter som peker til samme Google-ID: les de gjeldende oppføringene og deres kildebelegg, bekreft samme virkelige aktivitet, dato og personer, og velg oppføringen med riktig gjeldende innhold. Tittel-likhet alene er aldri tilstrekkelig. Personlige homework-grupper og erstattede taskSplit-lister avvises. Åpne deloppgaver som ikke finnes i valgt gjeldende liste må avstemmes før sammenslåing.
+
+`node src/cli.mjs merge-events FIL` tar `{targetId,eventIds:[ANNEN_ID],googleEventId,expectedEvents:{ID:HASH,...},dryRun:true}`. HASH er SHA-256 av nøyaktig `JSON.stringify` av oppføringen lest fra `/api/events/ID` (bruk Node, ikke en PowerShell-reserialisering). Fjern dryRun etter kontroll; familie-/kildeendringer siden lesing avviser planen. Før større migrering: `node src/cli.mjs backup before-merge`. Tjenesten lagrer selv hele den levende tilstanden kryptert under backups, leser tilbake bytes og returnerer filnavn/hash/antall. Kontroller at antallet gjeldende oppføringer samsvarer med API-et. Ikke anta at en arkivfil lest gjennom et annet prosess-/filmiljø er den tjenesten bruker; 8. oktober samsvarte en lokal fil med bare tre eldre oppføringer ikke med den aktive tjenesten. Ingen automatisk sletting, overskriving eller gjenoppretting gjøres av backup-kommandoen. Gjentakelse av en allerede utført identisk sammenslåing er idempotent.
+
+Kilder, gamle objekter/kanoniske nøkler og kalenderkvitteringer beholdes; råkortets tekstrevisjon endres ikke. Seneste eksplisitte skjul/gjenåpning og avkryssing med identisk oppgavetekst bevares. Gamle ID-er fungerer som varige aliaser for lesing, kildeoppdatering, avkryssing, skjuling og kalenderkvittering. Gamle objekter er tilgjengelige under `/api/events/ID/history`; de vises ikke som nye kort. Samme Google-ID beholdes, og det foretas ingen automatisk Google-sletting/opprettelse. Publiser bare gjeldende oppføringer med faktisk endret fingerprint; gjenbruk øvrige kvitteringer. Bekreft synkronisering gjennom faktisk Google-skriving og lesing.
+
+Google-verktøyets overgang fra timed til all-day kan gi HTTP 400 «Invalid start time». Ikke kvitter dette som suksess eller lag en ny avtale. Bruk om nødvendig kalenderens eksisterende oppføring i nettleseren, kontroller inkludert sluttdato (API-end er eksklusiv), og verifiser samme ID etter lagring. Kontroller også gjestesvar og varsler: nettleseren kan nullstille eget svar eller gjøre standardvarsel eksplisitt. Gjenopprett tidligere eget svar på primary-kopien med notify:false. Ingen invitasjoner eller meldinger sendes. En feil på selve connectorens feltkombinasjon er ikke et auth-problem.
+
+Familien trykker «Ferdig vurdert · skjul» for å fjerne fra både dashboardet og Google Calendar. Originaler, kildehistorikk og avkryssinger beholdes; skjul er ikke kildebekreftet avlysning eller bekreftelse på utførte deloppgaver. Gjenåpning finnes under Oppgaver → Skjulte oppføringer og legger avtalen tilbake.
+
+Etter kjøringslås: `node src/cli.mjs calendar-actions`. For action remove, slett EKSAKT tilknyttet calendarId/eventId med Calendar delete_event; verifisert 404/410/cancelled regnes som allerede fjernet. Registrer `calendar-action EVENT_ID FILE` med `{ "action":"removed", "googleEventId":"EKSAKT_ID", "revision":GJELDENDE_REVISION }` først etter faktisk sletting. Tjenesten beholder den gamle Google-ID-en som slettet historikk. Ikke slett andre oppføringer etter et bredt tittelsøk.
+
+For action restore: les gjeldende event og kildemateriale, søk etter allerede aktiv samme oppføring og oppdater den, ellers opprett på nytt. Registrer `calendar EVENT_ID FILE` som normalt, med ekte ID, URL, gjeldende fingerprint og `visibilityRevision:GJELDENDE_REVISION`. Oppføringen kan ha fått ny Google-ID. Ved konflikt les nyeste familievalg igjen; ikke overstyr et nyere trykk. Skjulte oppføringer nekter normal calendar-kvittering og skal ikke opprettes igjen ved kildeoppdateringer. `visibility` og samme canonicalKey bevares.
+
+Ved ekstern feil: `calendar-action EVENT_ID FILE` med `{ "status":"error", "revision":GJELDENDE_REVISION, "note":"Konkret feil", "retryAt":"ISO om 30 minutter" }`. Dette beholder handlingen pending og synlig. Global completion inkluderer kalenderhandlingen. En særskilt innboks/familievalg-kjøring bruker run `scope:"familiehandlinger"`; ok krever ingen telefonrestanser eller kalenderhandlinger, uten å hevde dekning av andre kilder. Ordinære kjøringer behandler kalenderhandlinger før eldre historikk og sjekker dem igjen før slutt.
+
+Den lokale dispatcher starter GPT-6 Luna high via appens bundlete `codex.exe exec` med innlogget ChatGPT-konto og eksisterende verktøy. Den globale npm-CLI-en er eldre og skal ikke brukes her. Kjøringslåsen tas før agentstart og fornyes hvert 15. minutt mens prosessen lever. Agenten får lease-token i instruksen. Første og andre avbrudd i mobilbehandling gir varig automatisk nytt forsøk etter 1/5 minutter; etter tre blir innsendingen synlig blocked, og ordinær gjennomgang kan gjenoppta. Kalenderfeil beholder pending med retryAt. `GET /api/phone/dispatcher` viser aktiv prosess/kø. Ingen ferdige opplastinger går tapt ved tjenestestart; køen rekonstrueres fra kryptert arkiv.
+Viktig: En Google-ID med removedAt i calendar/calendarHistory er slettet og kan aldri gjenbrukes i calendar-kvitteringen. Calendar read_event/update_event kan vise det gamle innholdet uten å gjenaktivere hendelsen. Søk i aktivt, avgrenset tidsvindu; ved fravær create_event med ny ID, og bekreft ny ID i aktivt search_events før kvittering. Bruk event EVENT_ID for én oppføring og raw-item for kildene; unngå å laste hele statusarkivet for én kalenderhandling.
+
+### Mobilkalender og oppgaver
+
+Familien på https://family.example.org/send/ har autentisert mobilvisning for kalender og oppgaver, med fast Send inn-knapp. GET /send/api/family projiserer bare familiemedlemmer, kalender-/oppgaveinnhold og tilknyttede kildelenker. Telefonen kan krysse av via tasks-endepunktet (expectedText beskytter mot foreldet tekst), og skjule/gjenåpne via visibility. Arkivering vekker den samme Luna-dispatcher som dashboardet. Tilknyttede originaler kan åpnes via /send/api/documents/RAW_ID/ATTACHMENT_ID med telefonøkt; ingen offentlig lenke opprettes. Innbokskvitteringer forblir begrenset til egen telefon. Se docs/mobilinnsending.md.
+
+### Gjeldende ukebrev per barn
+
+Ved personvalg har dashboard og tilknyttet mobil et direkte valg «Ukebrev · uke …». Serveren indekserer bevarte råkort/originaler uavhengig av kalenderfunn og familiens avkryssing/skjuling. Nåværende skoleuke prioriteres; i helgen velges neste skoleuke dersom den er tilgjengelig. Eldre fallback merkes «Sist tilgjengelig», aldri som et nytt ukebrev. Ingen ny lesekvittering eller oppgavefullføring følger av å åpne brevet.
+
+På intake kan råkortet få `weeklyLetter:{week:41,year:2026,attachmentId:"UUID"}`. week/year må være kildebelagt, attachmentId er valgfritt for originaler med uvanlige navn. memberIds må dekke de riktige barna. Eksisterende Vigilo-uke-/lekseplaner indekseres fra tittel, vedleggsnavn og registrert kildetid uten endring av rårevisjon/Drive/Calendar. Hovedplan velges fremfor foreldremøteinvitasjon/matteark; samme plan for søsken gjenbruker originalen. Mobiloriginalen krever telefonens vanlige tilknytning og gjør ingen offentlig deling.
+
+Ukebrevindeksen er et tillegg til agentisk review. Les fortsatt alle sider og relevante vedlegg, trekk ut lekser/utstyr/avtaler og viktige turdager med stabile oppgave-/kalendernøkler, og gjennomfør profil-/publiseringskontroll som før.
+
+### Dato er bekreftet, tidspunkt mangler
+
+Funn støtter dateConfirmed (boolean) og timeNote (tekst). En kildebelagt dato med manglende klokkeslett/varighet er ikke foreløpig. Bruk dateConfirmed:true, provisional:false. Ukjent start: allDay:true med start YYYY-MM-DD og eksklusiv end neste dag, timeNote:"Klokkeslett ikke oppgitt." Kjent start/ukjent slutt: behold kildeoppgitt start, sett rimelig anslått end og forklar anslaget i timeNote. Foreløpig gjelder dato/deltakelse eller valgt oppfølgingsdato; ved reell konflikt sett dateConfirmed:false. title skal ikke ha [Foreløpig] når provisional:false. Telefonens original og råkort er samme kilde, og URL-er samles i kildefeltene fremfor duplisering i details/reason.
+
+## Avgrensning av kjøringslås og omstart
+
+## Aktiviteter
+
+Konfigurer egne kilder i activity-sources.json og activity-feeds.json. activity-queue viser faktisk åpne kilder; activity-candidates, activity-page ID og activity-facebook ID viser nye data. Vurder innhold før --ack. activity-intake oppretter forslag med pitch, summary og reason. Familien velger eventuell kalenderføring. Se docs/aktiviteter.md.
+
+## Drift
+
+Se docs/operations.md. Run-rapporter skal beskrive faktisk arbeid og scope. partial krever konkrete blockers/resumeHint. Historiske hull beholdes, men kontroller ikke uendrede avslåtte dokumenter på nytt uten ny informasjon. Ikke kall full dekning ok fra en frisk probe eller en tom endringskø.

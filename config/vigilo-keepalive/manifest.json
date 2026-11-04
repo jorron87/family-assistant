@@ -1,0 +1,74 @@
+{
+  "manifest_version": 3,
+  "name": "Familien – innhenting og øktkontroll",
+  "version": "1.6.13",
+  "description": "Beskytter innlogget Vigilo-fane mot minneutlasting og henter lister fra Vigilo, Spond og Facebook-grupper til den lokale Familien-tjenesten.",
+  "permissions": [
+    "alarms",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://web-parent.prod.vigilo-oas.no/*",
+    "https://spond.com/*",
+    "https://api.spond.com/*",
+    "https://www.facebook.com/*",
+    "http://127.0.0.1:4318/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://web-parent.prod.vigilo-oas.no/*",
+        "https://spond.com/*"
+      ],
+      "js": [
+        "collector-core.js",
+        "collector-extra.js",
+        "collector-main.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://web-parent.prod.vigilo-oas.no/*",
+        "https://spond.com/*"
+      ],
+      "js": [
+        "collector-bridge.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://www.facebook.com/groups/*",
+        "https://www.facebook.com/*/events*",
+        "https://www.facebook.com/profile.php*",
+        "https://www.facebook.com/events/*"
+      ],
+      "js": [
+        "collector-facebook.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://www.facebook.com/groups/*",
+        "https://www.facebook.com/*/events*",
+        "https://www.facebook.com/profile.php*",
+        "https://www.facebook.com/events/*"
+      ],
+      "js": [
+        "collector-bridge.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_title": "Familien: innhenting og Vigilo-økt"
+  }
+}

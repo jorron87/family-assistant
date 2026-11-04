@@ -1,0 +1,23 @@
+{
+  "timezone": "Europe/Oslo",
+  "waste": {
+    "enabled": false
+  },
+  "backfillFrom": "2026-08-01",
+  "calendar": {
+    "id": "test-calendar",
+    "name": "Test"
+  },
+  "drive": {
+    "folderId": "test-folder",
+    "familyReaders": [
+      "reader@example.org"
+    ]
+  },
+  "facebookGroupUrls": [
+    "https://www.facebook.com/groups/9282172231321379",
+    "https://www.facebook.com/groups/951081777302696",
+    "https://www.facebook.com/groups/984092420799906",
+    "https://www.facebook.com/groups/9588369767575429"
+  ]
+}

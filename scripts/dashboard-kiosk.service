@@ -1,0 +1,11 @@
+[Unit]
+Description=Family Assistant display
+After=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/familien-kiosk
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

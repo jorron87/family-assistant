@@ -1,0 +1,11 @@
+# Aktivitetsgjennomgang
+
+Kildene velges av hver familie i config/activity-sources.json. Rangering bygger på faktiske interesser i deres egen profil; ikke anta preferanser ut fra kjønn/alder alene. Forslag er ikke avtaler. Ingen automatisk påmelding, kjøp eller kalenderføring uten familiens eksplisitte valg.
+
+Bruk activity-queue for faktiske mangler og targetThrough for fremtidige arrangementer. Discussion leses fra siste fullstendige kontrollpunkt minus minst72 timer; søndagens90-dagers horisont gjelder fremtidige arrangementer. En bekreftet komplett Upcoming-liste kan dekke horisonten selv om siste arrangement har tidligere dato. Kontroller listeende, ikke bare siste dato. Midlertidig Loading/disabled er ikke et endelig pagineringsavslag.
+
+HTTP-kilder har egne adaptere; nye/endrede kandidater og sideliner går til agenten. Behandle activity-candidates, activity-page ID og activity-facebook ID før --ack eller activity-source ok. Ikke bulkmerk uåpnede kilder. Uendret fil/forekomst gjenbrukes, ny forekomst eller reell endring vurderes. Manglende sluttid alene er ingen blocker: anslå rimelig varighet og forklar dette når dato/start er kildebelagt.
+
+Et forslag trenger canonicalKey, sourceId/sourceUrl, title, start/end, members, summary, reason og pitch. Pitch er en kort, fristende og kildebelagt beskrivelse av opplevelsen, tilpasset aktuell målgruppe uten å gjøre andre uvelkomne. Reason forklarer relevans; summary er nøktern. Behold samme ID/key, reaksjoner og kalendervalg ved oppdatering. Native Facebook-arrangements-ID + samme start identifiserer samme forekomst.
+
+Konkrete uleste innlegg bevares via activity-source unresolvedItems:[{externalId,reason}]. Ny ok for resten av kilden fjerner ikke hullene. Løs med resolvedItems:[{externalId,resolution:"read"|"removed"|"outside-window",evidence:"konkret kildebelegg"}]. En tom/ukjent tekst er ikke dokumentert irrelevant. Gjenbruk kjente feilkontrollpunkt uten identiske retries; faktisk ny tilgang/tekst skal vurderes.

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="no" translate="no">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#faf9f6">
+    <meta name="google" content="notranslate">
+    <title>Familien · oversikt</title>
+    <link rel="stylesheet" href="/app.css">
+    <link rel="stylesheet" href="/kiosk.css">
+    <link rel="stylesheet" href="/doorbell.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <button type="button" id="dashboard-home" class="dashboard-home" hidden>⌂ Hjem</button>
+      <div class="brand"><span class="brand-family">Eksempelfamilien</span><h1>Familien<span class="brand-period">.</span></h1></div>
+      <div class="header-date"><span id="current-date"></span><div class="header-live"><span id="outdoor-temperature" class="header-temperature" aria-label="Utetemperatur">—° ute</span><strong id="clock"></strong></div></div>
+      <nav id="tabs" class="main-nav" aria-label="Hovedvisning">
+        <button type="button" data-tab="overview" class="active" aria-current="page">Oversikt</button>
+        <button type="button" data-tab="week">Uke</button>
+        <button type="button" data-tab="month">Måned</button>
+        <button type="button" data-tab="tasks">Oppgaver</button>
+        <button type="button" data-tab="nearby">Rundt oss</button>
+        <span class="nav-divider" aria-hidden="true"></span>
+        <button type="button" data-tab="archive">Kilder</button>
+        <button type="button" data-tab="sources">Dekning</button>
+        <button type="button" data-tab="house">Huset</button><button type="button" data-tab="profile">Profil</button>
+        <button type="button" id="more-button" hidden aria-haspopup="dialog">Mer ⋯</button>
+      </nav>
+    </header>
+    <div id="login-banner" class="login-banner" role="alert" hidden></div>
+    <div id="weather-banner" class="weather-banner" role="status" hidden></div>
+    <main>
+      <p id="calendar-sync-status" class="calendar-sync-status" role="status" hidden></p>
+      <div class="filter-bar">
+        <div><span class="eyebrow">Familiekalender</span><p>Det vi skal huske, samlet på ett sted.</p></div>
+        <div class="person-filter" id="person-filter" aria-label="Filtrer på familiemedlem"></div>
+      </div>
+
+      <section id="weekly-letter" class="weekly-letter-strip" aria-label="Barnets ukebrev" hidden></section>
+      <section id="calendar" class="panel active" aria-label="Familiekalender">
+        <div class="calendar-toolbar">
+          <div><span class="eyebrow" id="view-kicker">Oversikt</span><h2 id="view-title">I dag og fremover</h2></div>
+          <div id="period-controls" class="period-controls" hidden>
+            <button type="button" id="previous-period" aria-label="Forrige periode">←</button>
+            <button type="button" id="current-period">I dag</button>
+            <button type="button" id="next-period" aria-label="Neste periode">→</button>
+          </div>
+        </div>
+        <div id="week-strip" class="week-strip" aria-label="Denne uken"></div>
+        <div id="calendar-content"></div>
+      </section>
+
+      <section id="tasks" class="panel" aria-label="Oppgaver"><div class="section-heading"><span class="eyebrow">Dette skal gjøres</span><h2>Oppgaver</h2><p>Trykk på en gruppe for å åpne sjekklisten. Telleren viser uferdige deloppgaver som har startet eller starter de neste 7 dagene.</p></div><div id="task-list" class="cards"></div></section>
+      <section id="nearby" class="panel" aria-label="Hva skjer rundt oss">
+        <div class="section-heading"><span class="eyebrow">Litt å glede seg til</span><h2>Hva skjer rundt oss?</h2><p>Utvalgte forslag for familien. Velg en person for å se det som kan passe.</p></div>
+        <div class="controls nearby-controls"><select id="nearby-window" aria-label="Når vil dere finne på noe"><option value="30">Neste 30 dager</option><option value="7">Neste 7 dager</option><option value="weekend">Neste helg</option><option value="90">Neste 90 dager</option></select><select id="nearby-filter" aria-label="Filtrer aktivitetsforslag"><option value="all">Alle forslag</option><option value="free">Gratis</option><option value="saved">Interessert og valgt</option><option value="hidden">Skjulte forslag</option></select><div class="nearby-touch-controls" aria-label="Filtrer aktivitetsforslag"><div class="nearby-touch-group" role="group" aria-label="Når"><button type="button" data-nearby-window="7">7 dager</button><button type="button" data-nearby-window="weekend">Helg</button><button type="button" data-nearby-window="30">30 dager</button><button type="button" data-nearby-window="90">90 dager</button></div><div class="nearby-touch-group" role="group" aria-label="Hvilke forslag"><button type="button" data-nearby-filter="all">Alle</button><button type="button" data-nearby-filter="free">Gratis</button><button type="button" data-nearby-filter="saved">Interessert / valgt</button><button type="button" data-nearby-filter="hidden">Skjulte</button></div></div><span id="nearby-count" class="meta" role="status"></span></div>
+        <div id="nearby-list" class="nearby-grid"></div>
+        <details class="nearby-coverage"><summary>Kilder og siste kontroll</summary><div id="nearby-sources"></div></details>
+      </section>
+      <section id="archive" class="panel" aria-label="Kilder og vedlegg">
+        <div class="section-heading"><span class="eyebrow">Dokumentarkiv</span><h2>Kilder og vedlegg</h2><p>Originalmaterialet bak kalenderen.</p></div>
+        <div class="controls"><input id="search" type="search" placeholder="Søk i titler og innhold" aria-label="Søk i rådata"><select id="source-filter" aria-label="Velg kilde"><option value="">Alle kilder</option><option value="familie">Fra familien</option><option value="vigilo">Vigilo</option><option value="spond">Spond</option><option value="facebook">Facebook-grupper</option><option value="renovasjon">Min Renovasjon</option></select></div>
+        <div id="raw-list" class="cards"></div>
+      </section>
+
+      <section id="sources" class="panel" aria-label="Kildedekning">
+        <div class="section-heading"><span class="eyebrow">Innhenting</span><h2>Kildedekning</h2><p>Hva som er kontrollert, og hva som gjenstår.</p></div>
+        <div id="source-list" class="cards"></div>
+        <h3 class="subheading">Siste kjøringer</h3><div id="run-list" class="cards"></div>
+        <h3 class="subheading">Kostnad per agentkjøring</h3><div id="usage-list" class="usage-table"></div>
+      </section>
+
+      <div id="house-rail" hidden aria-label="Husstatus"></div><section id="house" class="panel" aria-label="Huset"></section><section id="profile" class="panel" aria-label="Familieprofil">
+        <div class="section-heading"><span class="eyebrow">Varig kontekst</span><h2>Familieprofil</h2><p>Informasjon som hjelper oss å vurdere nye beskjeder.</p></div>
+        <div id="member-list" class="cards"></div>
+      </section>
+    </main>
+    <dialog id="more-dialog" class="more-dialog" aria-label="Mer"><h2>Mer</h2><div class="more-list"><button type="button" data-more-tab="archive"><strong>Kilder og vedlegg</strong><span>Originalmaterialet bak kalenderen</span></button><button type="button" data-more-tab="sources"><strong>Dekning</strong><span>Hva som er kontrollert, og hva som gjenstår</span></button><button type="button" data-more-tab="profile"><strong>Familieprofil</strong><span>Det assistenten vet om oss</span></button></div><button type="button" id="close-more" class="dialog-close">Lukk</button></dialog>
+    <dialog id="event-dialog" class="event-dialog" aria-label="Hendelsesdetaljer"><div class="dialog-navigation"><button type="button" class="return-home" hidden>⌂ Hjem</button><button type="button" id="close-dialog" class="dialog-close" aria-label="Lukk">← Tilbake</button></div><div id="dialog-content"></div></dialog>
+    <dialog id="document-dialog" class="document-dialog" aria-label="Dokument"><div class="dialog-navigation"><button type="button" class="return-home" hidden>⌂ Hjem</button><button type="button" id="close-document" class="dialog-close" aria-label="Lukk dokument">← Tilbake</button></div><div id="document-content"></div></dialog>
+    <footer>Familien · Kilder og kalender samlet for Eksempelfamilien <span id="connection-status" role="status"></span></footer>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

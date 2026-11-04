@@ -1,0 +1,101 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join,resolve} from 'node:path';
+import {createServer} from 'node:http';
+import {createStore} from '../src/store.mjs';
+import {phoneHandler} from '../src/phone-server.mjs';
+test('paired mobile family view exposes calendar, safe originals and durable changes without admin state',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'familien-mobile-family-test-'));let server;
+ try{
+  const store=createStore(dir),device=store.phone.pair({code:store.phone.invite().code});
+  const ingestion=store.beginRun();
+  assert.equal(ingestion.acquired,true);
+  const raw=store.upsertRaw({source:'vigilo',externalId:'mobile-test',title:'Ukeplan',body:'Private raw body',sourceUrl:'https://example.com/plan',members:['child2']}).item;
+  const bytes=Buffer.from('%PDF-1.7\nMobile original'),file=store.addAttachment(raw.id,{fileName:'ukeplan.pdf',mimeType:'application/pdf',bytes});
+  const event=store.upsertFinding(raw.id,{canonicalKey:'mobile-task',title:'Les ukeplanen',kind:'task',start:'2026-09-28',end:'2026-09-29',members:['child2'],task:{visibleFrom:'2026-09-28',dueDate:'2026-10-02',items:[{key:'read',text:'Les i 20 minutter'}]}});
+  const other=store.upsertRaw({source:'spond',externalId:'unlinked',title:'Other raw',body:'Private'}).item;
+  const unlinked=store.addAttachment(other.id,{fileName:'other.pdf',mimeType:'application/pdf',bytes});
+  const now=new Date(new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Oslo'}).format(new Date())+'T12:00:00Z');
+  now.setUTCDate(now.getUTCDate()+4-(now.getUTCDay()||7));
+  const schoolYear=now.getUTCFullYear(),schoolWeek=Math.ceil(((now-new Date(`${schoolYear}-01-01T00:00:00Z`))/86400000+1)/7);
+  const weekly=store.upsertRaw({source:'vigilo',externalId:'weekly-no-event',title:'Nytt fra klassen',body:'Weekly letter body',memberIds:['child3','child4'],weeklyLetter:{week:schoolWeek,year:schoolYear}}).item;
+  const weeklyFile=store.addAttachment(weekly.id,{fileName:`Uke ${schoolWeek}.pdf`,mimeType:'application/pdf',bytes});
+  const privateExtra=store.addAttachment(weekly.id,{fileName:'unrelated.pdf',mimeType:'application/pdf',bytes:Buffer.from('%PDF-1.7\nUnrelated private original')});
+  let wakes=0;
+  const body=async req=>{const chunks=[];for await(const chunk of req)chunks.push(chunk);return Buffer.concat(chunks);};
+  server=createServer(phoneHandler({store,root:resolve('.'),onQueued:()=>wakes++,body,json:async req=>JSON.parse((await body(req)).toString()),send:(res,status,value,type='application/json')=>{res.writeHead(status,{'Content-Type':type,'Cache-Control':'no-store'});res.end(Buffer.isBuffer(value)?value:JSON.stringify(value));}}));
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  const base=`http://127.0.0.1:${server.address().port}/send/api`,headers={Cookie:`familien_phone=${device.token}`,'X-Family-Request':'1','Content-Type':'application/json'};
+  const weeklyFamily=await (await fetch(base+'/family',{headers})).json();
+  assert.equal(weeklyFamily.weeklyLetters.filter(letter=>letter.rawId===weekly.id).length,2,'school letter works without a calendar finding');
+  assert.equal((await fetch(base+`/documents/${weekly.id}/${weeklyFile.id}`,{headers})).status,200);
+  assert.equal((await fetch(base+`/documents/${weekly.id}/${privateExtra.id}`,{headers})).status,404,'weekly access does not expose unrelated attachments');
+  assert.equal((await fetch(base+`/documents/${weekly.id}/${weeklyFile.id}`)).status,401);
+  assert.equal((await (await fetch(base+`/weekly-letters/${weekly.id}`,{headers})).json()).body,'Weekly letter body');
+  assert.equal((await fetch(base+`/weekly-letters/${other.id}`,{headers})).status,404);
+  // All transitive UI imports must be public JavaScript assets, including
+  // shared helpers added for the desktop UI and lazy profile editing.
+  const assetBase=base.slice(0,-4),pending=['phone-boot.js','profile-editor.mjs'],checked=new Set();
+  const html=await (await fetch(assetBase+'/')).text();
+  assert.match(html,/src="\/send\/phone-boot\.js"/);
+  assert.match(html,/id="startup-retry"/);
+  while(pending.length){
+   const asset=pending.pop();if(checked.has(asset))continue;checked.add(asset);
+   const response=await fetch(assetBase+'/'+asset);
+   assert.equal(response.status,200,`mobile module ${asset} must load without a phone session`);
+   assert.match(response.headers.get('content-type'),/javascript/,asset);
+   const source=await response.text();
+   assert.equal(source,readFileSync(join('public',asset),'utf8'));
+   for(const match of source.matchAll(/(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)['"]([^'"]+)['"]/g)){
+    if(match[1].startsWith('./'))pending.push(match[1].slice(2).split('?')[0]);
+   }
+  }
+  assert.ok(checked.has('dtf.mjs'),'calendar helper is covered by the import graph');
+  assert.equal((await fetch(base+'/family')).status,401);
+  assert.equal((await fetch(base+'/profile')).status,401);
+  assert.equal((await fetch(base+`/documents/${raw.id}/${file.id}`)).status,401);
+  const family=await (await fetch(base+'/family',{headers})).json();
+  assert.equal(family.events[0].task.items[0].text,'Les i 20 minutter');
+  const output=JSON.stringify(family);for(const secret of ['runLease','phone','Private raw body',device.token,'activeFacts'])assert.ok(!output.includes(secret));
+  const original=await fetch('http://127.0.0.1:'+server.address().port+family.events[0].sources[0].attachments[0].url,{headers});
+  assert.equal(original.status,200);assert.equal(original.headers.get('content-type'),'application/pdf');assert.deepEqual(Buffer.from(await original.arrayBuffer()),bytes);
+  assert.equal((await fetch(base+`/documents/${other.id}/${unlinked.id}`,{headers})).status,404);
+  const change=(path,data)=>fetch(base+path,{method:'POST',headers,body:JSON.stringify(data)});
+  assert.equal((await change('/identity',{memberId:'unknown'})).status,422);
+  assert.equal((await change('/identity',{memberId:'parent1'})).status,200);
+  const textInput={clientId:'afd2603e-a13e-73e3-9b58-a4e8bf440894',fileCount:0,text:'Jeg reiser med jobben onsdag og torsdag i uke 40',senderMemberId:'parent2'};
+  const textItem=await (await change('/inbox',textInput)).json();
+  assert.equal(textItem.senderMemberId,'parent1','sender comes from paired identity, not a spoofed submission field');
+  assert.equal((await change(`/inbox/${textItem.id}/submit`,{})).status,200);
+  assert.equal((await change('/identity',{memberId:'parent2'})).status,200);
+  assert.equal(store.phone.list(device.id).find(i=>i.id===textItem.id).senderMemberId,'parent1','changing device owner never rewrites past sender');
+  assert.equal((await change('/profile/edit',{action:'saveFact',memberId:'family',text:'Vi foretrekker rolige helger.',category:'preference'})).status,200);
+  const profile=await (await fetch(base+'/profile',{headers})).json();
+  assert.equal((await change('/profile/edit',{action:'saveDetails',memberId:'family',expectedName:profile.familyName,name:'Testfamilien'})).status,200);
+  assert.equal(store.profile().familyName,'Testfamilien');
+  assert.equal((await change('/profile/edit',{action:'saveDetails',memberId:'family',expectedName:profile.familyName,name:'Gammel endring'})).status,422);
+  const max=profile.members.find(m=>m.id==='child3');
+  assert.equal((await change('/profile/edit',{action:'saveDetails',memberId:max.id,expectedName:max.name,expectedSchoolClass:max.schoolClass,name:max.name,schoolClass:'4A'})).status,200);
+  assert.equal(store.profile().members.find(m=>m.id==='child3').schoolClass,'4A');
+  const familyFact=profile.facts.find(f=>f.memberId==='family');
+  assert.equal(familyFact.text,'Vi foretrekker rolige helger.');
+  assert.ok(!JSON.stringify(profile).includes('Private raw body'));
+  assert.equal((await change('/profile/edit',{action:'saveFact',id:familyFact.id,expectedText:'Feil gammel tekst',text:'Endring',category:'routine'})).status,422);
+  assert.equal((await change('/profile/edit',{action:'saveFact',id:familyFact.id,expectedText:familyFact.text,text:'Vi liker gaming sammen.',category:'hobby'})).status,200);
+  const edited=store.profile().activeFacts.find(f=>f.memberId==='family');
+  assert.equal(edited.text,'Vi liker gaming sammen.');
+  assert.equal(store.profile().facts.find(f=>f.id===familyFact.id).status,'superseded');
+  assert.equal((await change('/profile/edit',{action:'removeFact',id:edited.id,expectedText:edited.text})).status,200);
+  assert.ok(!store.profile().activeFacts.some(f=>f.memberId==='family'));
+  assert.equal((await change(`/events/${event.id}/tasks/read`,{done:true,expectedText:'Old text'})).status,422);
+  assert.equal((await change(`/events/${event.id}/tasks/read`,{done:true,expectedText:'Les i 20 minutter'})).status,200);
+  assert.ok(store.snapshot().events[event.id].task.items[0].doneAt);
+  assert.equal((await change(`/events/${event.id}/visibility`,{hidden:true})).status,200);assert.equal(wakes,2);
+  assert.equal(store.snapshot().runLease.token,ingestion.lease.token,'family changes preserve the active ingestion lease');
+  assert.equal((await (await fetch(base+'/family',{headers})).json()).events[0].visibility.hidden,true);
+  assert.equal((await fetch(base+'/status',{headers})).status,404);
+  assert.equal((await fetch(base+'/family',{method:'POST',headers:{...headers,Origin:'https://untrusted.example'},body:'{}'})).status,403);
+ }finally{if(server)await new Promise(r=>server.close(r));assert.ok(resolve(dir).startsWith(resolve(tmpdir())+'\\'));rmSync(dir,{recursive:true,force:true});}
+});

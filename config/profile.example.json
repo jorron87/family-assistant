@@ -1,0 +1,48 @@
+{
+  "familyName": "Eksempelfamilien",
+  "members": [
+    {
+      "id": "parent1",
+      "name": "Forelder A",
+      "role": "parent",
+      "aliases": []
+    },
+    {
+      "id": "parent2",
+      "name": "Forelder B",
+      "role": "parent",
+      "aliases": []
+    },
+    {
+      "id": "child1",
+      "name": "Barn En",
+      "role": "child",
+      "aliases": []
+    },
+    {
+      "id": "child2",
+      "name": "Barn To",
+      "role": "child",
+      "aliases": []
+    },
+    {
+      "id": "child3",
+      "name": "Barn Tre",
+      "role": "child",
+      "aliases": []
+    },
+    {
+      "id": "child4",
+      "name": "Barn Fire",
+      "role": "child",
+      "aliases": []
+    }
+  ],
+  "facts": [],
+  "searchHints": [
+    "skole",
+    "frist",
+    "påmelding"
+  ],
+  "source": "local-setup"
+}

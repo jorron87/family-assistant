@@ -1,0 +1,13 @@
+{
+  "enabled": false,
+  "timezone": "Europe/Oslo",
+  "dailyLookaheadDays": 30,
+  "weeklyLookaheadDays": 90,
+  "preferredPlaces": [],
+  "extendedPlaces": [],
+  "exceptionalDayTrips": [],
+  "ranking": [
+    "Alder, interesser og praktiske krav fra egen familieprofil"
+  ],
+  "sources": []
+}

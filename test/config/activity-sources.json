@@ -1,0 +1,28 @@
+{
+  "enabled": true,
+  "timezone": "Europe/Oslo",
+  "dailyLookaheadDays": 30,
+  "weeklyLookaheadDays": 90,
+  "sources": [
+    {
+      "id": "activity-1",
+      "name": "Test Facebook group",
+      "url": "https://www.facebook.com/groups/962077861881912"
+    },
+    {
+      "id": "activity-3",
+      "name": "Test list",
+      "url": "https://www.hvaskjeriasker.no/sok/"
+    },
+    {
+      "id": "activity-4",
+      "name": "Second list",
+      "url": "https://www.hvaskjeriasker.no/sok/"
+    },
+    {
+      "id": "activity-9",
+      "name": "HTTP failure fixture",
+      "url": "https://www.dnt.no/example/"
+    }
+  ]
+}

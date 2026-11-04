@@ -1,0 +1,25 @@
+{
+  "name": "family-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node scripts/test.mjs",
+    "setup": "node scripts/setup.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "privacy-check": "node scripts/privacy-check.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "mailparser": "^3.9.33",
+    "mammoth": "1.13.0",
+    "pdfjs-dist": "6.3.289",
+    "qrcode": "^1.5.4",
+    "ws": "^8.22.0"
+  },
+  "description": "Local-first family planning with agent review, Vigilo/Spond collection, mobile inbox and a touch dashboard",
+  "license": "MIT"
+}

@@ -1,0 +1,8 @@
+{
+  "enabled": false,
+  "executable": "",
+  "model": "",
+  "reasoningEffort": "high",
+  "approvalPolicy": "on-request",
+  "sandbox": "workspace-write"
+}
