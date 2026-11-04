@@ -38,7 +38,7 @@ export function loginProblems({ sourceStatus = {}, surfaces = {}, session = null
     if (loggedOut.has(source)) continue;
     const checked = sourceStatus[source]?.checkedAt ? Date.parse(sourceStatus[source].checkedAt) : 0;
     if (!checked || now - checked > STALE_HOURS * 3600000) {
-      problems.push({ source, level: 'stale', title: checked ? `${NAMES[source]}: siste fullførte kontroll er over ${STALE_HOURS} timer gammel` : `${NAMES[source]}: ingen fullført kontroll registrert`, detail: 'Nye data kan være hentet, men gjennomgangen er ikke bekreftet. Sjekk at PC-en og ChatGPT-appen kjører.', since: checked ? sourceStatus[source].checkedAt : null });
+      problems.push({ source, level: 'stale', title: checked ? `${NAMES[source]}: siste fullførte kontroll er over ${STALE_HOURS} timer gammel` : `${NAMES[source]}: ingen fullført kontroll registrert`, detail: 'Full kildegjennomgang er ikke bekreftet nylig. Se Dekning for status på innhenting og gjennomgang; dette er ikke et bekreftet innloggingsavbrudd.', since: checked ? sourceStatus[source].checkedAt : null });
     }
   }
   // Vigilos øktkontroll er helt stille: Chrome/utvidelsen er trolig stoppet.

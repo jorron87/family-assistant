@@ -13,6 +13,7 @@ import {normalizeWeeklyLetter} from './weekly-letters.mjs';
 import {recoveredSpondDiscovery} from './collector.mjs';
 import {hsiaHref,hsiaOccurrenceToken} from './activity-feeds.mjs';
 import {inspectOriginalResponse} from './original-response.mjs';
+import {reconcileSourceReviews} from './source-reviews.mjs';
 import {normalizeChildren,normalizeVigiloNews,normalizeVigiloThreads,normalizeVigiloThreadDetail,normalizeSpondPosts,normalizeSpondEvents,normalizeFacebookPosts,normalizeFacebookEvents,mergeFacebookPost,facebookPostToken,normalizeSupplemental,collectorIsFresh,isoDay,normalizeTitle,VIGILO_ORIGIN} from './collector.mjs';
 
 export const DATA_DIR = process.env.FAMILIEN_DATA_DIR ?? join(process.env.LOCALAPPDATA ?? homedir(), "Familien", "data");
@@ -706,6 +707,7 @@ export function createStore(dataDir = DATA_DIR) {
     archiveRun(run);
     state.runs.unshift(run);
     state.runs = state.runs.slice(0, 100);
+    reconcileSourceReviews(state.sourceStatus,[run]);
     save();
     return run;
   }
@@ -1557,5 +1559,6 @@ export function createStore(dataDir = DATA_DIR) {
     save();
   }
   const phone=phoneStore(state,{save,upsertRaw,addAttachment});
+  if(reconcileSourceReviews(state.sourceStatus,state.runs))save();
   return { backupArchive, eventHistory, event, mergeEvents, splitHomework, activityFacebook, changeCompletion, collectedItems, collectedList, sourceItems, editProfile, phone, calendarActions, calendarAction, setEventVisibility, upsertActivity, activityReaction, activityPlan, activitySource, snapshot, runHistory, profile: () => profileView(state.profile), profileFact, reviewProfile, documentStatus, reviewDocument, checkTask, upsertRaw, upsertFinding, updateSource, observeListing, markReviewed, updateSurface, reviewQueue, completionReport, addAttachment, getAttachment, linkDrive, linkCalendar, updateProfile, recordRun, beginRun, renewRun, endRun, collectorIngest, collectorConfig, collectorStatus, collectorRefresh, collectorFacebookSweep, collectedItem, activityFeedHsia, activityFeedCandidates, activityFeedNeedsDetail, activityFeedDetail, activityFeedPage, activityFeedError, activityFeedPageText, activityFeedStatus };
 }

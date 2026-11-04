@@ -39,6 +39,8 @@ test('kilde uten kontroll på over 24 timer og stille øktkontroll gir varsel av
   const problems = loginProblems({ sourceStatus: old, session: { health: 'ok', checkedAt: new Date(now - 3600000).toISOString(), stale: true }, now });
   assert.deepEqual(problems.map((p) => [p.source, p.level]), [['spond', 'stale'], ['vigilo', 'watch']]);
   assert.equal(loginSummary(problems).level, 'stale');
+  assert.doesNotMatch(problems[0].detail,/ChatGPT-appen/);
+  assert.match(problems[0].detail,/ikke et bekreftet innloggingsavbrudd/);
 });
 
 test('partial helse alene er ikke et innloggingsproblem', () => {
