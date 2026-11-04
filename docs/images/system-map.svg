@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="720" viewBox="0 0 1600 720" role="img" aria-labelledby="title desc">
+  <title id="title">Slik henger Familien sammen</title>
+  <desc id="desc">En påslått Windows-maskin hjemme kjører Chrome, lokal innsamling, review-kø og agent. Agenten bruker familieprofil og originaler før kalender, Drive og familievisning oppdateres. Telefonen kan også sende inn materiale.</desc>
+  <defs>
+
+
+  </defs>
+  <rect width="1600" height="720" rx="24" fill="#f7f6f1"/>
+  <text font-family="Georgia, serif" font-size="46" fill="#273c32" x="48" y="70">En maskin hjemme. Én oversikt for familien.</text>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="22" fill="#53665b" x="50" y="110">Innhenting finner endringer. Agenten finner ut hva de betyr.</text>
+  <rect x="34" y="155" width="1094" height="417" rx="24" fill="#edf1e9" stroke="#d9e0d5"/>
+  <rect x="58" y="175" width="28" height="19" rx="3" fill="none" stroke="#658071" stroke-width="2"/><path d="M53 200h38" stroke="#658071" stroke-width="2"/>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="17" fill="#658071" letter-spacing="2" font-weight="700" x="104" y="197">LAPTOP / MINI-PC HJEMME · WINDOWS</text>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#53665b" x="62" y="231">Står på · Chrome kjører · agent-runtime er installert og innlogget</text>
+  <rect x="64" y="264" width="282" height="168" rx="16" fill="#fffefa" stroke="#d4ddd0"/>
+  <text font-family="Georgia, serif" font-size="32" fill="#273c32" x="86" y="304">Din Chrome</text>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="22" fill="#53665b" x="86" y="344">Vigilo · Spond · Facebook</text>
+  <rect x="86" y="369" width="238" height="37" rx="18" fill="#edf1e9"/>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#273c32" x="101" y="394">Utvidelse + øktkontroll</text>
+  <path fill="none" stroke="#52725f" stroke-width="2" d="M354 342h69"/>
+  <rect x="435" y="264" width="282" height="168" rx="16" fill="#fffefa" stroke="#d4ddd0"/>
+  <text font-family="Georgia, serif" font-size="32" fill="#273c32" x="457" y="304">Lokal tjeneste</text>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="20" fill="#53665b" x="457" y="342">Samler · finner endringer</text>
+  <rect x="457" y="368" width="238" height="39" rx="9" fill="#dce7d6"/>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#273c32" x="475" y="394" font-weight="700">Review-kø: nytt / endret</text>
+  <path fill="none" stroke="#52725f" stroke-width="2" d="M725 342h65"/>
+  <rect x="802" y="264" width="288" height="168" rx="16" fill="#385b47"/>
+  <text font-family="Georgia, serif" font-size="32" fill="#fffefa" x="824" y="305">Agenten vurderer</text>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="20" fill="#e1eada" x="824" y="344">Leser tekst og dokumenter</text>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="20" fill="#e1eada" x="824" y="379">Dato · person · oppgaver</text>
+  <rect x="435" y="467" width="282" height="68" rx="13" fill="#e1e8dc"/>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#53665b" x="456" y="494">Kryptert originalarkiv</text><text font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#53665b" x="456" y="519">Stabile ID-er + lesekvitteringer</text>
+  <path fill="none" stroke="#52725f" stroke-width="2" d="M576 433v25"/>
+  <rect x="802" y="467" width="288" height="68" rx="13" fill="#e1e8dc"/>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#53665b" x="825" y="494">Familiens lokale profil</text><text font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#53665b" x="825" y="519">Personer · interesser · regler</text>
+  <path fill="none" stroke="#52725f" stroke-width="2" d="M948 465v-25" stroke-dasharray="5 5"/>
+  <path d="M1092 342h67M1159 256v260M1159 256h44M1159 386h44M1159 516h44" fill="none" stroke="#52725f" stroke-width="2"/>
+  <path fill="none" stroke="#52725f" stroke-width="2" d="M1192 256h12M1192 386h12M1192 516h12"/>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="17" fill="#658071" letter-spacing="2" font-weight="700" x="1214" y="195">TILBAKE TIL FAMILIEN</text>
+  <rect x="1214" y="217" width="346" height="91" rx="15" fill="#fffefa" stroke="#d4ddd0"/>
+  <text font-family="Georgia, serif" font-size="32" fill="#273c32" x="1236" y="254">Google Calendar</text><text font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#53665b" x="1236" y="284">Avtaler på telefonene</text>
+  <rect x="1214" y="347" width="346" height="91" rx="15" fill="#fffefa" stroke="#d4ddd0"/>
+  <text font-family="Georgia, serif" font-size="32" fill="#273c32" x="1236" y="384">Privat Google Drive</text><text font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#53665b" x="1236" y="414">Originaler og kildebelegg</text>
+  <rect x="1214" y="477" width="346" height="91" rx="15" fill="#fffefa" stroke="#d4ddd0"/>
+  <text font-family="Georgia, serif" font-size="32" fill="#273c32" x="1236" y="514">Dashboard + mobil</text><text font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#53665b" x="1236" y="544">Planer, personlige oppgaver, ukebrev</text>
+  <rect x="64" y="467" width="282" height="68" rx="13" fill="#fffefa" stroke="#d4ddd0"/>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#53665b" x="86" y="494">Også fra telefonen din</text><text font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#53665b" x="86" y="519">Bilde · PDF · kort beskjed</text>
+  <path fill="none" stroke="#52725f" stroke-width="2" d="M347 501h39V388h42"/>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="22" fill="#273c32" x="58" y="626" font-weight="700">Uendret innhold gjenbrukes. Nye funn går til agentisk review.</text>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#53665b" x="58" y="667">Arkivet er lokalt. Modellen og Google er eksterne tjenester. Utløpt innlogging krever fortsatt ny innlogging.</text>
+<path d="M416 336l7 6-7 6 M783 336l7 6-7 6 M421 382l7 6-7 6 M570 451l6 7 6-7 M942 447l6-7 6 7 M1197 250l7 6-7 6 M1197 380l7 6-7 6 M1197 510l7 6-7 6" fill="none" stroke="#52725f" stroke-width="2"/>
+</svg>

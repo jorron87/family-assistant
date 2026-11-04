@@ -2,7 +2,7 @@ const docs=new Set(['aktiviteter.md','architecture.md','integrations.md','kildeg
 const roots=new Set(['.gitattributes','.gitignore','AGENTS.md','CONTRIBUTING.md','LICENSE','README.md','SECURITY.md','package.json','package-lock.json']);
 export function allowedReleasePath(path){
  if(roots.has(path))return true;
- if(path.startsWith('docs/'))return docs.has(path.slice(5));
+ if(path.startsWith('docs/'))return docs.has(path.slice(5))||/^docs\/images\/[a-z-]+\.svg$/.test(path);
  if(path.startsWith('config/'))return /^config\/[^/]+\.example\.json$/.test(path)||path==='config/phone-image-requirements.txt'||/^config\/vigilo-keepalive\/(?:[^/]+\.(?:js|json)|README\.md)$/.test(path);
  if(path.startsWith('.githooks/'))return /^\.githooks\/(pre-commit|pre-push|commit-msg)$/.test(path);
  if(path.startsWith('.github/'))return /^\.github\/workflows\/[^/]+\.ya?ml$/.test(path);

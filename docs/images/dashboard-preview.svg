@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="720" viewBox="0 0 1440 720" role="img" aria-labelledby="title desc">
+  <title id="title">En roligere familieoversikt på veggen og i lomma</title>
+  <desc id="desc">Konseptskisse med oppdiktede eksempeloppføringer. Dashboardet viser i dag, i morgen og senere. Hvert barn har egne oppgaver. Mobilen har en tydelig knapp for å sende nye beskjeder eller dokumenter.</desc>
+  <defs></defs>
+  <rect width="1440" height="720" rx="24" fill="#edf1e8"/>
+  <text font-family="Georgia, serif" font-size="34" fill="#273c32" x="45" y="53">Mer oversikt. Mindre å holde i hodet.</text>
+  <rect x="36" y="83" width="1110" height="563" rx="18" fill="#faf9f5" stroke="#d5ddd0"/>
+  <text font-family="Georgia, serif" font-size="36" fill="#273c32" x="66" y="134">Familien<tspan fill="#718b76">.</tspan></text>
+  <rect x="390" y="105" width="80" height="38" rx="10" fill="#e7eee2"/><text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#385b47" x="406" y="130" font-weight="700">Oversikt</text>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#77837a" x="492" y="130">Uke</text><text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#77837a" x="548" y="130">Måned</text><text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#77837a" x="619" y="130">Rundt oss</text>
+  <text font-family="Georgia, serif" font-size="26" fill="#273c32" x="1058" y="133">16:42</text>
+  <path fill="none" stroke="#e0e4dc" stroke-width="1" d="M37 159h1108"/>
+  <rect x="67" y="181" width="71" height="34" rx="17" fill="#385b47"/><text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#fffefa" x="86" y="204">Alle</text>
+  <rect x="150" y="181" width="140" height="34" rx="17" fill="#fffefa" stroke="#e0e4dc"/><circle cx="166" cy="198" r="4" fill="#c57b84"/><text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#273c32" x="179" y="204">Barn A · 2 igjen</text>
+  <rect x="301" y="181" width="140" height="34" rx="17" fill="#fffefa" stroke="#e0e4dc"/><circle cx="317" cy="198" r="4" fill="#668db5"/><text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#273c32" x="330" y="204">Barn B · 3 igjen</text>
+  <text font-family="Georgia, serif" font-size="34" fill="#273c32" x="67" y="264">I dag</text><text font-family="Georgia, serif" font-size="34" fill="#273c32" x="420" y="264">I morgen</text><text font-family="Georgia, serif" font-size="34" fill="#273c32" x="775" y="264">Senere</text>
+  <path fill="none" stroke="#e0e4dc" stroke-width="1" d="M67 285h315M420 285h315M775 285h315"/>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#77837a" x="68" y="327">17:30</text><text font-family="Georgia, serif" font-size="22" fill="#273c32" x="126" y="326">Musikkverksted</text><text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#77837a" x="126" y="353">Ta med drikkeflaske</text>
+  <path fill="none" stroke="#e0e4dc" stroke-width="1" d="M67 374h315"/>
+  <rect x="68" y="401" width="309" height="137" rx="13" fill="#edf1e8"/>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="16" fill="#273c32" x="86" y="432" font-weight="700">Oppgaver denne uka</text><text font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#273c32" x="86" y="465">Barn A</text><text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#77837a" x="290" y="465">1 av 3</text>
+  <rect x="86" y="482" width="16" height="16" rx="4" fill="#fffefa" stroke="#a3b39b"/><text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#273c32" x="114" y="496">Les i 20 minutter</text>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#385b47" x="86" y="522">Åpne oppgavene →</text>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#77837a" x="421" y="327">Skole</text><text font-family="Georgia, serif" font-size="22" fill="#273c32" x="483" y="326">Turdag</text><text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#77837a" x="483" y="353">Husk matpakke og kakao</text>
+  <path fill="none" stroke="#e0e4dc" stroke-width="1" d="M420 374h315"/>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#77837a" x="421" y="412">18:00</text><text font-family="Georgia, serif" font-size="22" fill="#273c32" x="483" y="411">Foreldremøte</text><text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#77837a" x="483" y="438">Tid og sted fra skolemeldingen</text>
+  <path fill="none" stroke="#e0e4dc" stroke-width="1" d="M420 459h315"/>
+  <rect x="420" y="483" width="314" height="55" rx="10" fill="#fffefa" stroke="#dce2d7"/><text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#385b47" x="439" y="517">Åpne ukebrevet →</text>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#77837a" x="775" y="327">Fre.</text><text font-family="Georgia, serif" font-size="22" fill="#273c32" x="825" y="326">Søppelhenting</text><text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#77837a" x="825" y="353">Sett frem papir kvelden før</text>
+  <path fill="none" stroke="#e0e4dc" stroke-width="1" d="M775 374h315"/>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#77837a" x="776" y="413">Lør.</text><text font-family="Georgia, serif" font-size="22" fill="#273c32" x="825" y="412">Bygg noe sammen?</text><text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#77837a" x="825" y="439">Et aktivitetsforslag fra nærområdet</text>
+  <path fill="none" stroke="#e0e4dc" stroke-width="1" d="M775 460h315"/>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#77837a" x="67" y="601">Planer fra kildene · egne oppgaver per barn · originalen ett klikk unna</text>
+  <rect x="1115" y="140" width="282" height="508" rx="37" fill="#263d31"/>
+  <rect x="1124" y="149" width="264" height="490" rx="30" fill="#faf9f5"/>
+  <rect x="1200" y="157" width="112" height="17" rx="8" fill="#263d31"/>
+  <text font-family="Georgia, serif" font-size="31" fill="#273c32" x="1144" y="211">Familien.</text>
+  <rect x="1141" y="237" width="230" height="59" rx="13" fill="#385b47"/><text font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#fffefa" x="1164" y="274" font-weight="700">+ Send til agenten</text>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#77837a" x="1144" y="324">Bilde, dokument eller en beskjed</text>
+  <text font-family="Georgia, serif" font-size="29" fill="#273c32" x="1144" y="369">I morgen</text>
+  <path fill="none" stroke="#e0e4dc" stroke-width="1" d="M1143 385h226"/>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#273c32" x="1144" y="416">Turdag</text><text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#77837a" x="1144" y="443">Matpakke + kakao</text>
+  <rect x="1142" y="468" width="229" height="104" rx="12" fill="#edf1e8"/>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="16" fill="#273c32" x="1158" y="498" font-weight="700">Barn B · 3 oppgaver</text><text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#273c32" x="1158" y="530">□ Øv på ukas ord</text><text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#385b47" x="1158" y="555">Se alle →</text>
+  <path d="M1215 616h82" stroke="#8a978e" stroke-width="4" stroke-linecap="round"/>
+  <text font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#77837a" x="45" y="687">Konseptskisse med oppdiktede eksempler · desktop, touchskjerm og mobil</text>
+</svg>

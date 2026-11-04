@@ -29,6 +29,7 @@
 !/docs/runbook.md
 !/docs/setup.md
 !/docs/git-workflow.md
+!/docs/images/
 node_modules/
 config/*.json
 !config/*.example.json
