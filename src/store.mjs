@@ -1236,9 +1236,13 @@ export function createStore(dataDir = DATA_DIR) {
       for(const source of activities){const group=source.url.match(/\/groups\/(\d+)/)?.[1];groups.push({id:group??source.id,groupId:group??null,url:source.url,activitySourceId:source.id});if(group)groups.push({id:group+':events',groupId:group,url:source.url+'/events',activitySourceId:source.id});}
     }catch{/* optional activity sources */}return groups;
   }
+  const activityContentKey = item => hash(JSON.stringify([item.kind,item.title,item.text,item.postedAt,
+    (item.attachments??[]).map(a=>[a.nativeId??a.id??null,a.name??a.fileName,a.version??null])]));
   function activityFacebook(sourceId,{ack=false}={}) {
     state.collector.activityReviewed??={};
-    const items=Object.values(state.collector.items).filter(item=>item.activitySourceId&&(!sourceId||item.activitySourceId===sourceId)&&state.collector.activityReviewed[item.activitySourceId+'|'+item.externalId]!==item.token);
+    const items=Object.values(state.collector.items).filter(item=>item.activitySourceId&&(!sourceId||item.activitySourceId===sourceId)
+      &&state.collector.activityReviewed[item.activitySourceId+'|'+item.externalId]!==item.token
+      &&state.collector.activityIrrelevant?.[item.activitySourceId+'|'+item.externalId]?.contentKey!==activityContentKey(item));
     if(ack){for(const item of items)state.collector.activityReviewed[item.activitySourceId+'|'+item.externalId]=item.token;save();}
     return structuredClone(items);
   }
@@ -1440,14 +1444,25 @@ export function createStore(dataDir = DATA_DIR) {
         (input.resolvedItems !== undefined && !Array.isArray(input.resolvedItems))) throw Error('Kildehull må være lister.');
     const unresolved = new Map((previous?.unresolvedItems ?? []).map(item => [item.externalId, {...item}]));
     const resolutionHistory = [...(previous?.resolutionHistory ?? [])];
+    const classified=[];
     for (const item of input.unresolvedItems ?? []) {
       const externalId = words(item.externalId,300), reason = words(item.reason,1000);
       if (!externalId || !reason) throw Error('Ulest kildeelement krever externalId og konkret reason.');
       unresolved.set(externalId,{externalId,reason,firstObservedAt:unresolved.get(externalId)?.firstObservedAt ?? status.checkedAt,lastAttemptedAt:status.checkedAt});
     }
     for (const item of input.resolvedItems ?? []) {
-      if (!unresolved.has(item.externalId) || !['read','removed','outside-window'].includes(item.resolution) || words(item.evidence,2000).length < 12)
-        throw Error('Løs kildehull med kjent externalId, resolution (read/removed/outside-window) og konkret evidence.');
+      if (!unresolved.has(item.externalId) || !['read','removed','outside-window','irrelevant'].includes(item.resolution) || words(item.evidence,2000).length < 12)
+        throw Error('Løs kildehull med kjent externalId, resolution (read/removed/outside-window/irrelevant) og konkret evidence.');
+      if(item.resolution==='irrelevant') {
+        const post=state.collector.items[item.externalId],key=status.sourceId+'|'+item.externalId;
+        const nativeId=item.externalId.match(/^facebook:post:(\d+)$/)?.[1];
+        const linked=Object.values(state.rawItems).some(raw=>raw.externalId===item.externalId&&raw.findingIds?.length)
+          ||Object.values(state.activities).some(a=>!a.mergedInto&&nativeId&&new RegExp('(?:(?:posts|permalink)/'+nativeId+'(?:[/?#]|$)|[?&](?:story_fbid|post_id)='+nativeId+'(?:[&#]|$))').test(a.sourceUrl??''));
+        if(!nativeId||post?.kind!=='post'||post.activitySourceId!==status.sourceId||!post.text?.trim()
+          ||state.collector.activityReviewed?.[key]!==post.token||words(item.evidence,2000).length<40||linked)
+          throw Error('Irrelevant krever faktisk aktivitetsposttekst, kvittert gjeldende vurdering, konkret begrunnelse og ingen tilknyttede forslag/funn.');
+        classified.push([key,{contentKey:activityContentKey(post),evidence:words(item.evidence,2000),classifiedAt:status.checkedAt}]);
+      }
       resolutionHistory.push({...unresolved.get(item.externalId),resolution:item.resolution,evidence:words(item.evidence,2000),resolvedAt:status.checkedAt});
       unresolved.delete(item.externalId);
     }
@@ -1462,6 +1477,7 @@ export function createStore(dataDir = DATA_DIR) {
     status.lastSuccessfulCheckAt = status.health === 'ok' ? status.checkedAt
       : previous?.lastSuccessfulCheckAt ?? (previous?.health === 'ok' ? previous.checkedAt : null);
     state.activitySourceStatus[status.sourceId]=status;
+    if(classified.length){state.collector.activityIrrelevant??={};for(const [key,value]of classified)state.collector.activityIrrelevant[key]=value;}
     // Agentens ok betyr at gjeldende sideutgave er gjennomgått.
     const page = state.activityFeed.pages[status.sourceId];
     if (page && status.health === 'ok' && page.hash) { page.reviewedHash = page.hash; page.reviewedLineHashes = page.lineHashes ?? []; page.reviewedAt = now(); page.lines = null; }

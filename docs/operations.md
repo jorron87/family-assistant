@@ -4,6 +4,8 @@ Bruk `node src/cli.mjs next`, `completion`, `change-completion`, `dispatch-statu
 
 Ved partial: finn den konkrete flaten/feilen. Skill ekte utlogging, midlertidig API-feil, uleste elementer og gammel status. En403 på ett vedlegg beviser ikke global utlogging. Gjenopprett køer og prøv et rimelig alternativ én gang, men bevar reelle hull. Midlertidig Facebook-loading krever en etterobservasjon før stopp. Ikke start full ny innhenting bare for driftssjekk.
 
+Ved nettleserfeil: finn den eksisterende Chrome-utvidelsesforbindelsen i nettleseroversikten før native Windows-kontroll. Ukjent URL i ett Windows-vindu beviser ikke at nettleserverktøyet er utilgjengelig. Ved en faktisk sikkerhetsstopp avsluttes turnen, uten alternativ verktøyvei. Ved gjenopprettet API-liste: sammenhold native ID-er, datoer, lesekø og gjenværende flater før gammel partial-status rettes; en frisk probe alene er ikke full kildekontroll.
+
 Gi kjente feil et kort lokalt kontrollpunkt under `docs/drift` (ikke commit). Registrer relevante ID-er, faktisk feil, forsøkte metoder og neste kontrollbetingelse. Ingen hemmeligheter eller privat råtekst i slike notater. Varsle bare nye/forverrede feil eller nødvendig familiehandling; en kjent uendret blokkering skal fortsatt stå synlig i systemet.
 
 `scripts/restart-web-when-idle.ps1` bruker skånsom omstart. Ikke slipp en annen agents lease eller stopp en tjenestestartet agent midt i skriving. Bruk egne testporter/dataområder. Vanlig familiebruk skal fungere mens ingest kjører.
