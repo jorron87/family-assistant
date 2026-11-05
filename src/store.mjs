@@ -1371,11 +1371,14 @@ export function createStore(dataDir = DATA_DIR) {
   function nativeActivityKey(input) {
     // A title is not identity. Match only a native Facebook event and the same
     // start instant; recurring occurrences with different dates stay separate.
+    let event=null;
     try {
       const url=new URL(input.sourceUrl);
-      const event=/^(?:www\.|m\.)?facebook\.com$/.test(url.hostname) && url.pathname.match(/^\/events\/(\d+)\/?$/)?.[1];
-      return event && Number.isFinite(Date.parse(input.start)) ? `${event}:${Date.parse(input.start)}` : null;
-    } catch { return null; }
+      event=/^(?:www\.|m\.)?facebook\.com$/.test(url.hostname) && url.pathname.match(/^\/events\/(\d+)\/?$/)?.[1] || null;
+    } catch { /* An explicit native key can still identify a cross-post. */ }
+    event ??= [input.canonicalKey,...(Array.isArray(input.canonicalAliases)?input.canonicalAliases:[])]
+      .map(key=>String(key??'').match(/^facebook:event:(\d{6,30})(?::|$)/)?.[1]).find(Boolean)??null;
+    return event && Number.isFinite(Date.parse(input.start)) ? `${event}:${Date.parse(input.start)}` : null;
   }
   function upsertActivity(input) {
     assertDisplayText(input);

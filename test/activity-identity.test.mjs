@@ -42,6 +42,19 @@ test('different occurrences and non-Facebook URLs are not merged on title or URL
   const third=store.upsertActivity({...input,canonicalKey:'other-site',sourceUrl:'https://example.org/events/9675750046998519/'});
   assert.notEqual(first.id,third.id);
 });
+
+test('explicit native keys and aliases preserve identity when the source link changes to the organizer',t=>{
+  const {dir,store}=fixture(t),first=store.upsertActivity(input);
+  store.activityReaction(first.id,{action:'hidden'});
+  const nativeKey='facebook:event:9675750046998519:2030-10-19';
+  const onWebsite=store.upsertActivity({...input,canonicalKey:nativeKey,sourceUrl:'https://example.org/workshop'});
+  assert.equal(onWebsite.id,first.id);assert.equal(onWebsite.canonicalKey,first.canonicalKey);assert.equal(onWebsite.reaction,'hidden');
+  assert.ok(onWebsite.canonicalAliases.includes(nativeKey));
+  const restored=createStore(dir),fromFacebook=restored.upsertActivity({...input,canonicalKey:'new-heading'});
+  assert.equal(fromFacebook.id,first.id);assert.equal(fromFacebook.reaction,'hidden');
+  const next=restored.upsertActivity({...input,canonicalKey:'facebook:event:9675750046998519:2030-10-20',sourceUrl:'https://example.org/workshop',start:'2030-10-20T17:00:00+02:00',end:'2030-10-20T19:00:00+02:00'});
+  assert.notEqual(next.id,first.id);
+});
 test('legacy duplicates retain original fields and old IDs route family actions to the surviving card',t=>{
   const {dir,store}=fixture(t),first=store.upsertActivity(input);
   const seeded=seedLegacy(dir,first,[{canonicalKey:'second',title:'Second',reaction:'hidden'},{canonicalKey:'third',title:'Third'}]);
