@@ -325,6 +325,26 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     }
     root.append(hero,priceCheck());
     root.append(...storeSections(data.deals));
+    if(data.steady.length){
+      const section=el('section',undefined,'shop-store');
+      const head=el('div',undefined,'shop-store-head');head.append(el('h3','Fast lav pris, verdt en tur'),el('span','Ikke tilbud, men langt under de andre butikkene','shop-sub'));
+      section.append(head);
+      for(const item of data.steady){
+        const card=el('article',undefined,'shop-deal'),top=el('div',undefined,'shop-steady'),text=el('div',undefined,'shop-list-text');
+        text.append(el('h4',item.name),el('p',item.storeName+' · '+item.productName,'shop-sub'));
+        top.append(thumb(item.image),text);card.append(top);
+        const line=el('p',undefined,'shop-price');line.append(el('strong',price(item.unitPrice)+'/'+item.unit),el('span',' · snitt '+price(item.average)+'/'+item.unit+' · '+item.diffPct+' % lavere'));card.append(line);
+        const total=el('div',undefined,'shop-total');total.append(el('span','Kjøp '+item.packs+' × '+packLabel(item.packAmount,item.unit)+' ('+amount(item.packs*item.packAmount,item.unit)+') · '+kr(item.cost)),el('strong','Spar '+kr(item.saving)));card.append(total);
+        const stockItem=data.items.find(x=>x.id===item.watchId);
+        card.append(el('p',(item.stock.known?'Dere har '+(stockItem?stockSummary(stockItem):'lite igjen')+'. ':'Lager ikke talt. ')+'Kjedepris, så sjekk at butikken har den.','shop-sub'));
+        if(!item.stock.known&&stockItem){const ask=el('div',undefined,'shop-ask');ask.append(el('span','Hvor mange har dere hjemme?','shop-sub'),stockEditor(stockItem,async()=>{await load();render(true);},{confirm:true}));card.append(ask);}
+        const actions=el('div',undefined,'shop-actions');
+        actions.append(button('Legg på listen',()=>act(()=>api('/list',{action:'add',watchId:item.watchId,storeName:item.storeName,packs:item.packs,packAmount:item.packAmount,unitPrice:item.unitPrice,saving:item.saving,detail:item.productName}),'Lagt på handlelisten.'),'primary'));
+        if(item.sourceUrl&&!isKiosk()){const source=link('Se varen ↗',item.sourceUrl);source.className='shop-source';actions.append(source);}
+        card.append(actions);section.append(card);
+      }
+      root.append(section);
+    }
     const low=data.items.filter(x=>x.enabled&&x.stock.known&&x.stock.months!=null&&x.stock.months<1).slice(0,8);
     if(low.length){
       const card=el('section',undefined,'shop-card');

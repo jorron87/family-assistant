@@ -167,3 +167,5 @@ body.kiosk .main-nav button { padding-left: 13px; padding-right: 13px; }
 .shop-cheaper { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 4px; padding: 8px 10px; border-radius: 8px; background: var(--s-soft); color: var(--s-green); font-size: 14px; font-weight: 600; }
 .shop .shop-cheaper button { min-height: 40px; padding: 6px 14px; border: 1px solid var(--s-green); border-radius: 8px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .shop-known { flex-basis: 100%; margin-top: 2px; color: var(--s-muted); font-size: 13px; }
+.shop-steady { display: flex; align-items: center; gap: 10px; }
+.shop-steady h4 { margin: 0 0 2px; }

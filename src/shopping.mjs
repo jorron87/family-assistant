@@ -359,7 +359,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     const stores=s.settings.stores.map(x=>{const r=reviews.find(y=>y.storeId===x.id);return {id:x.id,name:x.name,status:r?.status??'unchecked',checkedAt:r?.checkedAt??null};});
     const n=purchaseNutrition(orders().filter(o=>o.deliveryDate>=a.from&&o.deliveryDate<=a.to),s.nutrition);
     const sum=list=>round(list.reduce((x,p)=>x+(p.saving??0),0));
-    const body={list:listView(today),odaDraft:odaDraft(a,today,at,found),monitoring:s.settings.monitoringEnabled===true,today,deals:main,smallDeals:small,belowTrip:found.belowTrip.map(d=>({...pick(d),alsoAt:[]})),covered:found.covered.map(pick),held:found.held,items,purchases:s.purchases.slice().reverse().slice(0,30).map(({previousStock,...p})=>p),saved:{year:sum(s.purchases.filter(p=>p.at.slice(0,4)===year)),all:sum(s.purchases)},stores,storesCheckedToday:stores.filter(x=>x.status==='ok'&&x.checkedAt&&shoppingDay(new Date(x.checkedAt))===today).length,analysis:{orderCount:a.orderCount,from:a.from,to:a.to,orderTotal:a.orderTotal,categories:a.categories,top:a.products.slice(0,15).map(p=>({name:p.name,spent:p.spent,orders:p.orders}))},nutrition:{spendPct:n.coverage.spendPct}};
+    const body={steady:steadyPrices(a,found,at),list:listView(today),odaDraft:odaDraft(a,today,at,found),monitoring:s.settings.monitoringEnabled===true,today,deals:main,smallDeals:small,belowTrip:found.belowTrip.map(d=>({...pick(d),alsoAt:[]})),covered:found.covered.map(pick),held:found.held,items,purchases:s.purchases.slice().reverse().slice(0,30).map(({previousStock,...p})=>p),saved:{year:sum(s.purchases.filter(p=>p.at.slice(0,4)===year)),all:sum(s.purchases)},stores,storesCheckedToday:stores.filter(x=>x.status==='ok'&&x.checkedAt&&shoppingDay(new Date(x.checkedAt))===today).length,analysis:{orderCount:a.orderCount,from:a.from,to:a.to,orderTotal:a.orderTotal,categories:a.categories,top:a.products.slice(0,15).map(p=>({name:p.name,spent:p.spent,orders:p.orders}))},nutrition:{spendPct:n.coverage.spendPct}};
     return {...body,rev:hash(JSON.stringify(body)),summary:summaryOf(main)};
   }
   function offerSource(id){const o=s.offers[id];if(!o)throw Error('Tilbudet finnes ikke lenger.');return {sourceUrl:o.sourceUrl,evidence:o.evidence};}
@@ -518,6 +518,10 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
       const w=s.watches[input.watchId];if(!w)throw Error('Ukjent vare.');
       const size=positive(input.packAmount,'pakningsstørrelse'),rate=rateOf(needOf(w,analysis()));
       const existing=listOpen().find(x=>x.watchId===w.id&&!x.offerId);if(existing)return existing;
+      if(input.storeName){
+        const packs=positive(input.packs??1,'antall'),entry={...base,watchId:w.id,name:w.name,detail:input.detail==null?null:text(input.detail,200),storeName:required(input.storeName,'Butikk').slice(0,120),packs,packAmount:size,unit:w.unit,unitPrice:input.unitPrice==null?null:positive(input.unitPrice,'pris'),saving:input.saving==null?null:positive(input.saving,'gevinst',true),reason:'Fast lav pris'};
+        s.shoppingList.push(entry);return entry;
+      }
       const entry={...base,watchId:w.id,name:w.name,packs:rate?Math.max(1,Math.ceil(rate/size)):1,packAmount:size,unit:w.unit};
       const option=odaProducts().get(w.id)?.[0];
       if(option)placeEntry(entry,w,option,entry.packs*size,deals(),now().getTime());
@@ -584,6 +588,36 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
   }
   // A proposed cart for the next big delivery. It only ever suggests; adding to
   // the real cart stays a separate, explicit family action.
+  // A store can simply be cheap without a campaign. When its everyday price sits
+  // well below the other chains and the family is running low, it is worth a trip.
+  function steadyPrices(a,found,at) {
+    const FRESH=48*3600000,campaign=new Set(found.opportunities.map(d=>d.watchId)),listed=new Set(listOpen().map(e=>e.watchId)),entries=new Map();
+    for(const e of catalog.entries())if(e.status==='approved')entries.set(e.watchId+'|'+e.store+'|'+e.id,e);
+    const result=[];
+    for(const w of Object.values(s.watches)){
+      const market=w.marketCalibration?.status==='ready'?w.marketCalibration:null;
+      if(w.enabled===false||!market||campaign.has(w.id)||listed.has(w.id))continue;
+      const cheapest=new Map();
+      for(const p of market.products)if(p.currentUnitPrice>0&&at-Date.parse(p.lastChecked)<=FRESH&&(!cheapest.has(p.store)||p.currentUnitPrice<cheapest.get(p.store).currentUnitPrice))cheapest.set(p.store,p);
+      if(cheapest.size<2)continue;
+      const prices=[...cheapest.values()],average=prices.reduce((n,p)=>n+p.currentUnitPrice,0)/prices.length,best=prices.sort((x,y)=>x.currentUnitPrice-y.currentUnitPrice)[0];
+      const store=s.settings.stores.find(x=>x.chainCode===best.store);
+      if(!store||/nettbutikk/i.test(store.name))continue;
+      const diffPct=(average-best.currentUnitPrice)/average*100;
+      if(diffPct<20)continue;
+      const need=needOf(w,a);if(need.amount===null)continue;
+      const stock=estimateStock(w,rateOf(need),at);
+      if(stock.known&&stock.months!=null&&stock.months>=3)continue;
+      const months=Math.min(12,shelfLifeMonths(w)),packs=packsFor(need.amount/12*months-(stock.amount??0),{packAmount:best.packAmount,bundlePacks:1,cap:100});
+      if(!packs)continue;
+      const saving=round((average-best.currentUnitPrice)*packs*best.packAmount);
+      if(saving<100)continue;
+      const entry=entries.get(w.id+'|'+best.store+'|'+best.id);
+      result.push({watchId:w.id,name:w.name,productName:best.name,storeName:store.name.replace(/\s*[–-]\s*Kassal.*$/,''),unit:w.unit,unitPrice:round(best.currentUnitPrice),average:round(average),diffPct:Math.round(diffPct),packs,packAmount:best.packAmount,cost:round(best.currentUnitPrice*best.packAmount*packs),saving,months,stock,sourceUrl:entry?.sourceUrl??null,image:imageRef(entry?.image)});
+    }
+    const rank=x=>x.stock.known?0:1;
+    return result.sort((x,y)=>rank(x)-rank(y)||y.saving-x.saving).slice(0,8);
+  }
   function odaDraft(a,today,at,found) {
     const dates=[...new Set(orders().map(o=>o.deliveryDate))].sort(),gaps=dates.slice(1).map((day,i)=>(Date.parse(day)-Date.parse(dates[i]))/86400000).sort((x,y)=>x-y);
     const gapDays=gaps.length>=2?gaps[Math.floor((gaps.length-1)/2)]:s.settings.stockUpDays??60,gapMonths=gapDays/30.44;

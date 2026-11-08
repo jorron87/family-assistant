@@ -125,3 +125,18 @@ test('each cart line shows a cheaper Oda variant and the lowest known price',()=
  assert.equal(line.unitPrice,40);assert.equal(line.cheaperVariant.productId,555);assert.equal(line.cheaperVariant.diffPct,50);assert.deepEqual(line.cheapestKnown,{storeName:'Nærbutikk',unitPrice:18});
  line=shop.cartReview(cart(555)).lines[0];assert.equal(line.cheaperVariant,null);assert.equal(line.cheapestKnown.unitPrice,18);
 });
+
+test('a store that is simply cheap is shown when stock is low and the gain is real',()=>{
+ const make=(cheap,extra={})=>{const {shop}=setup();shop.settings({stores:[{id:'near',name:'Nærbutikk – Kassal-kjedepriser',url:'https://example.com/near',minSavings:0,chainCode:'SPAR_NO'}]});const w=flour(shop,extra);
+  const products=[['SPAR_NO',9,cheap],['MENY_NO',10,100]];
+  for(const [store,id,price] of products){const seen=shop.catalogObserve({watchId:w.id,products:[{id,store,name:'Mel 1 kg',currentPrice:price,lastChecked:'2026-11-08T10:00:00Z'}]});shop.catalogReview({watchId:w.id,id,store,fingerprint:seen.entries[0].fingerprint,status:'approved',packAmount:1,unit:'kg',equivalenceEvidence:'Samme mel'});}
+  shop.market({watchId:w.id,products:products.map(([store,id,price])=>({id,store,unit:'kg',packAmount:1,reviewed:true,equivalenceEvidence:'Samme mel',lastChecked:'2026-11-08T10:00:00Z',currentPrice:price,history:history(price)}))});
+  return {shop,w};};
+ let {shop,w}=make(30);let [row]=shop.familyView().steady;
+ assert.equal(row.storeName,'Nærbutikk');assert.equal(row.packs,12);assert.equal(row.average,65);assert.equal(row.diffPct,54);assert.equal(row.saving,420);
+ shop.pantry({watchId:w.id,amount:6});assert.equal(shop.familyView().steady.length,0);
+ shop.pantry({watchId:w.id,amount:1});assert.equal(shop.familyView().steady[0].packs,11);
+ assert.equal(shop.list({action:'add',watchId:w.id,packAmount:1,storeName:'Nærbutikk',packs:11,unitPrice:30,saving:385}).reason,'Fast lav pris');assert.equal(shop.familyView().steady.length,0);
+ assert.equal(make(95).shop.familyView().steady.length,0);
+ assert.equal(make(30,{purchaseAmount:1}).shop.familyView().steady.length,0);
+});
