@@ -51,6 +51,38 @@ export function estimateStock(watch,monthlyRate,at) {
  return {known:true,amount:round(amount),months:monthlyRate?round(amount/monthlyRate):null,ageDays:Math.floor(ageDays),needsCheck:ageDays>STOCK_CHECK_DAYS};
 }
 
+const SAME_PACK=.12;
+const samePack=(a,b)=>Math.abs(a-b)<=Math.max(a,b)*SAME_PACK;
+
+/** The pack sizes a household actually thinks in, most bought first. */
+export function commonPacks(rows,fallback=[],counted=[]) {
+ const groups=[];
+ for(const row of rows){
+  if(!(row.quantity>0&&row.purchasedAmount>0))continue;
+  const amount=row.purchasedAmount/row.quantity,group=groups.find(g=>samePack(g.amount,amount));
+  if(group){group.quantity+=row.quantity;if(row.quantity>group.lead){group.lead=row.quantity;group.amount=amount;}}
+  else groups.push({amount,quantity:row.quantity,lead:row.quantity});
+ }
+ const total=groups.reduce((n,g)=>n+g.quantity,0);
+ const sizes=groups.filter(g=>g.quantity/total>=.15).sort((a,b)=>b.quantity-a.quantity).slice(0,3).map(g=>Math.round(g.amount*1000)/1000);
+ const list=sizes.length?sizes:fallback.slice(0,2);
+ const result=list.length?[...list]:[1];
+ for(const size of counted)if(size>0&&!result.some(x=>samePack(x,size)))result.push(size);
+ return result;
+}
+
+/** Counted packs, reduced to what the burned-down amount still covers. */
+export function packBreakdown(sizes,counted,amount) {
+ if(amount==null)return sizes.map(size=>({amount:size,count:0}));
+ if(!counted)return sizes.map((size,index)=>({amount:size,count:index?0:Math.round(amount/size)}));
+ let left=amount;const counts=new Map();
+ for(const size of [...sizes].sort((a,b)=>b-a)){
+  const key=Object.keys(counted).find(k=>samePack(Number(k),size)),have=key?counted[key]:0,count=Math.min(have,Math.floor(left/size+.25));
+  counts.set(size,count);left=Math.max(0,left-count*size);
+ }
+ return sizes.map(size=>({amount:size,count:counts.get(size)}));
+}
+
 export function dealTier({unitPrice,excellentPrice,discountPct,referenceType}) {
  if((excellentPrice!=null&&unitPrice<=excellentPrice)||discountPct>=EXCELLENT_DISCOUNT_PCT)return 'excellent';
  if(referenceType==='target')return 'good';

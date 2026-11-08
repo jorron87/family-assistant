@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {shoppingStore} from '../src/shopping.mjs';
-import {annualNeed,dealTier,defaultShelfLifeMonths,estimateStock} from '../src/shopping-planning.mjs';
+import {annualNeed,commonPacks,dealTier,defaultShelfLifeMonths,estimateStock,packBreakdown} from '../src/shopping-planning.mjs';
 
 const NOW='2026-11-08T12:00:00Z';
 function setup(at=NOW) {
@@ -68,6 +68,21 @@ test('stock lowers the quantity, burns down with use and demotes covered deals',
  const stock=estimateStock({stockAmount:10,stockCheckedAt:'2026-01-01T00:00:00Z'},1,Date.parse('2026-12-31T00:00:00Z'));assert.equal(stock.amount,0);assert.equal(stock.needsCheck,true);
  assert.throws(()=>shop.pantry({watchId:shop.watch({name:'Ukjent',unit:'stk',storage:'pantry'}).id,months:3}),/ukjent/i);
 });
+test('stock is counted in the packs a household actually buys',()=>{
+ const rows=[{quantity:8,purchasedAmount:3.2},{quantity:3,purchasedAmount:3},{quantity:1,purchasedAmount:.2}];
+ assert.deepEqual(commonPacks(rows),[.4,1]);
+ assert.deepEqual(commonPacks([],[.25,.5,1]),[.25,.5]);assert.deepEqual(commonPacks([]),[1]);assert.deepEqual(commonPacks(rows,[],[.75]),[.4,1,.75]);
+ assert.deepEqual(packBreakdown([.4,1],{'0.4':3,'1':1},2.2),[{amount:.4,count:3},{amount:1,count:1}]);
+ assert.deepEqual(packBreakdown([.4,1],{'0.4':3,'1':1},1.05),[{amount:.4,count:0},{amount:1,count:1}]);
+ assert.deepEqual(packBreakdown([.4],null,1.6),[{amount:.4,count:4}]);
+ const {shop,clock}=setup();shop.importOrders({orders:[{orderNumber:'x',deliveryDate:'2026-10-01',currency:'NOK',grossAmount:100,products:[{product:{id:1,name:'Mel',description:'400 g'},quantity:10,totalGrossAmount:'100.00'}]}]});
+ const w=shop.watch({name:'Mel',unit:'kg',storage:'pantry',productKeys:['oda:1'],targetPrice:100,purchaseAmount:12});
+ const saved=shop.pantry({watchId:w.id,packs:[{amount:.4,count:5}]});assert.equal(saved.item.stock.amount,2);assert.deepEqual(saved.item.packs,[{amount:.4,count:5}]);
+ assert.equal(shop.item({id:w.id,shelfLifeMonths:6}).stockPacks['0.4'],5);
+ clock.at='2026-11-23T12:00:00Z';const later=shop.familyView().items[0];assert.equal(later.packs[0].count,4);
+ assert.throws(()=>shop.pantry({watchId:w.id,packs:[{amount:.4,count:1.5}]}),/antall/);assert.throws(()=>shop.pantry({watchId:w.id,packs:[]}),/pakkeliste/);
+ shop.pantry({watchId:w.id,packs:[{amount:.4,count:0}]});assert.equal(shop.familyView().items[0].stock.known,true);assert.equal(shop.familyView().items[0].stock.amount,0);
+});
 test('buying adds stock and records the saving; undo restores everything',()=>{
  const {shop}=setup();const flour=watch(shop),{id}=shop.offer(offer(flour.id));
  shop.dealAction({offerId:id,action:'bought',packs:5});
@@ -122,6 +137,15 @@ test('community group posts become feed work, then an acknowledged store review'
  state.collector.items.a.token='t3';assert.equal(shop.queue()[0].unread,1);
  clock.at='2026-12-20T12:00:00Z';assert.deepEqual(shop.queue().filter(x=>x.do==='shopping-feed-review'),[]);
  assert.throws(()=>shop.feed({storeId:'missing'}),/Ukjent/);
+});
+test('the cheapest current price includes active offers, not only chain prices',()=>{
+ const {shop}=setup();const flour=watch(shop);
+ shop.market({watchId:flour.id,products:[{id:1,store:'MENY_NO',unit:'kg',packAmount:1,reviewed:true,equivalenceEvidence:'Samme vare',lastChecked:'2026-11-08T10:00:00Z',currentPrice:90,history:history(100)}]});
+ shop.settings({stores:[{id:'near',name:'Butikk (nettbutikk)',url:'https://example.com/near',minSavings:9999}]});
+ assert.equal(shop.familyView().items[0].prices.currentChain,'MENY');
+ shop.offer(offer(flour.id,{price:70}));
+ let p=shop.familyView().items[0].prices;assert.equal(p.current,70);assert.equal(p.currentChain,'Butikk (+ frakt)');
+ shop.offer(offer(flour.id,{validFrom:'2026-11-10'}));assert.equal(shop.familyView().items[0].prices.currentChain,'MENY');
 });
 test('member-only offers are reported rather than silently dropped',()=>{
  const {shop}=setup();const flour=watch(shop);shop.offer(offer(flour.id,{memberOnly:true}));

@@ -102,3 +102,9 @@ body.kiosk .main-nav button { padding-left: 13px; padding-right: 13px; }
 .shop-source-body .pdf-controls { display: flex; justify-content: center; align-items: center; gap: 16px; margin-bottom: 12px; }
 .shop-source-body .pdf-controls button { min-height: 56px; padding: 8px 20px; border: 1px solid var(--s-line); border-radius: 10px; background: var(--s-soft); color: var(--s-green); font: inherit; cursor: pointer; }
 .shop-qr { display: block; width: min(360px, 70vw); margin: 24px auto 12px; }
+.shop-stock { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: 6px; }
+.shop-step { display: flex; align-items: center; gap: 6px; }
+.shop .shop-step button { width: 44px; height: 44px; padding: 0; border: 1px solid var(--s-line); border-radius: 10px; background: var(--s-soft); color: var(--s-green); font: inherit; font-size: 22px; line-height: 1; cursor: pointer; }
+.shop-step-value { min-width: 28px; text-align: center; font-size: 18px; font-weight: 600; }
+.shop-step-label { font-size: 14px; color: var(--s-muted); }
+.shop .shop-empty { min-height: 44px; padding: 8px 14px; border: 1px solid var(--s-line); border-radius: 10px; background: transparent; color: var(--s-muted); font: inherit; font-size: 14px; cursor: pointer; }

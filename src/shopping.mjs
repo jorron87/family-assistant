@@ -2,7 +2,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {validateNutrition,purchaseNutrition} from './shopping-nutrition.mjs';
 import {calibrateMarket} from './shopping-market.mjs';
 import {createMarketCatalog} from './shopping-catalog.mjs';
-import {annualNeed,chainName,dealScore,dealTier,defaultShelfLifeMonths,estimateStock,planQuantities,shelfLifeMonths,shelfWithDate} from './shopping-planning.mjs';
+import {annualNeed,chainName,commonPacks,dealScore,dealTier,defaultShelfLifeMonths,estimateStock,packBreakdown,planQuantities,shelfLifeMonths,shelfWithDate} from './shopping-planning.mjs';
 
 const hash=value=>createHash('sha256').update(value).digest('hex').slice(0,24);
 const round=n=>Math.round((n+Number.EPSILON)*100)/100;
@@ -100,6 +100,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
   const needRows=(w,a)=>a.products.filter(p=>w.productKeys.includes(p.productKey)&&p.unit===w.unit);
   const needOf=(w,a)=>annualNeed(w,needRows(w,a),a.days,s.settings.odaShare??1);
   const rateOf=need=>need.amount==null?null:need.amount/12;
+  const addCounted=(w,size,count)=>{const key=String(Math.round(size*1000)/1000);w.stockPacks[key]=(w.stockPacks[key]??0)+count;};
   // A delivered order refills counted stock; uncounted stock stays unknown.
   function receiveOrder(order,a) {
     for(const w of Object.values(s.watches)){
@@ -108,6 +109,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
       if(added<=0)continue;
       const stock=estimateStock(w,rateOf(needOf(w,a)),now().getTime());
       w.stockAmount=round(stock.amount+added);w.stockCheckedAt=now().toISOString();
+      if(w.stockPacks)for(const p of order.products)if(w.productKeys.includes(p.productKey)&&p.pack?.unit===w.unit)addCounted(w,p.pack.amount,p.quantity);
     }
   }
   function importOrders(input) {
@@ -140,6 +142,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     next.shelfLifeMonths=input.shelfLifeMonths==null?null:positive(input.shelfLifeMonths,'holdbarhet');
     if(next.shelfLifeMonths!==null&&next.shelfLifeMonths>24)throw Error('Ugyldig holdbarhet.');
     next.manualLimits=(input.manualLimits??s.watches[id]?.manualLimits)===true;
+    next.stockPacks=s.watches[id]?.stockPacks??null;
     if(next.purchaseAmount!==null&&next.monthlyUsage!==null)throw Error('Planlagt mengde kan ikke kombineres med månedsforbruk.');
     if(!['kg','l','stk'].includes(next.unit)||!['frozen','pantry','chilled','other'].includes(next.storage)||!Number.isInteger(next.maxPacks)||next.minDiscountPct>100||next.productKeys.some(k=>typeof k!=='string'||k.length>200))throw Error('Ugyldig overvåkning.');
     if(s.watches[id]?.stockAmount===next.stockAmount&&input.stockConfirmed!==true)next.stockCheckedAt=s.watches[id].stockCheckedAt;
@@ -320,16 +323,23 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     return Object.values(s.watches).filter(w=>w.enabled!==false).map(w=>itemView(w,a,at)).map(({id,name,unit,storage,prices})=>({watchId:id,name,unit,storage,normal:prices.normal,good:prices.good,excellent:prices.excellent,cheapestNow:prices.current,chain:prices.currentChain}));
   }
   function view() {const a=analysis(),entries=catalog.entries(),found=deals(a);return {settings:structuredClone(s.settings),analysis:a,nutrition:purchaseNutrition(orders().filter(o=>o.deliveryDate>=a.from&&o.deliveryDate<=a.to),s.nutrition),watches:structuredClone(Object.values(s.watches)),opportunities:found.opportunities,belowTripOffers:found.belowTrip,coveredOffers:found.covered,heldOffers:found.held,offerCounts:offerCounts(),reviews:structuredClone(Object.values(s.reviews)),queue:queue(),purchases:structuredClone(s.purchases),catalog:{total:entries.length,pending:entries.filter(p=>p.status==='pending').length,approved:entries.filter(p=>p.status==='approved').length,excluded:entries.filter(p=>p.status==='excluded').length}};}
-  function itemView(w,a,at) {
+  function catalogPackMap() {
+    const byWatch=new Map();
+    for(const e of catalog.entries())if(e.status==='approved'&&e.packAmount){const sizes=byWatch.get(e.watchId)??new Map();sizes.set(e.packAmount,(sizes.get(e.packAmount)??0)+1);byWatch.set(e.watchId,sizes);}
+    return new Map([...byWatch].map(([id,sizes])=>[id,[...sizes].sort((x,y)=>y[1]-x[1]).map(([size])=>size)]));
+  }
+  function itemView(w,a,at,catalogPacks=new Map(),offerLow=new Map()) {
     const need=needOf(w,a),rate=rateOf(need),stock=estimateStock(w,rate,at),market=w.marketCalibration,rows=needRows(w,a);
     const normal=w.priceGuide?.referencePrice??null,freshProducts=market?.status==='ready'?market.products.filter(p=>at-Date.parse(p.lastChecked)<=48*3600000):[];
     const cheapest=[...freshProducts].sort((x,y)=>x.currentUnitPrice-y.currentUnitPrice)[0]??null;
-    const history=Object.values(s.priceHistory[w.id]??{});
+    const history=Object.values(s.priceHistory[w.id]??{}),offer=offerLow.get(w.id);
+    const offerWins=!!offer&&(!cheapest||offer.unitPrice<cheapest.currentUnitPrice);
     // "Good" must be a real step below normal, or the guide just repeats itself.
     const good=normal&&w.targetPrice?round(Math.min(w.targetPrice,normal*.92)):w.targetPrice;
     const chains=market?.coverage?.chainCount;
     const basis=market?.status==='ready'?market.coverage.observedDays+' dager med priser fra '+chains+(chains===1?' kjede':' kjeder'):market?.status==='needs-review'?'En vare er endret og sjekkes på nytt':w.priceGuide?'Foreløpig, ut fra det dere har betalt':w.targetPrice?'Egen prisgrense':'For lite prisdata ennå';
-    return {id:w.id,name:w.name,unit:w.unit,storage:w.storage,enabled:w.enabled!==false,manualLimits:w.manualLimits===true,annualAmount:need.amount===null?null:round(need.amount),annualBasis:need.basis,shelfLifeMonths:shelfLifeMonths(w),shelfCustom:w.shelfLifeMonths!=null,shelfDefault:defaultShelfLifeMonths(w),stock,spent:round(rows.reduce((n,p)=>n+p.spent,0)),prices:{normal,good,excellent:w.excellentPrice,targetPrice:w.targetPrice,current:cheapest?.currentUnitPrice??null,currentChain:cheapest?chainName(cheapest.store):null,lowestSeen:history.length>=30?Math.min(...history):null,historyDays:history.length,basis}};
+    const sizes=commonPacks(rows,catalogPacks.get(w.id)??[],Object.keys(w.stockPacks??{}).map(Number));
+    return {packs:packBreakdown(sizes,stock.known?w.stockPacks??null:null,stock.amount),id:w.id,name:w.name,unit:w.unit,storage:w.storage,enabled:w.enabled!==false,manualLimits:w.manualLimits===true,annualAmount:need.amount===null?null:round(need.amount),annualBasis:need.basis,shelfLifeMonths:shelfLifeMonths(w),shelfCustom:w.shelfLifeMonths!=null,shelfDefault:defaultShelfLifeMonths(w),stock,spent:round(rows.reduce((n,p)=>n+p.spent,0)),prices:{normal,good,excellent:w.excellentPrice,targetPrice:w.targetPrice,current:offerWins?offer.unitPrice:cheapest?.currentUnitPrice??null,currentChain:offerWins?offer.storeName.replace(/\s*\(nettbutikk\)$/i,' (+ frakt)'):cheapest?chainName(cheapest.store):null,lowestSeen:history.length>=30?Math.min(...history):null,historyDays:history.length,basis}};
   }
   const summaryOf=main=>({dealCount:main.length,excellentCount:main.filter(d=>d.tier==='excellent').length,potential:round(main.reduce((n,d)=>n+(d.saving??0),0)),top:main[0]?.watchName??null});
   function familyView() {
@@ -338,7 +348,8 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     const byWatch=new Map();for(const d of found.opportunities){const list=byWatch.get(d.watchId)??[];list.push(d);byWatch.set(d.watchId,list);}
     const primary=[...byWatch.values()].map(list=>({...pick(list[0]),alsoAt:list.slice(1).map(x=>({storeName:x.storeName,unitPrice:x.unitPrice}))}));
     const main=primary.filter(d=>d.tier!=='small'),small=primary.filter(d=>d.tier==='small');
-    const items=Object.values(s.watches).map(w=>itemView(w,a,at)).sort((x,y)=>y.spent-x.spent);
+    const offerLow=new Map();for(const d of [...found.opportunities,...found.belowTrip,...found.covered])if(d.validFrom<=today&&(!offerLow.has(d.watchId)||d.unitPrice<offerLow.get(d.watchId).unitPrice))offerLow.set(d.watchId,d);
+    const catalogPacks=catalogPackMap(),items=Object.values(s.watches).map(w=>itemView(w,a,at,catalogPacks,offerLow)).sort((x,y)=>y.spent-x.spent);
     const reviews=Object.values(s.reviews);
     const stores=s.settings.stores.map(x=>{const r=reviews.find(y=>y.storeId===x.id);return {id:x.id,name:x.name,status:r?.status??'unchecked',checkedAt:r?.checkedAt??null};});
     const n=purchaseNutrition(orders().filter(o=>o.deliveryDate>=a.from&&o.deliveryDate<=a.to),s.nutrition);
@@ -350,11 +361,17 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
   function familySummary(){const f=familyView();return {rev:f.rev,...f.summary};}
   function pantry(input) {
     const w=s.watches[input.watchId];if(!w)throw Error('Ukjent vare.');
-    let amount;
-    if(input.amount===null)amount=null;
+    let amount,packs=null;
+    if(Array.isArray(input.packs)){
+      if(!input.packs.length||input.packs.length>10)throw Error('Ugyldig pakkeliste.');
+      packs={};amount=0;
+      for(const p of input.packs){const size=positive(p.amount,'pakningsstørrelse'),count=Number(p.count);if(!Number.isInteger(count)||count<0||count>9999)throw Error('Ugyldig antall pakker.');if(count){packs[String(size)]=count;amount+=size*count;}}
+      amount=round(amount);
+    }
+    else if(input.amount===null)amount=null;
     else if(input.months!=null){const rate=rateOf(needOf(w,analysis())),months=positive(input.months,'antall måneder',true);if(months>36)throw Error('Ugyldig antall måneder.');if(rate===null&&months>0)throw Error('Forbruket er ukjent. Oppgi mengden i stedet.');amount=months?round(months*rate):0;}
     else amount=positive(input.amount,'beholdning',true);
-    return update(()=>{w.stockAmount=amount;w.stockCheckedAt=amount===null?null:now().toISOString();return {saved:true};});
+    return update(()=>{w.stockAmount=amount;w.stockCheckedAt=amount===null?null:now().toISOString();w.stockPacks=packs;return {saved:true,item:itemView(w,analysis(),now().getTime(),catalogPackMap())};});
   }
   function item(input) {
     const w=input.id===undefined?null:s.watches[input.id];if(input.id!==undefined&&!w)throw Error('Ukjent vare.');
@@ -368,7 +385,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     const o=s.offers[input.offerId];
     if(input.action==='undo'){
       const index=s.purchases.findLastIndex(p=>p.offerId===input.offerId);
-      return update(()=>{if(index>=0){const [entry]=s.purchases.splice(index,1),w=s.watches[entry.watchId];if(w){w.stockAmount=entry.previousStock.amount;w.stockCheckedAt=entry.previousStock.checkedAt;}}delete s.dealDecisions[input.offerId];return {saved:true};});
+      return update(()=>{if(index>=0){const [entry]=s.purchases.splice(index,1),w=s.watches[entry.watchId];if(w){w.stockAmount=entry.previousStock.amount;w.stockCheckedAt=entry.previousStock.checkedAt;w.stockPacks=entry.previousStock.packs??null;}}delete s.dealDecisions[input.offerId];return {saved:true};});
     }
     if(!o)throw Error('Tilbudet finnes ikke lenger.');
     const decision={status:input.action,fingerprint:offerFingerprint(o),validTo:o.validTo,at:now().toISOString()};
@@ -379,7 +396,9 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     if(!w)throw Error('Ukjent vare.');
     const saving=deal&&deal.referenceType!=='target'?round((deal.referencePrice-deal.unitPrice)*packs*o.packAmount):null;
     return update(()=>{
-      const previousStock={amount:w.stockAmount,checkedAt:w.stockCheckedAt},stock=estimateStock(w,rateOf(needOf(w,a)),now().getTime());
+      const previousStock={amount:w.stockAmount,checkedAt:w.stockCheckedAt,packs:w.stockPacks?{...w.stockPacks}:null},stock=estimateStock(w,rateOf(needOf(w,a)),now().getTime());
+      if(!stock.known)w.stockPacks={};
+      if(w.stockPacks)addCounted(w,o.packAmount,packs);
       w.stockAmount=round((stock.amount??0)+packs*o.packAmount);w.stockCheckedAt=now().toISOString();
       s.dealDecisions[o.id]=decision;
       s.purchases.push({id:randomUUID(),offerId:o.id,watchId:w.id,name:w.name,storeId:o.storeId,packs,packAmount:o.packAmount,unit:o.unit,unitPrice:round(o.price/o.packAmount),referencePrice:deal?.referencePrice??null,total:round(o.price*packs),saving,previousStock,at:now().toISOString()});

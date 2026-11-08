@@ -30,7 +30,6 @@ function field(label,control) {
   return wrap;
 }
 
-const STOCK_LEVELS=[[0,'Tomt'],[1,'1 mnd'],[3,'3 mnd'],[6,'6 mnd'],[12,'1 år']];
 const SHELF_CHOICES=[[1,'1 mnd'],[3,'3 mnd'],[6,'6 mnd'],[9,'9 mnd'],[12,'1 år']];
 const LOCATIONS=[['all','Alt'],['frozen','Fryser'],['pantry','Tørrvarer'],['chilled','Kjøl']];
 const TIER_LABEL={excellent:'Svært bra pris',good:'Bra pris',small:'Liten rabatt'};
@@ -38,7 +37,7 @@ const BASIS_TEXT={'household-estimate':'etter det dere har oppgitt','planned-amo
 const HELD_TEXT={member:'krever medlemskap vi ikke har registrert','needs-review':'venter på at en vare sjekkes','stale-prices':'venter på ferske priser'};
 
 export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/shopping',compact=false}) {
-  let data=null,tab='buy',search='',location='all',stale=false,odaQuery='',toastTimer=null;
+  let dirty=false,data=null,tab='buy',search='',location='all',stale=false,odaQuery='',toastTimer=null;
   const chosen=new Map(),openSections=new Set();
   panel.classList.add('shop');
   const toastNode=el('div',undefined,'shop-toast');toastNode.setAttribute('role','status');toastNode.hidden=true;
@@ -100,9 +99,43 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     }
     return row;
   }
-  const nearestLevel=months=>months==null?null:STOCK_LEVELS.reduce((best,[m])=>Math.abs(m-months)<Math.abs(best-months)?m:best,0);
-  function setStock(item,months) {
-    return act(()=>api('/pantry',{watchId:item.id??item.watchId,months}),null);
+  const packLabel=(size,unit)=>{
+    if(unit==='kg')return size<1?`${Math.round(size*100)*10} g`:`${nf(2).format(size)} kg`;
+    if(unit==='l')return size<1?`${nf(1).format(size*10)} dl`:`${nf(2).format(size)} l`;
+    return size===1?'stk':`${nf(0).format(size)} stk`;
+  };
+  function stockSummary(item) {
+    if(!item.stock.known)return 'Ikke registrert';
+    if(item.stock.amount<=0)return 'Tomt';
+    const parts=item.packs.filter(p=>p.count>0).map(p=>`${p.count} × ${packLabel(p.amount,item.unit)}`);
+    const what=parts.length?parts.join(' + '):amount(item.stock.amount,item.unit);
+    return item.stock.months!=null?`${what} · rekker ${item.stock.months<1?'noen uker':`ca. ${monthsText(item.stock.months)}`}`:what;
+  }
+  // Tapping is saved shortly after the last tap, so a count of six is one request.
+  function stockEditor(item,afterSave) {
+    const wrap=el('div',undefined,'shop-stock'),counts=new Map(item.packs.map(p=>[p.amount,p.count])),values=new Map();
+    let timer=null;
+    const save=async()=>{
+      clearTimeout(timer);timer=null;
+      try{
+        const reply=await api('/pantry',{watchId:item.id,packs:[...counts].map(([size,count])=>({amount:size,count}))});
+        const index=data.items.findIndex(x=>x.id===item.id);
+        if(index>=0)data.items[index]=reply.item;
+        dirty=true;afterSave(reply.item);
+      }catch(error){fail(error);}
+    };
+    const change=(size,delta)=>{counts.set(size,Math.max(0,counts.get(size)+delta));values.get(size).textContent=String(counts.get(size));clearTimeout(timer);timer=setTimeout(save,700);};
+    for(const pack of item.packs){
+      const row=el('div',undefined,'shop-step'),label=packLabel(pack.amount,item.unit),value=el('span',String(pack.count),'shop-step-value');
+      values.set(pack.amount,value);
+      const less=button('−',()=>change(pack.amount,-1)),more=button('+',()=>change(pack.amount,1));
+      less.setAttribute('aria-label',`Én færre ${label}`);more.setAttribute('aria-label',`Én mer ${label}`);
+      row.append(less,value,more,el('span',item.unit==='stk'&&pack.amount===1?'stk':`pk à ${label}`,'shop-step-label'));
+      wrap.append(row);
+    }
+    const empty=button('Tomt',()=>{for(const size of counts.keys()){counts.set(size,0);values.get(size).textContent='0';}save();},'shop-empty');
+    wrap.append(empty);
+    return wrap;
   }
 
   // The living-room display has no browser chrome, so a new tab has no way back.
@@ -143,7 +176,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     line.append(el('strong',`${price(deal.unitPrice)}/${deal.unit}`),el('span',` · ${deal.referenceType==='target'?'grensen er':'vanlig'} ${price(deal.referencePrice)}/${deal.unit}${deal.discountPct>=1?` · ${nf(0).format(deal.discountPct)} % lavere`:''}`));
     card.append(line);
     if(deal.options.length>1){
-      card.append(chips(deal.options.map(x=>[x.key,x.label]),option.key,key=>{chosen.set(deal.offerId,key);render(true);},'Velg mengde'));
+      card.append(chips(deal.options.map(x=>[x.key,`${x.label} · ${x.packs} pk`]),option.key,key=>{chosen.set(deal.offerId,key);render(true);},'Velg mengde'));
     }
     const total=el('div',undefined,'shop-total');
     total.append(el('span',`${option.packs} ${option.packs===1?'pakke':'pakker'} · ${amount(option.amount,deal.unit)} · ${kr(option.cost)}`));
@@ -152,16 +185,17 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     const notes=[];
     if(deal.tier==='good'&&deal.fullMonths===3)notes.push('Bra, men ikke et kupp, så vi foreslår 3 måneder.');
     else if(deal.tier!=='small'&&deal.fullMonths!=null&&deal.fullMonths<(deal.tier==='excellent'?12:3))notes.push(`Holder ca. ${monthsText(deal.fullMonths)}, så vi foreslår ikke mer.`);
-    if(deal.stock.known&&deal.stock.months!=null)notes.push(`Dere har ca. ${monthsText(deal.stock.months)} på lager.`);
+    const stockItem=data.items.find(x=>x.id===deal.watchId);
+    if(deal.stock.known&&stockItem)notes.push(`Dere har ${stockSummary(stockItem)}.`);
     if(deal.bestBefore)notes.push(`Best før ${dayLabel(deal.bestBefore)}.`);
     if(deal.maxPacks)notes.push(`Maks ${deal.maxPacks} per kunde.`);
     if(deal.bundlePacks>1)notes.push(`Kjøp ${deal.bundlePacks} og ${deal.bundlePacks}.`);
     if(deal.memberOnly)notes.push('Krever medlemskap.');
     if(deal.alsoAt.length)notes.push(`Også hos ${deal.alsoAt.map(x=>`${x.storeName} (${price(x.unitPrice)})`).join(', ')}.`);
     if(notes.length)card.append(el('p',notes.join(' '),'shop-sub'));
-    if(!deal.stock.known&&deal.annualAmount!=null){
+    if(!deal.stock.known&&stockItem){
       const ask=el('div',undefined,'shop-ask');
-      ask.append(el('span','Har dere noe fra før?','shop-sub'),chips(STOCK_LEVELS,null,months=>setStock(deal,months),'Hvor mye har dere?'));
+      ask.append(el('span','Hvor mange har dere hjemme?','shop-sub'),stockEditor(stockItem,async()=>{await load();render(true);}));
       card.append(ask);
     }
     const actions=el('div',undefined,'shop-actions');
@@ -239,7 +273,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     }
     if(data.smallDeals.length)root.append(details('small',`Små tilbud på turer dere uansett tar (${data.smallDeals.length})`,node=>node.append(...storeSections(data.smallDeals)),'shop-fold'));
     if(data.belowTrip.length)root.append(details('below',`Bra pris, men ikke verdt en egen tur (${data.belowTrip.length})`,node=>node.append(...storeSections(data.belowTrip)),'shop-fold'));
-    if(data.covered.length)root.append(details('covered',`Godt tilbud, men dere har nok (${data.covered.length})`,node=>{for(const deal of data.covered)node.append(el('p',`${deal.watchName} hos ${deal.storeName}: ${price(deal.unitPrice)}/${deal.unit}. Dere har ca. ${monthsText(deal.stock.months??0)} på lager.`,'shop-sub'));},'shop-fold'));
+    if(data.covered.length)root.append(details('covered',`Godt tilbud, men dere har nok (${data.covered.length})`,node=>{for(const deal of data.covered){const item=data.items.find(x=>x.id===deal.watchId);node.append(el('p',`${deal.watchName} hos ${deal.storeName}: ${price(deal.unitPrice)}/${deal.unit}. Dere har ${item?stockSummary(item):'nok'}.`,'shop-sub'));}},'shop-fold'));
     if(data.held.length)root.append(details('held',`Tilbud vi ikke kan vise ennå (${data.held.length})`,node=>{for(const entry of data.held)node.append(el('p',`${entry.watchName} hos ${entry.storeName} ${HELD_TEXT[entry.reason]??'venter'}.`,'shop-sub'));},'shop-fold'));
     root.append(odaSearch());
   }
@@ -274,25 +308,15 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
   }
 
   // ---- Lager ----
-  function stockText(item) {
-    if(!item.stock.known)return 'Ikke registrert';
-    if(item.stock.amount<=0)return 'Tomt';
-    return item.stock.months!=null?`ca. ${monthsText(item.stock.months)} igjen · ${amount(item.stock.amount,item.unit)}`:amount(item.stock.amount,item.unit);
-  }
   function pantryRow(item) {
     const row=el('div',undefined,'shop-item'+(item.enabled?'':' paused'));
     const head=button('',()=>itemDialog(item),'shop-item-head');
     const title=el('span',undefined,'shop-item-title');
-    title.append(el('strong',item.name),el('span',stockText(item)+(item.stock.needsCheck?' · sjekk gjerne':''),'shop-sub'));
+    const status=el('span',stockSummary(item)+(item.stock.needsCheck?' · sjekk gjerne':''),'shop-sub');
+    title.append(el('strong',item.name),status);
     head.append(title,el('span','›','shop-chevron'));
     row.append(head);
-    if(item.stock.known&&item.stock.months!=null){
-      const bar=el('div',undefined,'shop-bar'),fill=el('span');
-      fill.style.width=`${Math.min(100,item.stock.months/12*100)}%`;
-      if(item.stock.months<1)fill.className='low';
-      bar.append(fill);row.append(bar);
-    }
-    if(item.annualAmount!=null)row.append(chips(STOCK_LEVELS,nearestLevel(item.stock.months),months=>setStock(item,months),`Beholdning av ${item.name}`));
+    row.append(stockEditor(item,updated=>{status.textContent=stockSummary(updated);}));
     return row;
   }
   function pantryList(holder) {
@@ -304,7 +328,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
   function renderPantry(root) {
     const known=data.items.filter(x=>x.stock.known).length;
     const intro=el('section',undefined,'shop-hero');
-    intro.append(el('div','Hva har vi hjemme?','shop-hero-number small'),el('p',`${known} av ${data.items.length} varer er registrert. Beholdningen telles ned av seg selv, og «Kjøpt» legger til.`,'shop-sub'));
+    intro.append(el('div','Hva har vi hjemme?','shop-hero-number small'),el('p',`${known} av ${data.items.length} varer er registrert. Tell pakker en gang, så trekker vi fra etter hvert som dere bruker, og «Kjøpt» legger til.`,'shop-sub'));
     const input=el('input');input.type='search';input.placeholder='Finn en vare';input.value=search;input.setAttribute('aria-label','Søk i lageret');
     const list=el('div',undefined,'shop-list');
     input.oninput=()=>{search=input.value;pantryList(list);};
@@ -401,7 +425,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     if(!compact)head.append(el('h2','Handel'));
     const tabs=el('div',undefined,'shop-tabs');tabs.setAttribute('role','tablist');
     for(const [key,label] of [['buy','Kjøp nå'],['pantry','Lager'],['insight','Innsikt']]){
-      const node=button(label,()=>{tab=key;render();window.scrollTo({top:panel.getBoundingClientRect().top+window.scrollY-20});},key===tab?'on':'');
+      const node=button(label,async()=>{tab=key;if(dirty){dirty=false;try{await load();}catch{}}render();window.scrollTo({top:panel.getBoundingClientRect().top+window.scrollY-20});},key===tab?'on':'');
       node.setAttribute('role','tab');node.setAttribute('aria-selected',String(key===tab));tabs.append(node);
     }
     head.append(tabs);
