@@ -14,7 +14,7 @@ export function publicHttps(value) {
 
 /** The flyer page an agent noted in its evidence, when there is exactly one. */
 export function flyerPage(evidence) {
- const pages=[...new Set([...String(evidence??'').matchAll(/\bside\s+(\d{1,3})\b/gi)].map(match=>Number(match[1])))];
+ const pages=[...new Set([...String(evidence??'').matchAll(/\bside\s*(\d{1,3})\b/gi)].map(match=>Number(match[1])))];
  return pages.length===1&&pages[0]>0?pages[0]:null;
 }
 

@@ -27,6 +27,7 @@ test('pages, failures, oversized files and unsafe redirects fall back to a link'
 });
 test('a single page reference in the evidence opens that page',()=>{
  assert.equal(flyerPage('Kundeavis uke 46, side 23: Ali kaffe'),23);
+ assert.equal(flyerPage('SPAR uke46/2026, side23: Ali kaffe'),23);
  assert.equal(flyerPage('Alle sider lest'),null);
  assert.equal(flyerPage('Side 2 og side 9 viser varen'),null);
 });
