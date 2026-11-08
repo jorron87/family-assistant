@@ -107,3 +107,13 @@ test('restart keeps a live worker lease and releases only its own dead worker le
   createPhoneDispatcher({store,root:dir,launch:()=>{calls++;}}).tick();assert.equal(calls,1);assert.notEqual(store.snapshot().runLease.token,lease.lease.token);
  } finally {assert.ok(resolve(dir).startsWith(resolve(tmpdir())+'\\'));rmSync(dir,{recursive:true,force:true});}
 });
+
+test('list items that need routing start one bounded run after a short wait',()=>{
+ let now=Date.parse('2026-11-08T12:00:00Z'),launched=null,ended=0,attempts=null;
+ const work=[{id:'a',addedAt:'2026-11-08T11:59:30Z'}];
+ const store={snapshot:()=>({phone:{},runLease:{token:'t1'}}),phone:{list:()=>[],worker(){}},calendarActions:()=>[],beginRun:()=>({acquired:true,lease:{token:'t1'}}),endRun:()=>ended++,shopping:{listRouteWork:()=>work,listRouteAttempt:ids=>{attempts=ids;}}};
+ const dispatcher=createPhoneDispatcher({store,root:'.',clock:()=>now,launch:input=>{launched=input;return {pid:1};}});
+ dispatcher.tick();assert.equal(launched,null);
+ now+=31000;dispatcher.tick();assert.match(launched.prompt,/shopping-list-route/);assert.match(launched.prompt,/Ikke endre Oda-kurven/);assert.deepEqual(attempts,['a']);
+ launched.onExit(0,null);assert.equal(ended,1);
+});
