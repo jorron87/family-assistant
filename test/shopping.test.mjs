@@ -84,6 +84,12 @@ test('MCP historical product prices do not substitute for paid line totals',()=>
  const {shop}=fixture(),input=order('mcp','2026-10-01');input.linePricesVerified=false;input.products[0].product.price='1.00';
  shop.importOrders({orders:[input]});assert.equal(shop.analysis().products[0].spent,600);assert.equal(shop.analysis().products[0].baselineUnitPrice,null);
 });
+
+test('a target-price watch without purchase history does not invent consumption or paid savings',()=>{
+ const {shop}=fixture();const w=shop.watch({name:'Exact household item',productKeys:[],unit:'l',storage:'pantry',targetPrice:20,maxPacks:1});
+ shop.offer({watchId:w.id,storeId:'near',externalId:'delivered-bundle',name:'Exact item 3 x 10 l',price:570,packAmount:30,unit:'l',validFrom:'2026-11-08',validTo:'2026-11-08',sourceUrl:'https://example.com/item',evidence:'Three boxes, shipping included',comparable:true,comparisonNote:'Exact variant, delivered price'});
+ const [o]=shop.view().opportunities;assert.equal(o.packs,1);assert.equal(o.quantityBasis,'offer-pack');assert.equal(o.referenceType,'target');assert.equal(o.saving,null);assert.equal(o.unitPrice,19);
+});
 test('nutrition reports coverage and never treats unknown foods or volume as zero nutrients',()=>{
  const entry=validateNutrition({productKey:'oda:1',basis:'g',per100:{kcal:160,protein:20,fat:8,carbs:2},sourceUrl:'https://example.com/label',evidence:'Næringsinnhold per 100 g'});
  const orders=[{products:[{productKey:'oda:1',name:'Mat',category:'Mat',netTotal:40,quantity:2,pack:{amount:.4,unit:'kg'}},{productKey:'unknown',category:'Mat',netTotal:20,quantity:1,pack:{amount:1,unit:'l'}},{productKey:'soap',category:'Hus og hjem',netTotal:100,quantity:1}]}];

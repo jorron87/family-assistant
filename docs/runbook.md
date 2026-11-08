@@ -10,6 +10,8 @@ For eldre lagret tegnskade: ta `/api/maintenance/backup`, les originalbelegget o
 
 ## Handel og tilbud
 
+Varer uten Oda-historikk kan overvåkes med tom `productKeys` og en uttrykkelig, justerbar `targetPrice` per kg/l/stk. Da vises målpris, aldri påstått betalt referanse eller kronebesparelse. Uten oppgitt forbruk brukes bare én tilbudspakning. For nettbutikker må den registrerte prisen inkludere dokumentert frakt og eventuelle vektgebyrer for akkurat den viste mengden. En fast kombinasjon av flere bokser kan registreres som én samlet pakning med total mengde og levert pris. Ukjent frakt, feil variant, utsolgte varer og uavklarte abonnementsvilkår skal ikke kvalifisere som et sammenlignbart tilbud. Registrer dem med `comparable:false` og konkret begrunnelse. Kontroller flerpakninger mot samme antall enkeltpakker; flerpakninger er ikke alltid billigere. Hold butikkontrollen daglig og bruk kildens faktiske lagerstatus og kjøpsgrenser.
+
 `node src/cli.mjs shopping` viser innstillinger, tolv måneders analyse som standard, overvåkninger, ferske tilbud, næringsdatadekning og butikkontroller. `shopping-queue` viser bare forfalte kontroller når overvåkning er aktivert. `next` legger disse etter telefon-/kalender-/kildearbeid. Fullkontrollen behandler dem med samme autoriserte agent. Et rent shoppingarbeid kan rapporteres med `scope:"handel"`; dette flytter aldri fullkontrolltid for skole- eller aktivitetskilder. Blocked-butikkontroller og utestet Oda-tilkobling skal fortsatt forklares konkret, selv om neste kontroll er utsatt.
 
 Skrivekommandoene tar en UTF-8 JSON-fil under `tmp/agent`:
