@@ -20,6 +20,8 @@ An explicit `purchaseAmount` can plan a larger stock-up without inventing monthl
 
 Wholesale quotes may exclude VAT. Preserve the quoted amount and apply the evidenced VAT rate before comparison with household prices. Configure `pricesIncludeVat:false` for such stores; an offer then requires `vatRate` and is normalized to a gross pack price. Do not confuse chicken thighs with breast, ground coffee with whole beans, or a wholesale case price with a price per kilogram.
 
+Kassal API results are chain-price candidates, not evidence of local stock, flyer campaigns, memberships or customer limits. Use the actual price receipt timestamp, never product updated_at or fetch time, for freshness. Keep API credentials encrypted and agent-only. Preserve manual product equivalence and store checks before treating candidates as actionable savings.
+
 Never open the same attachment in multiple tabs. Reuse existing source/working tabs. Keep the Vigilo keeper on Vigilo. Respect normal authentication pauses; do not refresh in a loop. Do not bypass access controls. A single blocked attachment or failed supplemental request does not prove global logout. Verify actual fresh list receipts for every configured child and required surface.
 
 For web UI work, discover the connected browsers/tabs first and use the existing Chrome extension browser with its returned IDs. Native Windows window control may fail to determine a browser URL even when the extension can read that same tab. Read the selected browser's documentation and reuse a free working tab. Do not infer global browser unavailability from a native-window error. An explicit safety stop still ends that turn; do not switch tools to bypass it.

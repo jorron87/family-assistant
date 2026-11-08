@@ -20,6 +20,7 @@ import {createIngestionDispatcher} from './ingestion-dispatch.mjs';
 import {createGooglePublisher} from './google-publisher.mjs';
 import {weeklyLetters} from './weekly-letters.mjs';
 import {createOda} from './oda.mjs';
+import {createKassal} from './kassal.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const store = createStore();
@@ -45,6 +46,7 @@ const dispatchTick=()=>{if(!restarting&&!process.env.FAMILIEN_NO_DISPATCH)phoneD
 const host = "127.0.0.1";
 const port = Number(process.env.FAMILIEN_PORT ?? 4318);
 const oda=createOda({dataDir:DATA_DIR,shopping:store.shopping,redirectUrl:`http://127.0.0.1:${port}/api/shopping/oda/callback`});
+const kassal=createKassal({dataDir:DATA_DIR});
 PUBLIC_FILES.set('shopping-view.mjs','text/javascript; charset=utf-8');
 PUBLIC_FILES.set('shopping.css','text/css; charset=utf-8');
 const sessionMaintenance = createSessionMaintenance({dataDir:DATA_DIR});
@@ -76,7 +78,7 @@ async function handle(req, res) {
     const path = new URL(req.url, `http://${host}:${port}`).pathname;
     const method = req.method;
     if(path==='/shopping-setup'&&method==='GET')return send(res,200,readFileSync(join(root,'public','shopping-setup.html')),'text/html; charset=utf-8');
-    if(path==='/api/shopping'&&method==='GET')return send(res,200,{...store.shopping.view(),oda:oda.status()});
+    if(path==='/api/shopping'&&method==='GET')return send(res,200,{...store.shopping.view(),oda:oda.status(),kassal:kassal.status()});
     if(path==='/api/shopping/queue'&&method==='GET')return send(res,200,store.shopping.queue());
     if(path==='/api/shopping/oda/callback'&&method==='GET'){
       await oda.callback(Object.fromEntries(new URL(req.url,`http://${host}`).searchParams));
@@ -85,6 +87,11 @@ async function handle(req, res) {
     if(path.startsWith('/api/shopping/')&&method==='POST'){
       if(req.headers['x-family-request']!=='1'||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host))return send(res,403,{error:'Ugyldig avsender.'});
       const input=await json(req);
+      if(path==='/api/shopping/kassal/configure')return send(res,200,kassal.configure(input));
+      if(path==='/api/shopping/kassal/search')return send(res,200,await kassal.search(input));
+      if(path==='/api/shopping/kassal/stores')return send(res,200,await kassal.stores(input));
+      if(path==='/api/shopping/kassal/product')return send(res,200,await kassal.product(input));
+      if(path==='/api/shopping/kassal/ean')return send(res,200,await kassal.ean(input));
       if(path==='/api/shopping/orders')return send(res,200,store.shopping.importOrders(input));
       if(path==='/api/shopping/settings')return send(res,200,store.shopping.settings(input));
       if(path==='/api/shopping/watch')return send(res,200,store.shopping.watch(input));

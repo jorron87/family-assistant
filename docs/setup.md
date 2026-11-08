@@ -11,6 +11,8 @@
 
 ## Handel (valgfritt)
 
+Kassal-integrasjonen er valgfri: konfigurer familiens egen API-nøkkel med `kassal-configure` som beskrevet i runbooken. Nøkkelen lagres kryptert på agenten og skal aldri legges i offentlig config, logger eller klientkode. Kjedepriser supplerer kildekontrollen; de bekrefter ikke lokale kampanjer eller lagerstatus. Hobbytilgang og tilgjengelige kjeder må kontrolleres mot Kassals gjeldende dokumentasjon.
+
 Handel kan bruke `purchaseAmount` for planlagte storinnkjøp av lagringsvarer. Dette er et alternativ til `monthlyUsage`, ikke målt forbruk. Se handelskontraktene i `runbook.md`; velg mengder og varselgrenser etter husholdningens preferanser og varenes faktiske holdbarhet.
 
 Handel-fanen viser kjøpsanalyse, en overvåkningsliste og kildebelagte tilbud. Overvåkning er avslått ved opprettelse. Åpne `/shopping-setup` på agentporten for å koble til familiens egen Oda-konto via OAuth og `https://oda.com/mcp`. Familien godkjenner tilgangen hos Oda; registrering og tokens lagres kryptert i eget dataområde og vises aldri i dashboard-API-et. Ikke kopier nettlesercookies eller en annen installasjons tokens. Oppsettet er sperret på kiosk- og mobilporten. Hent historikk og prøv én uttrykkelig valgt kurvendring manuelt før tilkoblingen regnes som testet. Familien betaler på Odas nettside.
