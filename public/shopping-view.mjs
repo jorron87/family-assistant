@@ -128,6 +128,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     if(deal.tier==='good'&&deal.fullMonths===3)notes.push('Bra, men ikke et kupp, så vi foreslår 3 måneder.');
     else if(deal.tier!=='small'&&deal.fullMonths!=null&&deal.fullMonths<(deal.tier==='excellent'?12:3))notes.push(`Holder ca. ${monthsText(deal.fullMonths)}, så vi foreslår ikke mer.`);
     if(deal.stock.known&&deal.stock.months!=null)notes.push(`Dere har ca. ${monthsText(deal.stock.months)} på lager.`);
+    if(deal.bestBefore)notes.push(`Best før ${dayLabel(deal.bestBefore)}.`);
     if(deal.maxPacks)notes.push(`Maks ${deal.maxPacks} per kunde.`);
     if(deal.bundlePacks>1)notes.push(`Kjøp ${deal.bundlePacks} og ${deal.bundlePacks}.`);
     if(deal.memberOnly)notes.push('Krever medlemskap.');

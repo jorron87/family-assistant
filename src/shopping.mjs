@@ -2,7 +2,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {validateNutrition,purchaseNutrition} from './shopping-nutrition.mjs';
 import {calibrateMarket} from './shopping-market.mjs';
 import {createMarketCatalog} from './shopping-catalog.mjs';
-import {annualNeed,chainName,dealScore,dealTier,defaultShelfLifeMonths,estimateStock,planQuantities,shelfLifeMonths} from './shopping-planning.mjs';
+import {annualNeed,chainName,dealScore,dealTier,defaultShelfLifeMonths,estimateStock,planQuantities,shelfLifeMonths,shelfWithDate} from './shopping-planning.mjs';
 
 const hash=value=>createHash('sha256').update(value).digest('hex').slice(0,24);
 const round=n=>Math.round((n+Number.EPSILON)*100)/100;
@@ -147,7 +147,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
   function offer(input) {
     const watch=s.watches[input.watchId];if(!watch)throw Error('Ukjent overvåkning.');
     const store=s.settings.stores.find(x=>x.id===input.storeId);if(!store)throw Error('Butikken er ikke valgt.');
-    const entry={id:hash(`${required(input.storeId,'Butikk')}\0${required(input.externalId,'Tilbuds-ID')}`),externalId:input.externalId,storeId:input.storeId,watchId:watch.id,name:required(input.name,'Varenavn'),price:positive(input.price,'tilbudspris'),packAmount:positive(input.packAmount,'pakningsmengde'),unit:input.unit,validFrom:day(input.validFrom),validTo:day(input.validTo),observedAt:input.observedAt??now().toISOString(),sourceUrl:url(input.sourceUrl),evidence:required(input.evidence,'Kildebelegg'),conditions:text(input.conditions,1000),memberOnly:input.memberOnly===true,maxPacks:input.maxPacks==null?null:positive(input.maxPacks,'maks kundeantall'),bundlePacks:positive(input.bundlePacks??1,'antall i pakketilbud'),comparable:input.comparable===true,comparisonNote:required(input.comparisonNote,'Sammenligningsgrunnlag')};
+    const entry={id:hash(`${required(input.storeId,'Butikk')}\0${required(input.externalId,'Tilbuds-ID')}`),externalId:input.externalId,storeId:input.storeId,watchId:watch.id,name:required(input.name,'Varenavn'),price:positive(input.price,'tilbudspris'),packAmount:positive(input.packAmount,'pakningsmengde'),unit:input.unit,validFrom:day(input.validFrom),validTo:day(input.validTo),observedAt:input.observedAt??now().toISOString(),sourceUrl:url(input.sourceUrl),evidence:required(input.evidence,'Kildebelegg'),conditions:text(input.conditions,1000),memberOnly:input.memberOnly===true,bestBefore:input.bestBefore==null?null:day(input.bestBefore),maxPacks:input.maxPacks==null?null:positive(input.maxPacks,'maks kundeantall'),bundlePacks:positive(input.bundlePacks??1,'antall i pakketilbud'),comparable:input.comparable===true,comparisonNote:required(input.comparisonNote,'Sammenligningsgrunnlag')};
     if(entry.unit!==watch.unit||entry.validTo<entry.validFrom||!Number.isFinite(Date.parse(entry.observedAt))||Date.parse(entry.observedAt)>now().getTime()+60000||!Number.isInteger(entry.bundlePacks)||(entry.maxPacks!==null&&!Number.isInteger(entry.maxPacks)))throw Error('Ugyldig tilbudsperiode, mengde eller observasjon.');
     entry.quotedPriceIncludesVat=input.priceIncludesVat??store.pricesIncludeVat??true;
     if(typeof entry.quotedPriceIncludesVat!=='boolean')throw Error('Momsgrunnlag må oppgis som true eller false.');
@@ -208,7 +208,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
       const unitPrice=o.price/o.packAmount,discountPct=(reference-unitPrice)/reference*100;
       if(discountPct<w.minDiscountPct||(w.targetPrice!==null&&unitPrice>w.targetPrice))continue;
       const referenceType=market?'market':alternative?'alternative':amount>0?'paid':'target';
-      const need=needOf(w,a),stock=estimateStock(w,rateOf(need),at),shelfMonths=shelfLifeMonths(w);
+      const need=needOf(w,a),stock=estimateStock(w,rateOf(need),at),shelfMonths=shelfWithDate(shelfLifeMonths(w),o.bestBefore,at);
       const tier=dealTier({unitPrice,excellentPrice:w.excellentPrice,discountPct,referenceType});
       const hasSaving=amount>0||alternative||!!market;
       if(hasSaving&&reference<=unitPrice)continue;
@@ -333,7 +333,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
   const summaryOf=main=>({dealCount:main.length,excellentCount:main.filter(d=>d.tier==='excellent').length,potential:round(main.reduce((n,d)=>n+(d.saving??0),0)),top:main[0]?.watchName??null});
   function familyView() {
     const a=analysis(),at=now().getTime(),today=shoppingDay(now()),year=today.slice(0,4),found=deals(a);
-    const pick=d=>({offerId:d.id,watchId:d.watchId,watchName:d.watchName,storeId:d.storeId,storeName:d.storeName,name:d.name,tier:d.tier,lowestSeen:d.lowestSeen,unit:d.unit,price:d.price,unitPrice:d.unitPrice,referencePrice:d.referencePrice,referenceType:d.referenceType,discountPct:d.discountPct,packAmount:d.packAmount,bundlePacks:d.bundlePacks,maxPacks:d.maxPacks,validFrom:d.validFrom,validTo:d.validTo,memberOnly:d.memberOnly,conditions:d.conditions,comparisonNote:d.comparisonNote,sourceUrl:d.sourceUrl,storage:d.storage,annualAmount:d.annualAmount,quantityBasis:d.quantityBasis,shelfMonths:d.shelfMonths,fullMonths:d.fullMonths,stock:d.stock,saving:d.saving,recommendedKey:d.recommendedKey,options:d.options});
+    const pick=d=>({bestBefore:d.bestBefore,offerId:d.id,watchId:d.watchId,watchName:d.watchName,storeId:d.storeId,storeName:d.storeName,name:d.name,tier:d.tier,lowestSeen:d.lowestSeen,unit:d.unit,price:d.price,unitPrice:d.unitPrice,referencePrice:d.referencePrice,referenceType:d.referenceType,discountPct:d.discountPct,packAmount:d.packAmount,bundlePacks:d.bundlePacks,maxPacks:d.maxPacks,validFrom:d.validFrom,validTo:d.validTo,memberOnly:d.memberOnly,conditions:d.conditions,comparisonNote:d.comparisonNote,sourceUrl:d.sourceUrl,storage:d.storage,annualAmount:d.annualAmount,quantityBasis:d.quantityBasis,shelfMonths:d.shelfMonths,fullMonths:d.fullMonths,stock:d.stock,saving:d.saving,recommendedKey:d.recommendedKey,options:d.options});
     const byWatch=new Map();for(const d of found.opportunities){const list=byWatch.get(d.watchId)??[];list.push(d);byWatch.set(d.watchId,list);}
     const primary=[...byWatch.values()].map(list=>({...pick(list[0]),alsoAt:list.slice(1).map(x=>({storeName:x.storeName,unitPrice:x.unitPrice}))}));
     const main=primary.filter(d=>d.tier!=='small'),small=primary.filter(d=>d.tier==='small');

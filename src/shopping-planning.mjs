@@ -25,6 +25,13 @@ export function defaultShelfLifeMonths({name='',storage='other'}={}) {
 }
 export const shelfLifeMonths=watch=>watch.shelfLifeMonths??defaultShelfLifeMonths(watch);
 
+/** A dated offer, such as short-dated surplus stock, cannot outlast its own date. */
+export function shelfWithDate(months,bestBefore,at) {
+ if(!bestBefore)return months;
+ const left=(Date.parse(bestBefore+'T12:00:00Z')-at)/(DAYS_PER_MONTH*DAY);
+ return Math.min(months,left<1?.5:Math.floor(left));
+}
+
 /** Yearly amount, in the watch's unit. Null means the need is genuinely unknown. */
 export function annualNeed(watch,rows,historyDays) {
  if(watch.monthlyUsage!=null)return {amount:watch.monthlyUsage*12,basis:'household-estimate'};
