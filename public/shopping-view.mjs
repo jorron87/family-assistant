@@ -66,7 +66,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     banner.hidden=!summary.dealCount;
     banner.replaceChildren();
     if(!summary.dealCount)return;
-    const lead=summary.excellentCount?`Svært bra pris på ${summary.top}`:`${summary.dealCount} gode kjøp denne uka`;
+    const lead=summary.excellentCount?`Svært bra pris på ${summary.top}`:`${summary.dealCount} ${summary.dealCount===1?'godt kjøp':'gode kjøp'} denne uka`;
     banner.append(button(`${lead} · spar ${kr(summary.potential)} · se Handel`,onOpen));
   }
   async function load() {
@@ -318,8 +318,9 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
   function renderBuy(root) {
     const hero=el('section',undefined,'shop-hero');
     const potential=data.summary.potential;
-    if(data.deals.length){
-      hero.append(el('p','Denne uka','shop-sub'),el('div',`${kr(potential)} å spare`,'shop-hero-number'),el('p',`${data.deals.length} ${data.deals.length===1?'kjøp':'kjøp'} verdt å gjøre${data.saved.year?` · ${kr(data.saved.year)} spart i år`:''}`,'shop-sub'));
+    if(data.deals.length||data.steady.length){
+      const parts=[data.deals.length?data.deals.length+' '+(data.deals.length===1?'tilbud':'tilbud'):null,data.steady.length?data.steady.length+' fast lav pris':null].filter(Boolean).join(' og ');
+      hero.append(el('p','Denne uka','shop-sub'),el('div',`${kr(potential)} å spare`,'shop-hero-number'),el('p',`${parts}${data.saved.year?` · ${kr(data.saved.year)} spart i år`:''}`,'shop-sub'));
     }else{
       hero.append(el('div',data.monitoring?'Ingen kupp akkurat nå':'Tilbudsovervåkning er av','shop-hero-number small'),el('p',`${data.storesCheckedToday} butikker sjekket i dag${data.saved.year?` · ${kr(data.saved.year)} spart i år`:''}`,'shop-sub'));
     }

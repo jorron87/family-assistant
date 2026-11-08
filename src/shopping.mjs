@@ -94,6 +94,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
   s.priceHistory??={};
   s.productLinks??={};
   s.feedReviewed??={};
+  s.feedRead??={};
   s.shoppingList??=[];
   s.odaLimits??={};
   s.odaChoices??={};
@@ -250,21 +251,30 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
   function feed(input) {
     const store=s.settings.stores.find(x=>x.id===input.storeId&&x.facebookGroup);if(!store)throw Error('Ukjent gruppekilde.');
     const items=feedUnread(store.id);
-    if(input.ack!==true)return structuredClone(items.map(({externalId,url,author,text:body,postedAt,attachments,comments,token})=>({externalId,url,author,text:body,postedAt,attachments,comments,token})));
+    if(input.ack!==true)return update(()=>{s.feedRead[store.id]=Object.fromEntries(items.map(item=>[item.externalId,item.token]));return items.map(({externalId,url,author,text:body,postedAt,attachments,comments,token})=>({externalId,url,author,text:body,postedAt,attachments,comments,token}));});
     const evidence=required(input.evidence,'Kontrollbelegg');
-    return update(()=>{const seen=s.feedReviewed[store.id]??={};for(const item of items)seen[item.externalId]=item.token;s.reviews[store.id]={storeId:store.id,status:'ok',checkedAt:now().toISOString(),evidence,sourceUrl:store.url,nextCheck:shoppingDay(new Date(now().getTime()+86400000))};return {reviewed:items.length};});
+    if(!s.feedRead[store.id])throw Error('Les shopping-feed før gjennomgangen kvitteres.');
+    return update(()=>{const seen=s.feedReviewed[store.id]??={},read=s.feedRead[store.id],reviewed=items.filter(item=>read[item.externalId]===item.token);for(const item of reviewed)seen[item.externalId]=item.token;const remaining=feedUnread(store.id).length;if(!remaining)s.reviews[store.id]={storeId:store.id,status:'ok',checkedAt:now().toISOString(),evidence,sourceUrl:store.url,nextCheck:shoppingDay(new Date(now().getTime()+86400000))};delete s.feedRead[store.id];return {reviewed:reviewed.length,remaining};});
   }
   function marketRefreshDue(today) {
     const calibrated=Object.values(s.watches).filter(w=>w.enabled!==false&&w.marketCalibration?.checkedAt);
     if(!calibrated.length)return [];
-    const newest=calibrated.map(w=>w.marketCalibration.checkedAt).sort().at(-1);
-    return shoppingDay(new Date(newest))===today?[]:[{do:'shopping-market-refresh',groups:calibrated.length,lastCheckedAt:newest}];
+    const due=calibrated.filter(w=>w.marketCalibration.status==='needs-review'||shoppingDay(new Date(w.marketCalibration.checkedAt))!==today);
+    return due.length?[{do:'shopping-market-refresh',groups:due.length,watchIds:due.map(w=>w.id).sort(),lastCheckedAt:due.map(w=>w.marketCalibration.checkedAt).sort()[0]}]:[];
   }
   function queue() {
-    if(!s.settings.monitoringEnabled)return [];
+    const routes=listRouteWork().map(e=>({do:'shopping-list-route',id:e.id,name:e.name,need:e.need,addedAt:e.addedAt,retryAt:e.routeRetryAt??null}));
+    if(!s.settings.monitoringEnabled)return routes;
     const today=shoppingDay(now());
-    return [...catalog.pending().filter(p=>s.watches[p.watchId]?.enabled!==false).map(p=>({do:'shopping-product-review',watchId:p.watchId,watchName:s.watches[p.watchId]?.name,productId:p.id,store:p.store,name:p.name,fingerprint:p.fingerprint,sourceUrl:p.sourceUrl})),...feedWork(),...s.settings.stores.filter(x=>!x.facebookGroup&&(!s.reviews[x.id]||s.reviews[x.id].nextCheck<=today)).map(x=>({do:'shopping-review',storeId:x.id,name:x.name,url:x.url,lastReview:s.reviews[x.id]??null})),...marketRefreshDue(today),...unlinkedOrderLines(),...listRouteWork().map(e=>({do:'shopping-list-route',id:e.id,name:e.name,need:e.need,addedAt:e.addedAt}))];
+    return [...catalog.pending().filter(p=>s.watches[p.watchId]?.enabled!==false).map(p=>({do:'shopping-product-review',watchId:p.watchId,watchName:s.watches[p.watchId]?.name,productId:p.id,store:p.store,name:p.name,fingerprint:p.fingerprint,sourceUrl:p.sourceUrl})),...feedWork(),...s.settings.stores.filter(x=>!x.facebookGroup&&(!s.reviews[x.id]||s.reviews[x.id].nextCheck<=today)).map(x=>({do:'shopping-review',storeId:x.id,name:x.name,url:x.url,lastReview:s.reviews[x.id]??null})),...marketRefreshDue(today),...unlinkedOrderLines(),...routes];
   }
+  function completion() {
+    const work=queue(),blockedStores=s.settings.monitoringEnabled?s.settings.stores.filter(x=>s.reviews[x.id]?.status==='blocked').map(x=>({storeId:x.id,name:x.name,evidence:s.reviews[x.id].evidence})):[];
+    const blockedRoutes=s.shoppingList.filter(e=>!e.checkedAt&&e.routing==='blocked').map(({id,name,reason})=>({id,name,reason}));
+    return {complete:!work.length&&!blockedStores.length&&!blockedRoutes.length,work,blockedStores,blockedRoutes};
+  }
+  function listRouteAttempt(ids) {return update(()=>{for(const e of listRouteWork())if(ids.includes(e.id)){e.routeAttempts=(e.routeAttempts??0)+1;e.routeRetryAt=null;}return true;});}
+  function listRouteFinish(ids,note) {return update(()=>{for(const e of listRouteWork())if(ids.includes(e.id)){if(e.routeAttempts>=3){e.routing='blocked';e.storeName??=NEAREST;e.reason=note??'Kunne ikke sorteres automatisk. Velg butikk selv eller legg varen inn på nytt.';}else e.routeRetryAt=new Date(now().getTime()+(e.routeAttempts>=2?300000:60000)).toISOString();}return true;});}
   function catalogObserve(input){
     const w=s.watches[input.watchId];if(!w)throw Error('Ukjent overvåkning.');
     const result=catalog.observe(input);w.catalogManaged=true;
@@ -345,7 +355,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     const sizes=commonPacks(rows,catalogPacks.get(w.id)??[],Object.keys(w.stockPacks??{}).map(Number));
     return {packs:packBreakdown(sizes,stock.known?w.stockPacks??null:null,stock.amount),id:w.id,name:w.name,unit:w.unit,storage:w.storage,enabled:w.enabled!==false,manualLimits:w.manualLimits===true,annualAmount:need.amount===null?null:round(need.amount),annualBasis:need.basis,shelfLifeMonths:shelfLifeMonths(w),shelfCustom:w.shelfLifeMonths!=null,shelfDefault:defaultShelfLifeMonths(w),stock,spent:round(rows.reduce((n,p)=>n+p.spent,0)),prices:{normal,good,excellent:w.excellentPrice,targetPrice:w.targetPrice,current:offerWins?offer.unitPrice:cheapest?.currentUnitPrice??null,currentChain:offerWins?offer.storeName.replace(/\s*\(nettbutikk\)$/i,' (+ frakt)'):cheapest?chainName(cheapest.store):null,lowestSeen:history.length>=30?Math.min(...history):null,historyDays:history.length,basis}};
   }
-  const summaryOf=main=>({dealCount:main.length,excellentCount:main.filter(d=>d.tier==='excellent').length,potential:round(main.reduce((n,d)=>n+(d.saving??0),0)),top:main[0]?.watchName??null});
+  const summaryOf=(main,steady=[])=>({dealCount:main.length+steady.length,excellentCount:main.filter(d=>d.tier==='excellent').length,potential:round([...main,...steady].reduce((n,d)=>n+(d.saving??0),0)),top:main[0]?.watchName??steady[0]?.name??null});
   function familyView() {
     const a=analysis(),at=now().getTime(),today=shoppingDay(now()),year=today.slice(0,4),found=deals(a);
     const onList=new Set(listOpen().map(x=>x.offerId));
@@ -360,7 +370,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     const n=purchaseNutrition(orders().filter(o=>o.deliveryDate>=a.from&&o.deliveryDate<=a.to),s.nutrition);
     const sum=list=>round(list.reduce((x,p)=>x+(p.saving??0),0));
     const body={steady:steadyPrices(a,found,at),list:listView(today),odaDraft:odaDraft(a,today,at,found),monitoring:s.settings.monitoringEnabled===true,today,deals:main,smallDeals:small,belowTrip:found.belowTrip.map(d=>({...pick(d),alsoAt:[]})),covered:found.covered.map(pick),held:found.held,items,purchases:s.purchases.slice().reverse().slice(0,30).map(({previousStock,...p})=>p),saved:{year:sum(s.purchases.filter(p=>p.at.slice(0,4)===year)),all:sum(s.purchases)},stores,storesCheckedToday:stores.filter(x=>x.status==='ok'&&x.checkedAt&&shoppingDay(new Date(x.checkedAt))===today).length,analysis:{orderCount:a.orderCount,from:a.from,to:a.to,orderTotal:a.orderTotal,categories:a.categories,top:a.products.slice(0,15).map(p=>({name:p.name,spent:p.spent,orders:p.orders}))},nutrition:{spendPct:n.coverage.spendPct}};
-    return {...body,rev:hash(JSON.stringify(body)),summary:summaryOf(main)};
+    return {...body,rev:hash(JSON.stringify(body)),summary:summaryOf(main,body.steady)};
   }
   function offerSource(id){const o=s.offers[id];if(!o)throw Error('Tilbudet finnes ikke lenger.');return {sourceUrl:o.sourceUrl,evidence:o.evidence};}
   function familySummary(){const f=familyView();return {rev:f.rev,...f.summary};}
@@ -551,8 +561,13 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     if(input.action==='add')return update(()=>listAdd(input));
     if(input.action==='route'){
       const entry=find(),storeName=required(input.storeName,'Butikk').slice(0,120),reason=required(input.reason,'Begrunnelse').slice(0,300);
+      if(entry.checkedAt)throw Error('Varen er allerede kjøpt.');
+      if(entry.need==='now'&&storeName==='Oda')throw Error('Trenger nå skal handles i en fysisk nærbutikk.');
       const odaProductId=input.odaProductId==null?null:Number(input.odaProductId);if(odaProductId!==null&&(!Number.isSafeInteger(odaProductId)||odaProductId<1))throw Error('Ugyldig Oda-vare.');
-      return update(()=>{Object.assign(entry,{imageUrl:/^https:\/\//.test(input.imageUrl??'')?String(input.imageUrl).slice(0,1000):entry.imageUrl??null,storeName,reason,routing:null,odaProductId,detail:input.matchedName?String(input.matchedName).slice(0,200):entry.detail,unitPrice:input.unitPrice==null?entry.unitPrice:positive(input.unitPrice,'pris'),unit:input.unit??entry.unit,packAmount:input.packAmount==null?entry.packAmount:positive(input.packAmount,'pakning'),packs:input.packs==null?entry.packs:positive(input.packs,'antall')});return entry;});
+      const patch={imageUrl:/^https:\/\//.test(input.imageUrl??'')?String(input.imageUrl).slice(0,1000):entry.imageUrl??null,storeName,reason,routing:null,routeRetryAt:null,odaProductId,detail:input.matchedName?String(input.matchedName).slice(0,200):entry.detail,unitPrice:input.unitPrice==null?entry.unitPrice:positive(input.unitPrice,'pris'),unit:input.unit??entry.unit,packAmount:input.packAmount==null?entry.packAmount:positive(input.packAmount,'pakning'),packs:input.packs==null?entry.packs:positive(input.packs,'antall')};
+      if(patch.packs!==null&&(!Number.isInteger(patch.packs)||patch.packs>1000)||patch.unit!==null&&!['kg','l','stk'].includes(patch.unit))throw Error('Ugyldig mengde eller enhet.');
+      if(storeName==='Oda'&&(!odaProductId||!patch.packs))throw Error('Oda-valg krever produkt-ID og antall pakker.');
+      return update(()=>{Object.assign(entry,patch);return entry;});
     }
     if(input.action==='check'){
       const entry=find();if(entry.checkedAt)return structuredClone(entry);
@@ -655,5 +670,5 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     return update(()=>{s.productLinks[key]={watchId:w?.id??null,evidence,at:now().toISOString()};if(w&&!w.productKeys.includes(key))w.productKeys.push(key);return s.productLinks[key];});
   }
   function cartReceipt(id,patch) {return update(()=>s.cartReceipts[id]={...(s.cartReceipts[id]??{}),...patch,id,updatedAt:now().toISOString()});}
-  return {odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt:ids=>update(()=>{for(const e of s.shoppingList)if(ids.includes(e.id)){e.routeAttempts=(e.routeAttempts??0)+1;if(e.routeAttempts>=3&&e.routing==='pending'){e.routing=null;e.reason='Kunne ikke sorteres automatisk';}}return true;}),list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
+  return {completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
 }

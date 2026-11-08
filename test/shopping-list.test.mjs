@@ -133,6 +133,7 @@ test('a store that is simply cheap is shown when stock is low and the gain is re
   shop.market({watchId:w.id,products:products.map(([store,id,price])=>({id,store,unit:'kg',packAmount:1,reviewed:true,equivalenceEvidence:'Samme mel',lastChecked:'2026-11-08T10:00:00Z',currentPrice:price,history:history(price)}))});
   return {shop,w};};
  let {shop,w}=make(30);let [row]=shop.familyView().steady;
+ assert.equal(shop.familyView().summary.potential,420);assert.equal(shop.familyView().summary.dealCount,1);assert.equal(shop.familyView().summary.top,'Mel');
  assert.equal(row.storeName,'Nærbutikk');assert.equal(row.packs,12);assert.equal(row.average,65);assert.equal(row.diffPct,54);assert.equal(row.saving,420);
  shop.pantry({watchId:w.id,amount:6});assert.equal(shop.familyView().steady.length,0);
  shop.pantry({watchId:w.id,amount:1});assert.equal(shop.familyView().steady[0].packs,11);
