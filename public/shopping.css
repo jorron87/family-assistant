@@ -1,0 +1,27 @@
+#shopping { max-width: 1380px; margin: auto; padding-bottom: 48px; }
+#shopping section { margin: 26px 0; padding: 24px; background: var(--white,#fff); border: 1px solid var(--line,#ddd); border-radius: 18px; }
+.shopping-heading h2 { font-size: 38px; margin: 10px 0; }
+.shopping-note { color: var(--muted,#626b63); max-width: 85ch; }
+.shopping-offers { display:flex; flex-wrap:wrap; gap:16px; }
+.shopping-offers > h3, .shopping-offers > p { flex-basis:100%; }
+.shopping-offer { flex:1 1 300px; padding:22px; border-radius:14px; background:var(--soft-green,#eaf2e7); }
+.shopping-offer strong { font-size:28px; color:var(--green,#345b3b); }
+#shopping button,.shopping-dialog button { min-height:48px; padding:10px 18px; border-radius:10px; border:1px solid var(--line,#ccc); background:var(--paper,#f7f7f2); color:var(--ink,#18251d); cursor:pointer; font:inherit; }
+#shopping button:disabled { opacity:.5; cursor:default; }
+#shopping input,.shopping-dialog input,.shopping-dialog select { min-height:46px; padding:8px 12px; border:1px solid var(--line,#ccc); border-radius:8px; background:var(--paper,#fff); color:var(--ink,#18251d); font:inherit; }
+.shopping-search,.shopping-watch { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:12px 0; }
+.shopping-watch > span { flex:1 1 320px; }
+.shopping-watch input { width:85px; }
+.shopping-table { overflow-x:auto; margin:18px 0; }
+.shopping-table table { width:100%; border-collapse:collapse; }
+.shopping-table th,.shopping-table td { text-align:left; padding:12px; border-bottom:1px solid var(--line,#ddd); }
+#shopping summary { cursor:pointer; padding:14px 0; font-weight:600; }
+.shopping-dialog { width:min(620px,90vw); max-height:90vh; overflow:auto; border:1px solid var(--line,#ddd); border-radius:20px; background:var(--paper,#fff); color:var(--ink,#18251d); padding:28px; }
+.shopping-dialog label { display:grid; gap:6px; margin:14px 0; }
+.shopping-dialog::backdrop { background:#10201888; }
+.shopping-banner { background:var(--soft-green,#eaf2e7); padding:8px 24px; }
+.shopping-banner[hidden] { display:none; }
+.shopping-banner button { border:0; background:transparent; color:var(--green,#345b3b); font:inherit; font-weight:700; min-height:42px; cursor:pointer; }
+.shopping-message:empty { display:none; }
+body.kiosk .main-nav button { padding-left:13px; padding-right:13px; }
+@media(max-width:700px) { #shopping section { padding:16px; } .shopping-table th,.shopping-table td { padding:8px; } }

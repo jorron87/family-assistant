@@ -45,7 +45,7 @@ export function collectorSummary(collector, now = Date.now()) {
   return out;
 }
 
-export function buildNext({ phone, calendarActions, completion, queue, activities, collector, feed, now = Date.now() }) {
+export function buildNext({ phone, calendarActions, completion, queue, activities, collector, feed, shopping = [], now = Date.now() }) {
   const work = [];
   const phoneItems = (Array.isArray(phone) ? phone : phone?.items ?? []).filter((item) => ["queued", "processing", "blocked"].includes(item.status));
   for (const item of phoneItems) work.push({ do: "phone", id: item.id, title: item.title, status: item.status, note: item.note ?? undefined });
@@ -63,6 +63,7 @@ export function buildNext({ phone, calendarActions, completion, queue, activitie
   for(const id of new Set((feed?.facebookActivities??[]).map(item=>item.sourceId)))work.push({do:'activity-facebook',id,hint:'node src/cli.mjs activity-facebook '+id});
   for (const id of feed?.changedPages ?? []) work.push({ do: 'activity-page', id, hint: 'node src/cli.mjs activity-page ' + id });
   for (const source of activities?.pending ?? []) work.push({ do: "activity-source", id: source.sourceId, name: source.name, reason: source.reason });
+  work.push(...shopping);
   const collectorGaps=Object.entries(collector?.supplemental??{}).filter(([,status])=>status.health!=='ok').map(([surface,status])=>({surface,...status}));
   return { complete: completion?.complete === true && !work.length, collector: collectorSummary(collector, now),collectorGaps,counts: completion?.counts, remaining: work.length, work: work.slice(0, 40), moreWork: Math.max(0, work.length - 40), horizon: new Date(soon).toISOString().slice(0, 10) };
 }

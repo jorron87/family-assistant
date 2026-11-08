@@ -42,6 +42,8 @@ npm start
 
 En touchskjerm kan vise oversikten fast. Mobilinnsending utenfor hjemmet bruker egen HTTPS-tunnel. Home Assistant, vær, renovasjon og lokale aktivitetsforslag er valgfrie tillegg.
 
+**Handel** er et valgfritt tillegg for Oda-historikk, prisovervåkning og lokale tilbud på varer familien allerede kjøper. Dashboardet viser anslått besparelse i kroner, pakningsstørrelser, vilkår og kilde. Oda kobles til med familiens eget samtykke; valgte varer kan legges i kurven, mens familien ser over og betaler hos Oda. Historikk fra én butikk er bare en del av forbruket. [Oppsett](docs/setup.md) og [kommandoer](docs/runbook.md) beskriver aktivering og manuell verifisering.
+
 [Arkitektur](docs/architecture.md) · [Integrasjoner](docs/integrations.md) · [Utvikling og Git](docs/git-workflow.md) · [Personvern](SECURITY.md) · [Bidra](CONTRIBUTING.md)
 
 MIT-lisens. Uoffisielle kildeintegrasjoner; grensesnitt og datotolkning er foreløpig primært norske.

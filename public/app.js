@@ -7,6 +7,7 @@ import { cleanTitle, isFollowUp, isWaste } from "./event-display.mjs";
 import { loginProblems, loginSummary } from "./login-status.mjs";
 import { celebrateTick, celebrateComplete, celebrationFor, pop } from "./celebrate.mjs";
 import { isHomework, isExpired } from "./home-tasks.mjs";
+import {installShoppingView} from './shopping-view.mjs';
 
 const $ = (selector) => document.querySelector(selector);
 const node = (tag, text, className) => {
@@ -27,6 +28,7 @@ let houseLoading=false;
 let profileEditor;
 let profileLoading=false;
 let state;
+const shoppingView=installShoppingView({panel:document.querySelector('#shopping'),banner:document.querySelector('#shopping-banner'),onOpen:()=>setTab('shopping')});
 const kiosk = new URLSearchParams(location.search).has("kiosk");
 let doorbellView={isOpen:()=>false};
 // ?celebrate=tick eller ?celebrate=done viser feiringen med prøvedata (uten å krysse av noe).
@@ -829,13 +831,14 @@ function render() {
   }
   if (kiosk) { const inMore = ["archive","sources","profile"].includes(tab); $("#more-button").classList.toggle("active", inMore); if (inMore) $("#more-button").setAttribute("aria-current","page"); else $("#more-button").removeAttribute("aria-current"); }
   for (const panel of document.querySelectorAll(".panel")) panel.classList.toggle("active", panel.id === (isCalendarTab(tab) ? "calendar" : tab));
-  $(".filter-bar").hidden = tab === "sources" || tab === "profile" || tab === "house";
+  $(".filter-bar").hidden = tab === "sources" || tab === "profile" || tab === "house" || tab === "shopping";
   if (isCalendarTab(tab)) renderCalendar();
   if (tab === "archive") renderArchive();
   if (tab === "tasks") renderTasks();
   if (tab === "nearby") renderNearby();
   if (tab === "sources") renderSources();
   if (tab === "profile") renderProfile();
+  if (tab === 'shopping') shoppingView.open();
   for (const element of document.querySelectorAll("[data-scroll-key]")) element.scrollTop=scrolls.get(element.dataset.scrollKey) || 0;
 }
 async function loadHouseView() {

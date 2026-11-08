@@ -45,11 +45,21 @@ async function activityState() {
 async function execute(command, args, flags) {
   let result;
   switch (command) {
+    case 'shopping': result=await request('/api/shopping');break;
+    case 'shopping-queue': result=await request('/api/shopping/queue');break;
+    case 'shopping-orders': result=await request('/api/shopping/orders','POST',json(args[0]));break;
+    case 'shopping-settings': result=await request('/api/shopping/settings','POST',json(args[0]));break;
+    case 'shopping-watch': result=await request('/api/shopping/watch','POST',json(args[0]));break;
+    case 'shopping-offer': result=await request('/api/shopping/offer','POST',json(args[0]));break;
+    case 'shopping-review': result=await request('/api/shopping/review','POST',json(args[0]));break;
+    case 'shopping-nutrition': result=await request('/api/shopping/nutrition','POST',json(args[0]));break;
+    case 'oda-sync': result=await request('/api/shopping/oda/sync','POST',{});break;
     case 'next': {
-      const [phone, calendarActions, completion, queue, activities, collector, feed] = await Promise.all([
-        request('/api/phone/inbox'), request('/api/calendar-actions'), request('/api/completion'), request('/api/review-queue'), activityState(), request('/api/collector/status'), request('/api/activity-feed')
+      const [phone, calendarActions, completion, queue, activities, collector, feed, shopping] = await Promise.all([
+        request('/api/phone/inbox'), request('/api/calendar-actions'), request('/api/completion'), request('/api/review-queue'), activityState(), request('/api/collector/status'), request('/api/activity-feed'), request('/api/shopping/queue')
       ]);
-      result = buildNext({ phone, calendarActions, completion, queue, activities, collector, feed });
+      result = buildNext({ phone, calendarActions, completion, queue, activities, collector, feed, shopping });
+      result.shopping=shopping;
       break;
     }
     case 'event': {
@@ -168,7 +178,7 @@ async function execute(command, args, flags) {
     case "calendar": result = await request(`/api/events/${args[0]}/calendar`, "POST", json(args[1])); break;
     case "run": {
       const input = json(args[0]);
-      if (input.outcome !== 'skipped' && !['telefon','familiehandlinger','kildeendringer'].includes(input.scope)) validateActivityRun(await activityState(), input);
+      if (input.outcome !== 'skipped' && !['telefon','familiehandlinger','kildeendringer','handel'].includes(input.scope)) validateActivityRun(await activityState(), input);
       result = await request("/api/runs", "POST", input);
       break;
     }

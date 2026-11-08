@@ -8,6 +8,7 @@ import { initialProfile } from "./profile.mjs";
 import { normalizeProfile, validateFact, learnFact, profileView } from "./profile-facts.mjs";
 import { mergeTask } from "./tasks.mjs";
 import { phoneStore } from './phone.mjs';
+import { shoppingStore } from './shopping.mjs';
 import {sourceIdentity} from './source-identity.mjs';
 import {normalizeWeeklyLetter} from './weekly-letters.mjs';
 import {recoveredSpondDiscovery} from './collector.mjs';
@@ -711,7 +712,7 @@ export function createStore(dataDir = DATA_DIR) {
     }
     if (input.outcome === "ok") {
       const report = completionReport();
-      if (input.scope==='kildeendringer' ? !changeCompletion().complete : ['telefon','familiehandlinger'].includes(input.scope) ? report.phonePending.length || calendarActions().length : !report.complete) throw new Error(`Kjøringen kan ikke rapporteres ok med restanser: ${JSON.stringify(report.counts)}.`);
+      if (input.scope==='handel' ? shopping.queue().length || shopping.view().reviews.some(r=>r.status==='blocked') : input.scope==='kildeendringer' ? !changeCompletion().complete : ['telefon','familiehandlinger'].includes(input.scope) ? report.phonePending.length || calendarActions().length : !report.complete) throw new Error(`Kjøringen kan ikke rapporteres ok med restanser: ${JSON.stringify(report.counts)}.`);
     } else if (["partial", "needs_login", "error"].includes(input.outcome)) {
       if (!Array.isArray(input.blockers) || !input.blockers.length || !input.blockers.every((blocker) => words(blocker, 500).length >= 12)) {
         throw new Error("Ufullstendig kjøring krever konkrete blockers. Arbeidsmengde eller planlagt sluttid er ikke en blokkering.");
@@ -720,7 +721,7 @@ export function createStore(dataDir = DATA_DIR) {
     } else {
       throw new Error("Ugyldig kjøringsutfall.");
     }
-    if (input.scope && !['alle','telefon','familiehandlinger','kildeendringer'].includes(input.scope)) throw new Error('Ugyldig kjøringsomfang.');
+    if (input.scope && !['alle','telefon','familiehandlinger','kildeendringer','handel'].includes(input.scope)) throw new Error('Ugyldig kjøringsomfang.');
     // An agent's report timestamp must not override the observed lease start.
     // After release we have no observed start; do not invent a zero duration or
     // associate the report with another agent's previous lease.
@@ -1591,7 +1592,7 @@ export function createStore(dataDir = DATA_DIR) {
     return {facebookActivities:activityFacebook().map(item=>({sourceId:item.activitySourceId,externalId:item.externalId,title:item.title})), hsia: { sweepAt: feed.hsia.sweepAt, complete: feed.hsia.complete ?? null, total: feed.hsia.total ?? null, window: feed.hsia.window ?? null, items: Object.keys(feed.hsia.items).length, candidates: openCandidates().length, error: feed.hsia.error?.message ?? null, errorAt: feed.hsia.error?.at ?? null }, pages, changedPages: pages.filter((page) => page.changed).map((page) => page.id) };
   }
 
-  function snapshot() { const { collector, activityFeed, ...rest } = state; return structuredClone({...rest,events:Object.fromEntries(currentEvents().map(event=>[event.id,event]))}); }
+  function snapshot() { const { collector, activityFeed, shopping, ...rest } = state; return structuredClone({...rest,events:Object.fromEntries(currentEvents().map(event=>[event.id,event]))}); }
   function runHistory(before = null) {
     const files = readdirSync(runDir).filter((file) => file.endsWith(".enc") && (!before || file < before)).sort().reverse();
     const page = files.slice(0, 30);
@@ -1602,7 +1603,8 @@ export function createStore(dataDir = DATA_DIR) {
     save();
   }
   const phone=phoneStore(state,{save,upsertRaw,addAttachment});
+  const shopping=shoppingStore(state,{save});
   if(reconcileSourceReviews(state.sourceStatus,state.runs))save();
-  return { repairText, backupArchive, eventHistory, event, mergeEvents, splitHomework, activityFacebook, changeCompletion, collectedItems, collectedList, sourceItems, editProfile, phone, calendarActions, calendarAction, setEventVisibility, upsertActivity, activityReaction, activityPlan, activitySource, snapshot, runHistory, profile: () => profileView(state.profile), profileFact, reviewProfile, documentStatus, reviewDocument, checkTask, upsertRaw, upsertFinding, updateSource, observeListing, markReviewed, updateSurface, reviewQueue, completionReport, addAttachment, getAttachment, linkDrive, linkCalendar, updateProfile, recordRun, beginRun, renewRun, endRun, collectorIngest, collectorConfig, collectorStatus, collectorRefresh, collectorFacebookSweep, collectedItem, activityFeedHsia, activityFeedCandidates, activityFeedNeedsDetail, activityFeedDetail, activityFeedPage, activityFeedError, activityFeedPageText, activityFeedStatus };
+  return { shopping, repairText, backupArchive, eventHistory, event, mergeEvents, splitHomework, activityFacebook, changeCompletion, collectedItems, collectedList, sourceItems, editProfile, phone, calendarActions, calendarAction, setEventVisibility, upsertActivity, activityReaction, activityPlan, activitySource, snapshot, runHistory, profile: () => profileView(state.profile), profileFact, reviewProfile, documentStatus, reviewDocument, checkTask, upsertRaw, upsertFinding, updateSource, observeListing, markReviewed, updateSurface, reviewQueue, completionReport, addAttachment, getAttachment, linkDrive, linkCalendar, updateProfile, recordRun, beginRun, renewRun, endRun, collectorIngest, collectorConfig, collectorStatus, collectorRefresh, collectorFacebookSweep, collectedItem, activityFeedHsia, activityFeedCandidates, activityFeedNeedsDetail, activityFeedDetail, activityFeedPage, activityFeedError, activityFeedPageText, activityFeedStatus };
 }
 

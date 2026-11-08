@@ -14,6 +14,8 @@ Read config/sources.json, `node src/cli.mjs profile` and applicable docs/runbook
 
 Use collected/resources/resource before browser work. Reuse stable native source IDs and reviewed document receipts. An unchanged native file ID does not need another download or checksum. Read all pages of genuinely new/changed documents, visually when needed, and record document-review only after complete reading. Text extraction alone is not a reading receipt. HTML login/error responses are not PDF/DOCX originals even when the filename suggests otherwise.
 
+Shopping is opt-in. On full runs, handle enabled `next.shopping` / `shopping-review` work using the shopping section of docs/runbook.md. Oda history is only a lower bound on household purchases: purchase limits, other stores, stock and waste prevent treating it as measured consumption. Prioritize meaningful savings in kroner on repeat purchases, with equivalent products, real package sizes, customer limits, validity, membership and a grounded quantity. Compare against conservative paid prices, never a retailer's claimed discount alone. Cart changes require an explicit family action; never automatically retry an ambiguous external cart write or claim it succeeded without a verified receipt.
+
 Never open the same attachment in multiple tabs. Reuse existing source/working tabs. Keep the Vigilo keeper on Vigilo. Respect normal authentication pauses; do not refresh in a loop. Do not bypass access controls. A single blocked attachment or failed supplemental request does not prove global logout. Verify actual fresh list receipts for every configured child and required surface.
 
 For web UI work, discover the connected browsers/tabs first and use the existing Chrome extension browser with its returned IDs. Native Windows window control may fail to determine a browser URL even when the extension can read that same tab. Read the selected browser's documentation and reuse a free working tab. Do not infer global browser unavailability from a native-window error. An explicit safety stop still ends that turn; do not switch tools to bypass it.
@@ -31,6 +33,8 @@ Update local findings before Calendar, then record real external receipts on the
 ## Scope and completion
 
 `scope:"familiehandlinger"` handles phone submissions and hide/restore only. `scope:"kildeendringer"` handles new/changed source work, profiles and publishing; use change-completion. Neither proves global source coverage. Full runs use completion plus activity-queue. Work until complete or concrete external blockers remain; elapsed time or volume is not a reason to silently stop. Do other available work before reporting a block. Never mark unopened surfaces ok.
+
+`scope:"handel"` reports shopping work only and never certifies school/activity coverage. Check `shopping-queue` and the actual store review statuses before reporting shopping complete. Nutrient totals describe covered purchases, not anyone's dietary intake; unknown labels remain missing. Personal adult training targets do not become children's targets.
 
 Activities remain suggestions until the household explicitly selects calendar inclusion. Each needs a short, grounded, inviting pitch; retain reasoning separately. Discussion history and future event horizons differ. Paginate to actual list end/cutoff; temporary Loading/disabled states are not proof of a block. Persist specific unread IDs via unresolvedItems; resolve only with evidence. Reuse unchanged failure checkpoints rather than repeating identical failed downloads.
 

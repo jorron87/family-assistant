@@ -19,6 +19,7 @@ import {createResources,collectorResourceRequests} from './resources.mjs';
 import {createIngestionDispatcher} from './ingestion-dispatch.mjs';
 import {createGooglePublisher} from './google-publisher.mjs';
 import {weeklyLetters} from './weekly-letters.mjs';
+import {createOda} from './oda.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const store = createStore();
@@ -43,6 +44,9 @@ const servers=[];
 const dispatchTick=()=>{if(!restarting&&!process.env.FAMILIEN_NO_DISPATCH)phoneDispatcher.tick();};
 const host = "127.0.0.1";
 const port = Number(process.env.FAMILIEN_PORT ?? 4318);
+const oda=createOda({dataDir:DATA_DIR,shopping:store.shopping,redirectUrl:`http://127.0.0.1:${port}/api/shopping/oda/callback`});
+PUBLIC_FILES.set('shopping-view.mjs','text/javascript; charset=utf-8');
+PUBLIC_FILES.set('shopping.css','text/css; charset=utf-8');
 const sessionMaintenance = createSessionMaintenance({dataDir:DATA_DIR});
 
 function send(res, status, value, type = "application/json; charset=utf-8") {
@@ -71,6 +75,28 @@ async function handle(req, res) {
   try {
     const path = new URL(req.url, `http://${host}:${port}`).pathname;
     const method = req.method;
+    if(path==='/shopping-setup'&&method==='GET')return send(res,200,readFileSync(join(root,'public','shopping-setup.html')),'text/html; charset=utf-8');
+    if(path==='/api/shopping'&&method==='GET')return send(res,200,{...store.shopping.view(),oda:oda.status()});
+    if(path==='/api/shopping/queue'&&method==='GET')return send(res,200,store.shopping.queue());
+    if(path==='/api/shopping/oda/callback'&&method==='GET'){
+      await oda.callback(Object.fromEntries(new URL(req.url,`http://${host}`).searchParams));
+      return send(res,200,'Oda er tilkoblet. Gå tilbake til Handel og hent ordrehistorikken.','text/plain; charset=utf-8');
+    }
+    if(path.startsWith('/api/shopping/')&&method==='POST'){
+      if(req.headers['x-family-request']!=='1'||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host))return send(res,403,{error:'Ugyldig avsender.'});
+      const input=await json(req);
+      if(path==='/api/shopping/orders')return send(res,200,store.shopping.importOrders(input));
+      if(path==='/api/shopping/settings')return send(res,200,store.shopping.settings(input));
+      if(path==='/api/shopping/watch')return send(res,200,store.shopping.watch(input));
+      if(path==='/api/shopping/offer')return send(res,200,store.shopping.offer(input));
+      if(path==='/api/shopping/review')return send(res,200,store.shopping.review(input));
+      if(path==='/api/shopping/nutrition')return send(res,200,store.shopping.nutrition(input));
+      if(path==='/api/shopping/oda/connect')return send(res,200,await oda.authorize());
+      if(path==='/api/shopping/oda/sync')return send(res,200,await oda.sync());
+      if(path==='/api/shopping/oda/search')return send(res,200,await oda.search(input));
+      if(path==='/api/shopping/oda/add')return send(res,200,await oda.addToCart(input));
+      if(path==='/api/shopping/oda/cart')return send(res,200,await oda.cart());
+    }
     if(path==='/google-setup'&&method==='GET')return send(res,200,readFileSync(join(root,'public','google-setup.html')),'text/html; charset=utf-8');
     if(path==='/api/google/status'&&method==='GET')return send(res,200,googlePublisher.status());
     if(path==='/api/google/callback'&&method==='GET'){
@@ -363,8 +389,8 @@ doorbell.attach(servers.at(-1));
 servers.at(-1).listen(port, host, () => console.log(`Familien: http://${host}:${port}`));
 // Family controls are available on the living-room display; ingestion stays private.
 servers.push(createServer((req,res) => {
-  if(/^\/(?:api\/(?:resources|collector|google)(?:[/?]|$)|google-setup)/.test(req.url))return send(res,req.method==='GET'?403:405,{error:'Kildeoriginaler og integrasjonsoppsett er bare tilgjengelige lokalt på agentporten.'});
-  if (req.method !== "GET" && !(req.method === "POST" && /^(?:\/api\/home-assistant\/command|\/api\/doorbell\/frame|\/api\/profile\/edit|\/api\/events\/[a-f0-9]{24}\/(?:tasks\/[a-zA-Z0-9:_-]{1,100}|visibility)|\/api\/activities\/[a-f0-9]{24}\/reaction)$/.test(new URL(req.url,`http://${host}`).pathname))) return send(res,405,{error:"Dashboardet kan bare lese, krysse av, skjule oppføringer og velge aktiviteter."});
+  if(/^\/(?:api\/(?:resources|collector|google)(?:[/?]|$)|google-setup|shopping-setup|api\/shopping\/oda\/(?:connect|callback)|api\/shopping\/(?:orders|settings|offer|review|nutrition))/.test(req.url))return send(res,req.method==='GET'?403:405,{error:'Kildeoriginaler og integrasjonsoppsett er bare tilgjengelige lokalt på agentporten.'});
+  if (req.method !== "GET" && !(req.method === "POST" && /^(?:\/api\/shopping\/(?:watch|oda\/(?:sync|search|add|cart))|\/api\/home-assistant\/command|\/api\/doorbell\/frame|\/api\/profile\/edit|\/api\/events\/[a-f0-9]{24}\/(?:tasks\/[a-zA-Z0-9:_-]{1,100}|visibility)|\/api\/activities\/[a-f0-9]{24}\/reaction)$/.test(new URL(req.url,`http://${host}`).pathname))) return send(res,405,{error:"Handlingen er bare tilgjengelig lokalt på agentporten."});
   return handle(req,res);
 }));
 doorbell.attach(servers.at(-1));

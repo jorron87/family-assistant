@@ -9,6 +9,14 @@
 7. Konfigurer `config/agent.json`: full sti til egen agent-CLI, en modell kontoen faktisk støtter, reasoningEffort og eksplisitte valg av sandbox/approvalPolicy. Standardmodellen er tom og automatikk avslått. Start med én manuell gjennomgang og kontroller kilder, kalender, oppgaver og deling. Ved unattended drift kan en interaktiv approval-policy stoppe på verktøykall; velg dette bevisst sammen med systemeieren, og gi bare den tilgangen oppgaven trenger.
 8. Etter bestått manuell test: aktiver agenten og ønsket `collector.dispatch`. Mobilbehandling starter når egen global lease er ledig. `dailyFullFallback:true` kan starte daglig reservekontroll etter07:15 norsk tid. Avtal eventuell planlagt fullkontroll og daglig drift i agent-appen. Repoet oppretter ingen abonnementer eller app-automasjoner automatisk.
 
+## Handel (valgfritt)
+
+Handel-fanen viser kjøpsanalyse, en overvåkningsliste og kildebelagte tilbud. Overvåkning er avslått ved opprettelse. Åpne `/shopping-setup` på agentporten for å koble til familiens egen Oda-konto via OAuth og `https://oda.com/mcp`. Familien godkjenner tilgangen hos Oda; registrering og tokens lagres kryptert i eget dataområde og vises aldri i dashboard-API-et. Ikke kopier nettlesercookies eller en annen installasjons tokens. Oppsettet er sperret på kiosk- og mobilporten. Hent historikk og prøv én uttrykkelig valgt kurvendring manuelt før tilkoblingen regnes som testet. Familien betaler på Odas nettside.
+
+Bruk `shopping-settings` til historisk startdato, lagringsnotat og eksplisitt valgte butikker med stabile ID-er, offisielle kundeavislenker og minste besparelse per handletur. Tersklene er familiens praktiske prioritering, ikke en måling av kjørekostnad. `monitoringEnabled:true` legger forfalte butikkontroller i den eksisterende agentens `next`-kø; det oppretter ingen ny automatisering, runtime eller modell. Kilder må kontrolleres manuelt før aktivering. Bruk runbookens shoppingkontrakter og test med syntetiske ordre i separat datamappe først.
+
+Oda dekker ikke nødvendigvis hele matbudsjettet eller forbruket. Kostholdsanalyse trenger næringsdeklarasjoner og målbar mengde; den gjetter ikke næringsinnhold eller barnas energibehov fra handlekurven.
+
 ## Mobil utenfor hjemmenettet
 
 Sett en HTTPS-tunnel/reverse proxy til **bare port4320** og `/send/`; bruk egen adresse i `config/phone-access.json`. En tunnel på samme PC kan nå loopback direkte. Ved LAN-bruk må `FAMILIEN_PHONE_HOST` settes uttrykkelig og brannmur begrenses passende. Åpne `/phone-setup` lokalt på4318 for å lage en tidsbegrenset invitasjon/QR. Velg riktig avsender per telefon og legg siden på hjemskjermen. Invitasjoner og enhetstilgang er hemmeligheter. Test utlogging/tilbakekalling og ekte bilde/tekstinnsending før familiens daglige bruk. Bare den valgte agenten behandler data; ingen eksterne AI-kall gjøres av prosjektet uten agentoppsettet.
