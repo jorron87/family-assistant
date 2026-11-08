@@ -101,6 +101,29 @@ export function createOda({dataDir,shopping,redirectUrl,makeClient=()=>new Clien
     walk(during?.groups);
     return {productId,requested:quantity,accepted,error,validationMessages:during?.validationMessages??null,line:lines[0]??null,restored:cartQuantity(after,productId)===initial};
   });}
+  const verifiedWrite=async(requestId,fields,write,verify)=>{
+    if(!/^[a-zA-Z0-9-]{16,100}$/.test(requestId??''))throw Error('Ugyldig kurvhandling.');
+    const previous=shopping.receipt(requestId);
+    if(previous){if(previous.status==='confirmed')return previous;throw Error('Denne kurvhandlingen må kontrolleres hos Oda før et nytt forsøk.');}
+    const before=await call('get_cart');
+    shopping.cartReceipt(requestId,{status:'in_flight',...fields});
+    try{
+      await write(before);
+      const after=await call('get_cart');
+      if(!verify(after,before))throw Error('Mengden kunne ikke bekreftes.');
+      return shopping.cartReceipt(requestId,{status:'confirmed',...fields,url:after.url});
+    }catch{shopping.cartReceipt(requestId,{status:'uncertain'});throw Error('Kurvhandlingen kunne ikke bekreftes. Kontroller handlekurven hos Oda; handlingen gjentas ikke automatisk.');}
+  };
+  async function changeCart(input) {return exclusive(async()=>{
+    const {requestId,productId,delta}=input;
+    if(!Number.isSafeInteger(productId)||productId<1||!Number.isInteger(delta)||delta===0||Math.abs(delta)>200)throw Error('Ugyldig kurvhandling.');
+    return verifiedWrite(requestId,{productId,quantity:delta},()=>call('manipulate_cart',{operations:[{productId,quantity:delta}]}),(after,before)=>cartQuantity(after,productId)===Math.max(0,cartQuantity(before,productId)+delta));
+  });}
+  async function swapInCart(input) {return exclusive(async()=>{
+    const {requestId,fromProductId,toProductId,quantity}=input;
+    if(![fromProductId,toProductId].every(id=>Number.isSafeInteger(id)&&id>0)||fromProductId===toProductId||!Number.isInteger(quantity)||quantity<1||quantity>100)throw Error('Ugyldig kurvhandling.');
+    return verifiedWrite(requestId,{productId:toProductId,quantity},before=>call('manipulate_cart',{operations:[{productId:fromProductId,quantity:-cartQuantity(before,fromProductId)},{productId:toProductId,quantity}]}),(after,before)=>cartQuantity(after,fromProductId)===0&&cartQuantity(after,toProductId)===cartQuantity(before,toProductId)+quantity);
+  });}
   async function addToCart(input) {return exclusive(async()=>{
     const {requestId,productId,quantity}=input;
     if(!/^[a-zA-Z0-9-]{16,100}$/.test(requestId??'')||!Number.isSafeInteger(productId)||productId<1||!Number.isInteger(quantity)||quantity<1||quantity>100)throw Error('Ugyldig kurvhandling.');
@@ -117,5 +140,5 @@ export function createOda({dataDir,shopping,redirectUrl,makeClient=()=>new Clien
     }catch{shopping.cartReceipt(requestId,{status:'uncertain'});throw Error('Kurvhandlingen kunne ikke bekreftes. Kontroller handlekurven hos Oda; handlingen gjentas ikke automatisk.');}
   });}
   function status(){const configured=existsSync(path);let connected=!!client;try{connected||=configured&&!!read().tokens;}catch{lastError='Oda-oppsettet kunne ikke leses. Kontroller oppsettet lokalt.';}return {configured,connected,busy,error:lastError};}
-  return {probeLimit,tools,authorize,callback,sync,search,addToCart,status,close,cart:()=>exclusive(()=>call('get_cart'))};
+  return {changeCart,swapInCart,probeLimit,tools,authorize,callback,sync,search,addToCart,status,close,cart:()=>exclusive(()=>call('get_cart'))};
 }

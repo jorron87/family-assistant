@@ -59,9 +59,9 @@ test('price level changes the Oda quantity, and full stock leaves the draft',()=
 const history=price=>Array.from({length:30},(_,i)=>({date:new Date(Date.parse('2026-10-10T10:00:00Z')+i*86400000).toISOString(),price}));
 function withChain(shop,w,price) {shop.settings({stores:[{id:'near',name:'Nærbutikk',url:'https://example.com/near',minSavings:0,chainCode:'SPAR_NO'}]});
  const seen=shop.catalogObserve({watchId:w.id,products:[{id:9,store:'SPAR_NO',name:'Mel',currentPrice:price,lastChecked:'2026-11-08T10:00:00Z'}]});shop.catalogReview({watchId:w.id,id:9,store:'SPAR_NO',fingerprint:seen.entries[0].fingerprint,status:'approved',packAmount:1,unit:'kg',equivalenceEvidence:'Samme vare'});shop.market({watchId:w.id,products:[{id:9,store:'SPAR_NO',unit:'kg',packAmount:1,reviewed:true,equivalenceEvidence:'Samme vare',lastChecked:'2026-11-08T10:00:00Z',currentPrice:price,history:history(price)}]});}
-test('urgent items go to the nearest store without any routing',()=>{
+test('urgent items start at the nearest store and may still be routed',()=>{
  const {shop}=setup();const e=shop.list({action:'add',name:'Brokkoli',need:'now'});
- assert.equal(e.storeName,'Nærmeste butikk');assert.equal(e.routing,null);assert.deepEqual(shop.listRouteWork(),[]);
+ assert.equal(e.storeName,'Nærmeste butikk');assert.equal(e.routing,'pending');assert.equal(shop.listRouteWork()[0].need,'now');
 });
 test('unknown items wait for agent routing, and known items are placed at once',()=>{
  const {shop}=setup();shop.settings({monitoringEnabled:true,stores:[]});
@@ -92,4 +92,36 @@ test('the cart review warns per line about limits and better places',()=>{
  const cart={groups:[{items:[{product:{id:555,name:'Hvetemel'},quantity:10,totalGrossAmount:'300.00'},{product:{id:9,name:'Noe annet'},quantity:1,totalGrossAmount:'10.00'}]}],validationMessages:['Dessverre tilbyr vi maks 2 stk Hvetemel per person.'],totalGrossAmount:'310.00'};
  const review=shop.cartReview(cart);
  assert.equal(review.lines.length,2);assert.equal(review.lines[0].elsewhere.storeName,'Nærbutikk');assert.match(review.lines[0].limit,/maks 2/);assert.equal(review.lines[1].elsewhere,null);assert.equal(review.lines[1].limit,null);
+});
+
+test('the cheapest Oda variant is the default and a chosen variant is remembered',()=>{
+ const {shop}=setup();orders(shop);const w=flour(shop);odaItem(shop,w.id,{id:1,price:20,productId:555});odaItem(shop,w.id,{id:2,price:60,pack:2,productId:777});
+ let row=shop.familyView().odaDraft.items[0];assert.equal(row.productId,555);assert.deepEqual(row.variants.map(x=>x.productId),[555,777]);
+ const listed=shop.list({action:'add',name:'mel'});assert.equal(listed.odaProductId,555);
+ shop.list({action:'variant',watchId:w.id,productId:777});
+ row=shop.familyView().odaDraft.items[0];assert.equal(row.productId,777);assert.equal(row.entryIds.length,1);
+ const entry=shop.familyView().list.open[0];assert.equal(entry.odaProductId,777);assert.equal(entry.packAmount,2);assert.equal(entry.variants.length,2);
+ assert.throws(()=>shop.list({action:'variant',watchId:w.id,productId:999}),/Varianten/);
+});
+test('urgent items only move between nearby stores when the gain is clear',()=>{
+ const make=price=>{const {shop}=setup();const w=flour(shop,{purchaseAmount:60});withChain(shop,w,price);shop.watch({...shop.view().watches[0],priceGuide:{referencePrice:100,checkedAt:'2026-11-08T10:00:00Z',evidence:'Grunnlag'}});return shop;};
+ assert.equal(make(95).list({action:'add',name:'mel',need:'now'}).storeName,'Nærmeste butikk');
+ const moved=make(50).list({action:'add',name:'mel',need:'now'});assert.equal(moved.storeName,'Nærbutikk');assert.match(moved.reason,/under vanlig pris/);assert.equal(moved.routing,null);
+ const unknown=make(50).list({action:'add',name:'Brokkoli',need:'now'});assert.equal(unknown.storeName,'Nærmeste butikk');assert.equal(unknown.routing,'pending');
+});
+test('product photos never reopen a review and are only served from stored addresses',()=>{
+ const {shop}=setup();const w=flour(shop);odaItem(shop,w.id);
+ const entry=shop.catalogEntries(w.id)[0];
+ shop.catalogObserve({watchId:w.id,products:[{id:1,store:'ODA_NO',name:entry.name,image:'https://images.example.com/mel.jpg'}]});
+ const after=shop.catalogEntries(w.id)[0];assert.equal(after.status,'approved');assert.equal(after.fingerprint,entry.fingerprint);assert.equal(after.image,'https://images.example.com/mel.jpg');
+ const row=shop.familyView().odaDraft.items;const id=row.length?row[0].image:null;
+ assert.equal(shop.imageSource('notstored'),null);if(id)assert.equal(shop.imageSource(id),'https://images.example.com/mel.jpg');
+});
+
+test('each cart line shows a cheaper Oda variant and the lowest known price',()=>{
+ const {shop}=setup();const w=flour(shop);odaItem(shop,w.id,{id:1,price:20,productId:555});odaItem(shop,w.id,{id:2,price:40,productId:777});withChain(shop,w,18);
+ const cart=lineId=>({groups:[{items:[{product:{id:lineId,name:'Hvetemel'},quantity:1,totalGrossAmount:'40.00'}]}],validationMessages:[],totalGrossAmount:'40.00'});
+ let line=shop.cartReview(cart(777)).lines[0];
+ assert.equal(line.unitPrice,40);assert.equal(line.cheaperVariant.productId,555);assert.equal(line.cheaperVariant.diffPct,50);assert.deepEqual(line.cheapestKnown,{storeName:'Nærbutikk',unitPrice:18});
+ line=shop.cartReview(cart(555)).lines[0];assert.equal(line.cheaperVariant,null);assert.equal(line.cheapestKnown.unitPrice,18);
 });

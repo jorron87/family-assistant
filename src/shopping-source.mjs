@@ -37,3 +37,27 @@ export function createSourceFetcher({fetchImpl=fetch,now=Date.now}={}) {
  }
  return {load};
 }
+
+const IMAGE_BYTES=3*1024*1024,IMAGE_MS=24*3600000,IMAGE_ENTRIES=400,IMAGE_TYPES=/^image\/(jpeg|png|webp|gif)/i;
+/** Product photos for the shopping list, served from this origin and cached. */
+export function createImageFetcher({fetchImpl=fetch,now=Date.now}={}) {
+ const cache=new Map();
+ async function load(url) {
+  const hit=cache.get(url);
+  if(hit&&now()-hit.at<IMAGE_MS)return hit;
+  const miss=null;
+  if(!publicHttps(url))return miss;
+  try{
+   const response=await fetchImpl(url,{headers:{'User-Agent':UA,Accept:'image/*'},redirect:'follow',signal:AbortSignal.timeout(15000)});
+   const type=response.headers.get('content-type')??'';
+   if(!response.ok||!publicHttps(response.url||url)||!IMAGE_TYPES.test(type)||Number(response.headers.get('content-length')??0)>IMAGE_BYTES)return miss;
+   const bytes=Buffer.from(await response.arrayBuffer());
+   if(bytes.length>IMAGE_BYTES)return miss;
+   const entry={bytes,type:type.split(';')[0],at:now()};
+   cache.delete(url);cache.set(url,entry);
+   while(cache.size>IMAGE_ENTRIES)cache.delete(cache.keys().next().value);
+   return entry;
+  }catch{return miss;}
+ }
+ return {load};
+}

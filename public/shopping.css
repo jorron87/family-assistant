@@ -155,3 +155,15 @@ body.kiosk .main-nav button { padding-left: 13px; padding-right: 13px; }
   #family-shopping input, #family-shopping select { color: var(--s-ink); }
   #family-shopping input::placeholder { color: var(--s-muted); opacity: 1; }
 }
+.shop-thumb { flex: 0 0 44px; width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; background: #fff; overflow: hidden; }
+.shop-thumb:empty { background: var(--s-soft); }
+.shop-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.shop-list-row { flex-wrap: wrap; }
+.shop-variants { flex-basis: 100%; }
+.shop-variants > summary { min-height: 36px !important; padding: 6px 0 !important; font-size: 13px !important; }
+.shop-variant { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--s-line); }
+.shop .shop-variant button { min-height: 44px; padding: 6px 14px; border: 1px solid var(--s-line); border-radius: 10px; background: transparent; color: var(--s-green); font: inherit; cursor: pointer; }
+.shop-variant .shop-onlist { flex: 0 0 auto; font-size: 14px; }
+.shop-cheaper { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 4px; padding: 8px 10px; border-radius: 8px; background: var(--s-soft); color: var(--s-green); font-size: 14px; font-weight: 600; }
+.shop .shop-cheaper button { min-height: 40px; padding: 6px 14px; border: 1px solid var(--s-green); border-radius: 8px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.shop-known { flex-basis: 100%; margin-top: 2px; color: var(--s-muted); font-size: 13px; }

@@ -42,6 +42,11 @@ function sourceUrl(value) {
  if(parsed.protocol!=='https:'||parsed.username||parsed.password)throw Error('Source URL must use HTTPS without credentials.');
  return parsed.href;
 }
+// A product photo is display-only: it never affects equivalence or review.
+function imageUrl(value) {
+ if(value==null||value==='')return null;
+ try{return sourceUrl(value);}catch{return null;}
+}
 function categories(value) {
  if(value==null)return [];
  if(!Array.isArray(value)||value.length>50)throw Error('Invalid product categories.');
@@ -110,7 +115,7 @@ export function createMarketCatalog(state,{now=()=>new Date(),save=()=>{}}={}) {
    if(!firstSeen||!lastSeen||!metadataObservedAt)return null;
    const pendingSince=raw.status==='pending'?timestamp(raw.pendingSince,'pending time'):null;
    if(raw.status==='pending'&&!pendingSince)return null;
-   return {version:VERSION,key,watchId,id,store,...info,fingerprint:fp,status:raw.status,firstSeen,lastSeen,metadataObservedAt,pendingSince,query:text(raw.query,'query',500),currentPrice:number(raw.currentPrice,'current package price'),lastChecked:timestamp(raw.lastChecked,'actual price receipt'),review,previousReview};
+   return {version:VERSION,key,watchId,id,store,...info,fingerprint:fp,status:raw.status,firstSeen,lastSeen,metadataObservedAt,pendingSince,image:imageUrl(raw.image),query:text(raw.query,'query',500),currentPrice:number(raw.currentPrice,'current package price'),lastChecked:timestamp(raw.lastChecked,'actual price receipt'),review,previousReview};
   }catch{return null;}
  }
  function snapshot(entry,at) {
@@ -151,7 +156,7 @@ export function createMarketCatalog(state,{now=()=>new Date(),save=()=>{}}={}) {
     }
    }
    const status=hasChanged?'pending':previous?.status??'pending';
-   staged.set(key,{version:VERSION,key,watchId,id,store,...info,fingerprint:fp,status,firstSeen:previous?.firstSeen??observedAt,lastSeen:observedAt,metadataObservedAt:observedAt,pendingSince:status==='pending'?(hasChanged?observedAt:previous?.pendingSince??observedAt):null,query:query===undefined?previous?.query??null:query,currentPrice,lastChecked,review:hasChanged?null:previous?.review??null,previousReview:hasChanged?previous.review??previous.previousReview:previous?.previousReview??null});
+   staged.set(key,{version:VERSION,key,watchId,id,store,...info,fingerprint:fp,status,firstSeen:previous?.firstSeen??observedAt,lastSeen:observedAt,metadataObservedAt:observedAt,pendingSince:status==='pending'?(hasChanged?observedAt:previous?.pendingSince??observedAt):null,image:own(product,'image')&&product.image!==undefined?imageUrl(product.image):previous?.image??null,query:query===undefined?previous?.query??null:query,currentPrice,lastChecked,review:hasChanged?null:previous?.review??null,previousReview:hasChanged?previous.review??previous.previousReview:previous?.previousReview??null});
   }
   if(staged.size){for(const [key,entry] of staged)state[key]=entry;save();}
   const rows=sortEntries([...staged.values()]).map(entry=>snapshot(entry,at));
