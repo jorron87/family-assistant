@@ -11,6 +11,8 @@
 
 ## Handel (valgfritt)
 
+Handel kan bruke `purchaseAmount` for planlagte storinnkjøp av lagringsvarer. Dette er et alternativ til `monthlyUsage`, ikke målt forbruk. Se handelskontraktene i `runbook.md`; velg mengder og varselgrenser etter husholdningens preferanser og varenes faktiske holdbarhet.
+
 Handel-fanen viser kjøpsanalyse, en overvåkningsliste og kildebelagte tilbud. Overvåkning er avslått ved opprettelse. Åpne `/shopping-setup` på agentporten for å koble til familiens egen Oda-konto via OAuth og `https://oda.com/mcp`. Familien godkjenner tilgangen hos Oda; registrering og tokens lagres kryptert i eget dataområde og vises aldri i dashboard-API-et. Ikke kopier nettlesercookies eller en annen installasjons tokens. Oppsettet er sperret på kiosk- og mobilporten. Hent historikk og prøv én uttrykkelig valgt kurvendring manuelt før tilkoblingen regnes som testet. Familien betaler på Odas nettside.
 
 Bruk `shopping-settings` til historisk startdato, lagringsnotat og eksplisitt valgte butikker med stabile ID-er, offisielle kundeavislenker og minste besparelse per handletur. Tersklene er familiens praktiske prioritering, ikke en måling av kjørekostnad. `monitoringEnabled:true` legger forfalte butikkontroller i den eksisterende agentens `next`-kø; det oppretter ingen ny automatisering, runtime eller modell. Kilder må kontrolleres manuelt før aktivering. Bruk runbookens shoppingkontrakter og test med syntetiske ordre i separat datamappe først.

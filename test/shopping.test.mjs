@@ -80,6 +80,17 @@ test('wholesale quotes require VAT and compare gross prices with household purch
  shop.offer({...offer,vatRate:.15});const result=shop.view().opportunities[0];assert.equal(result.price,115);assert.equal(result.unitPrice,115);assert.equal(result.priceBeforeVat,100);assert.equal(result.saving,140);
  shop.offer({...offer,vatRate:.25});assert.equal(shop.view().opportunities[0].price,125);
 });
+
+test('explicit bulk plans can exceed a typical shop but still honor stock and customer limits',()=>{
+ const {shop}=fixture();shop.importOrders({orders:[order('one','2026-01-01'),order('two','2026-10-01')]});
+ const w=shop.watch({name:'Stock-up category',productKeys:['oda:1'],unit:'kg',storage:'pantry',purchaseAmount:20,maxPacks:100,stockAmount:2});
+ const offer={watchId:w.id,storeId:'near',externalId:'bulk',name:'Equivalent goods',price:50,packAmount:.4,unit:'kg',validFrom:'2026-11-08',validTo:'2026-11-14',sourceUrl:'https://example.com/offer',evidence:'Current 400 g price',comparable:true,comparisonNote:'Same product',bundlePacks:2};
+ shop.offer(offer);const planned=shop.view().opportunities[0];assert.equal(planned.packs,44);assert.equal(planned.saving,440);assert.equal(planned.quantityBasis,'planned-amount');assert.equal(shop.view().watches[0].monthlyUsage,null);
+ shop.offer({...offer,maxPacks:8});assert.equal(shop.view().opportunities[0].packs,8);
+ shop.watch({...w,stockAmount:20});assert.equal(shop.view().opportunities.length,0);
+ assert.throws(()=>shop.watch({...w,monthlyUsage:3}),/månedsforbruk/);
+ assert.throws(()=>shop.watch({...w,storage:'chilled'}),/lagringsvare/);
+});
 test('MCP historical product prices do not substitute for paid line totals',()=>{
  const {shop}=fixture(),input=order('mcp','2026-10-01');input.linePricesVerified=false;input.products[0].product.price='1.00';
  shop.importOrders({orders:[input]});assert.equal(shop.analysis().products[0].spent,600);assert.equal(shop.analysis().products[0].baselineUnitPrice,null);
