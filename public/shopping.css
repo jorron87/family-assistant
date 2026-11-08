@@ -88,3 +88,6 @@
 body.kiosk .main-nav button { padding-left: 13px; padding-right: 13px; }
 @media (max-width: 480px) { .shop .shop-tabs { flex: 1; } .shop .shop-tabs button { flex: 1; padding: 8px 6px; } .shop-hero-number { font-size: 34px; } .shop-hero, .shop-card, .shop-store { padding: 15px; } }
 @media (prefers-color-scheme: dark) { #family-shopping.shop { --s-card: #151d19; --s-gold: #e6c98a; --s-gold-soft: #3a2c14; --s-red: #e08a7e; } #family-shopping .shop-refresh, #family-shopping .shop-badge.excellent, #family-shopping .primary { color: #0e1411 !important; } .shop-toast { color: #0e1411; } .shop-dialog { --s-card: #151d19; } }
+.shop-source { display: inline-flex; align-items: center; min-height: 44px; font-size: 15px; font-weight: 600; }
+.shop-fold .shop-store { padding: 10px 0 0; border: 0; border-top: 1px solid var(--s-line); border-radius: 0; background: transparent; }
+.shop-fold summary + .shop-store { border-top: 0; }

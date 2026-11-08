@@ -113,7 +113,9 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     badges.append(el('span',TIER_LABEL[deal.tier],'shop-badge '+deal.tier));
     if(deal.lowestSeen)badges.append(el('span','Laveste vi har sett','shop-badge low'));
     if(deal.validFrom>data.today)badges.append(el('span',`Fra ${dayLabel(deal.validFrom)}`,'shop-badge later'));
-    card.append(badges,el('h4',deal.watchName),el('p',deal.name,'shop-sub'));
+    const source=link(`Se tilbudet hos ${deal.storeName.replace(/\s*\(.*\)$/,'')} ↗`,deal.sourceUrl);
+    source.className='shop-source';
+    card.append(badges,el('h4',deal.watchName),el('p',deal.name,'shop-sub'),source);
     const line=el('p',undefined,'shop-price');
     line.append(el('strong',`${price(deal.unitPrice)}/${deal.unit}`),el('span',` · ${deal.referenceType==='target'?'grensen er':'vanlig'} ${price(deal.referencePrice)}/${deal.unit}${deal.discountPct>=1?` · ${nf(0).format(deal.discountPct)} % lavere`:''}`));
     card.append(line);
@@ -149,7 +151,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
       node.append(el('p',deal.comparisonNote,'shop-sub'));
       if(deal.annualAmount!=null)node.append(el('p',`Årsbehov: ${amount(deal.annualAmount,deal.unit)}, ${BASIS_TEXT[deal.quantityBasis]??''}.`,'shop-sub'));
       if(deal.conditions)node.append(el('p',deal.conditions,'shop-sub'));
-      node.append(link('Se tilbudet',deal.sourceUrl));
+      if(deal.evidence)node.append(el('p',`Kilde: ${deal.evidence}`,'shop-sub'));
     },'shop-why'));
     return card;
   }
@@ -177,6 +179,17 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     update();
     return card;
   }
+  function storeSections(deals) {
+    const groups=new Map();
+    for(const deal of deals){const list=groups.get(deal.storeName)??[];list.push(deal);groups.set(deal.storeName,list);}
+    const sum=list=>list.reduce((n,d)=>n+(d.saving??0),0);
+    return [...groups.entries()].sort((a,b)=>sum(b[1])-sum(a[1])).map(([store,list])=>{
+      const section=el('section',undefined,'shop-store'),head=el('div',undefined,'shop-store-head');
+      head.append(el('h3',store),el('span',`${sum(list)>0?`Spar ${kr(sum(list))} · `:''}senest ${dayLabel(list.map(d=>d.validTo).sort()[0])}`,'shop-sub'));
+      section.append(head,...list.map(dealCard));
+      return section;
+    });
+  }
   function renderBuy(root) {
     const hero=el('section',undefined,'shop-hero');
     const potential=data.summary.potential;
@@ -186,17 +199,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
       hero.append(el('div',data.monitoring?'Ingen kupp akkurat nå':'Tilbudsovervåkning er av','shop-hero-number small'),el('p',`${data.storesCheckedToday} butikker sjekket i dag${data.saved.year?` · ${kr(data.saved.year)} spart i år`:''}`,'shop-sub'));
     }
     root.append(hero,priceCheck());
-    const groups=new Map();
-    for(const deal of data.deals){const list=groups.get(deal.storeName)??[];list.push(deal);groups.set(deal.storeName,list);}
-    const ordered=[...groups.entries()].sort((a,b)=>b[1].reduce((n,d)=>n+(d.saving??0),0)-a[1].reduce((n,d)=>n+(d.saving??0),0));
-    for(const [store,deals] of ordered){
-      const section=el('section',undefined,'shop-store');
-      const head=el('div',undefined,'shop-store-head');
-      const last=deals.map(d=>d.validTo).sort()[0];
-      head.append(el('h3',store),el('span',`Spar ${kr(deals.reduce((n,d)=>n+(d.saving??0),0))} · senest ${dayLabel(last)}`,'shop-sub'));
-      section.append(head,...deals.map(dealCard));
-      root.append(section);
-    }
+    root.append(...storeSections(data.deals));
     const low=data.items.filter(x=>x.enabled&&x.stock.known&&x.stock.months!=null&&x.stock.months<1).slice(0,8);
     if(low.length){
       const card=el('section',undefined,'shop-card');
@@ -211,8 +214,8 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
       }
       root.append(card);
     }
-    if(data.smallDeals.length)root.append(details('small',`Små tilbud på turer dere uansett tar (${data.smallDeals.length})`,node=>node.append(...data.smallDeals.map(dealCard)),'shop-fold'));
-    if(data.belowTrip.length)root.append(details('below',`Bra pris, men ikke verdt en egen tur (${data.belowTrip.length})`,node=>node.append(...data.belowTrip.map(dealCard)),'shop-fold'));
+    if(data.smallDeals.length)root.append(details('small',`Små tilbud på turer dere uansett tar (${data.smallDeals.length})`,node=>node.append(...storeSections(data.smallDeals)),'shop-fold'));
+    if(data.belowTrip.length)root.append(details('below',`Bra pris, men ikke verdt en egen tur (${data.belowTrip.length})`,node=>node.append(...storeSections(data.belowTrip)),'shop-fold'));
     if(data.covered.length)root.append(details('covered',`Godt tilbud, men dere har nok (${data.covered.length})`,node=>{for(const deal of data.covered)node.append(el('p',`${deal.watchName} hos ${deal.storeName}: ${price(deal.unitPrice)}/${deal.unit}. Dere har ca. ${monthsText(deal.stock.months??0)} på lager.`,'shop-sub'));},'shop-fold'));
     if(data.held.length)root.append(details('held',`Tilbud vi ikke kan vise ennå (${data.held.length})`,node=>{for(const entry of data.held)node.append(el('p',`${entry.watchName} hos ${entry.storeName} ${HELD_TEXT[entry.reason]??'venter'}.`,'shop-sub'));},'shop-fold'));
     root.append(odaSearch());
