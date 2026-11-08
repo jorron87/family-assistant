@@ -21,3 +21,5 @@ input,textarea,select,.surface,.task-group,.receipt,.profile-card,dialog,.sheet-
 @media (prefers-color-scheme:dark){.login-line{background:#3b1f1c;color:#f0b8b0}.login-line.stale,.login-line.watch{background:#3a2c14;color:#e6c98a}}
 
 .weekly-letter-strip{margin:12px 0 18px;display:flex;flex-direction:column;gap:5px}.weekly-letter-strip[hidden]{display:none}.weekly-letter-button{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:52px;padding:12px 15px;border:1px solid var(--line);border-radius:12px;background:var(--soft);color:var(--green);text-decoration:none}.weekly-letter-button strong{font-size:15px}.weekly-letter-button span,.weekly-letter-note{font-size:12px;color:var(--muted)}.weekly-letter-note{padding-left:15px}.weekly-letter-button:focus-visible{outline:3px solid var(--green);outline-offset:2px}
+
+.mobile-nav{gap:2px;padding-left:6px;padding-right:6px}.mobile-nav button{flex-direction:column;gap:0;min-height:52px;padding:4px 2px;font-size:18px;line-height:1.1}.mobile-nav button span{font-size:11px}.mobile-nav .send-nav{padding:4px 2px;border-radius:12px}

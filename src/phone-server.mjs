@@ -3,7 +3,7 @@ import {join} from 'node:path';
 import {loginProblems,loginSummary} from '../public/login-status.mjs';
 import {weeklyLetters} from './weekly-letters.mjs';
 
-export function phoneHandler({store,root,send,body,json,onQueued=()=>{},weather=null,sessionMaintenance=null}) {
+export function phoneHandler({oda=null,store,root,send,body,json,onQueued=()=>{},weather=null,sessionMaintenance=null}) {
   const attempts=[];
   return async(req,res)=>{
     try {
@@ -16,6 +16,8 @@ export function phoneHandler({store,root,send,body,json,onQueued=()=>{},weather=
         assets['/send/member-colors.mjs']=['member-colors.mjs','text/javascript; charset=utf-8'];
         assets['/send/celebrate.mjs']=['celebrate.mjs','text/javascript; charset=utf-8'];
         assets['/send/home-tasks.mjs']=['home-tasks.mjs','text/javascript; charset=utf-8'];
+        assets['/send/shopping-view.mjs']=['shopping-view.mjs','text/javascript; charset=utf-8'];
+        assets['/send/shopping.css']=['shopping.css','text/css; charset=utf-8'];
         assets['/send/phone-boot.js']=['phone-boot.js','text/javascript; charset=utf-8'];
         if(path==='/'||path==='/send') {res.writeHead(302,{Location:'/send/'});return res.end();}
         if(assets[path])return send(res,200,readFileSync(join(root,'public',assets[path][0])),assets[path][1]);
@@ -44,6 +46,13 @@ export function phoneHandler({store,root,send,body,json,onQueued=()=>{},weather=
         const login=loginSummary(loginProblems({sourceStatus:snapshot.sourceStatus,surfaces:snapshot.surfaces,session:sessionMaintenance?.snapshot()??null}));
         return send(res,200,{members,events,login,weeklyLetters:letters,childIds:store.profile().members.filter(member=>member.role==='child').map(member=>member.id)});
       }
+      if(path==='/send/api/shopping/family'&&req.method==='GET')return send(res,200,{...store.shopping.familyView(),oda:oda?.status()??{connected:false}});
+      if(path==='/send/api/shopping/summary'&&req.method==='GET')return send(res,200,store.shopping.familySummary());
+      if(req.method==='POST'&&path==='/send/api/shopping/pantry')return send(res,200,store.shopping.pantry(await json(req)));
+      if(req.method==='POST'&&path==='/send/api/shopping/item')return send(res,200,store.shopping.item(await json(req)));
+      if(req.method==='POST'&&path==='/send/api/shopping/deal')return send(res,200,store.shopping.dealAction(await json(req)));
+      if(req.method==='POST'&&path==='/send/api/shopping/oda/search'&&oda)return send(res,200,await oda.search(await json(req)));
+      if(req.method==='POST'&&path==='/send/api/shopping/oda/add'&&oda)return send(res,200,await oda.addToCart(await json(req)));
       if(path==='/send/api/weather'&&req.method==='GET')return send(res,200,weather?await weather.get():{unavailable:true});
       if(path==='/send/api/profile'&&req.method==='GET') {
         const profile=store.profile();

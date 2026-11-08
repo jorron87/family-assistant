@@ -17,12 +17,17 @@ test('shopping stays private, kiosk actions are limited, and order state survive
   const state=await (await fetch(base+'/api/state')).json();assert.equal(state.shopping,undefined);
   const kiosk=`http://127.0.0.1:${port+1}`,mobile=`http://127.0.0.1:${port+2}`;
   for(const path of ['/shopping-setup','/api/shopping/oda/callback','/api/shopping/orders'])assert.ok([403,405].includes((await fetch(kiosk+path)).status));
-  for(const path of ['settings','orders','offer','review','nutrition','market','catalog','catalog-review','oda/connect','kassal/configure','kassal/search','kassal/stores','kassal/ean','kassal/product','kassal/history'])assert.equal((await post(kiosk+'/api/shopping/'+path,{})).status,405);
+  for(const path of ['settings','orders','offer','review','nutrition','market','catalog','catalog-review','link','oda/connect','kassal/configure','kassal/search','kassal/stores','kassal/ean','kassal/product','kassal/history'])assert.equal((await post(kiosk+'/api/shopping/'+path,{})).status,405);
   assert.equal((await fetch(kiosk+'/api/shopping/catalog')).status,403);
   assert.equal((await post(base+'/api/shopping/kassal/configure',{apiKey:'synthetic-test-kassal-token'},{Origin:'https://untrusted.example'})).status,403);
   assert.equal((await post(base+'/api/shopping/kassal/configure',{apiKey:'synthetic-test-kassal-token'})).status,200);
   assert.ok(!JSON.stringify(await(await fetch(base+'/api/shopping')).json()).includes('synthetic-test-kassal-token'));
   assert.notEqual((await fetch(mobile+'/api/shopping')).status,200);
+  assert.equal((await fetch(mobile+'/send/api/shopping/family')).status,401);
+  assert.equal((await post(mobile+'/send/api/shopping/pantry',{})).status,401);
+  assert.equal((await fetch(mobile+'/send/shopping-view.mjs')).status,200);
+  const family=await (await fetch(kiosk+'/api/shopping/family')).json();assert.deepEqual(family.deals,[]);assert.equal(family.analysis.orderCount,1);assert.ok(typeof family.rev==='string');
+  assert.equal((await post(kiosk+'/api/shopping/pantry',{watchId:'missing',amount:1})).status,422);
   for(const path of ['/shopping-view.mjs','/shopping.css'])assert.equal((await fetch(kiosk+path)).status,200);
   assert.equal((await post(kiosk+'/api/shopping/watch',{name:'Følg pris',productKeys:[],unit:'stk',storage:'other',targetPrice:100})).status,200);
   const exited=new Promise(r=>child.once('exit',r));assert.equal((await post(base+'/api/maintenance/restart',{})).status,202);await exited;await start();
