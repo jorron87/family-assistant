@@ -33,12 +33,13 @@ export function shelfWithDate(months,bestBefore,at) {
 }
 
 /** Yearly amount, in the watch's unit. Null means the need is genuinely unknown. */
-export function annualNeed(watch,rows,historyDays) {
+export function annualNeed(watch,rows,historyDays,odaShare=1) {
  if(watch.monthlyUsage!=null)return {amount:watch.monthlyUsage*12,basis:'household-estimate'};
  const bought=rows.reduce((sum,row)=>sum+Math.max(0,row.purchasedAmount??0),0);
- const registered=bought>0?bought*365/Math.max(historyDays,90):0;
+ // The household can state how much of its shopping the documented store covers.
+ const registered=bought>0?bought*365/Math.max(historyDays,90)/odaShare:0;
  if(watch.purchaseAmount!=null&&watch.purchaseAmount>=registered)return {amount:watch.purchaseAmount,basis:'planned-amount'};
- if(registered>0)return {amount:registered,basis:'oda-lower-bound'};
+ if(registered>0)return {amount:registered,basis:odaShare<1?'oda-share-estimate':'oda-lower-bound'};
  return {amount:null,basis:'offer-pack'};
 }
 

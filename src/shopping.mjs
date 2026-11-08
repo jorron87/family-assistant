@@ -98,7 +98,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
   const orders=()=>Object.values(s.orders);
   const update=fn=>{const result=fn();save();return structuredClone(result);};
   const needRows=(w,a)=>a.products.filter(p=>w.productKeys.includes(p.productKey)&&p.unit===w.unit);
-  const needOf=(w,a)=>annualNeed(w,needRows(w,a),a.days);
+  const needOf=(w,a)=>annualNeed(w,needRows(w,a),a.days,s.settings.odaShare??1);
   const rateOf=need=>need.amount==null?null:need.amount/12;
   // A delivered order refills counted stock; uncounted stock stays unknown.
   function receiveOrder(order,a) {
@@ -119,6 +119,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     const next={...s.settings};
     if(input.historyFrom!==undefined)next.historyFrom=day(input.historyFrom);
     if(input.monitoringEnabled!==undefined){if(typeof input.monitoringEnabled!=='boolean')throw Error('Ugyldig overvåkningsvalg.');next.monitoringEnabled=input.monitoringEnabled;}
+    if(input.odaShare!==undefined){const share=input.odaShare===null?1:Number(input.odaShare);if(!Number.isFinite(share)||share<.1||share>1)throw Error('Oda-andelen må være mellom 0,1 og 1.');next.odaShare=share;}
     if(input.storageNote!==undefined)next.storageNote=text(input.storageNote,1500);
     if(input.stockUpDays!==undefined)next.stockUpDays=Math.min(365,positive(input.stockUpDays,'lagerhorisont'));
     if(input.stores!==undefined){if(!Array.isArray(input.stores)||input.stores.length>50)throw Error('Ugyldig butikkliste.');next.stores=input.stores.map(x=>({id:safeId(x.id,'Butikk-ID'),name:required(x.name,'Butikk'),url:url(x.url),minSavings:positive(x.minSavings??50,'minste besparelse',true),memberEligible:x.memberEligible===true,pricesIncludeVat:x.pricesIncludeVat!==false,chainCode:x.chainCode==null?null:safeId(x.chainCode,'Kjedekode'),facebookGroup:x.facebookGroup==null?null:safeId(x.facebookGroup,'Facebook-gruppe')}));if(new Set(next.stores.map(x=>x.id)).size!==next.stores.length)throw Error('Butikk-ID må være unik.');}

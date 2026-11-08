@@ -148,6 +148,14 @@ test('unverified order prices still document how much was bought',()=>{
  const need=annualNeed(shop.view().watches[0],shop.analysis().products,366);assert.ok(need.amount>4.9&&need.amount<5.1);assert.equal(need.basis,'oda-lower-bound');assert.equal(shop.analysis().products[0].baselineUnitPrice,null);
  assert.equal(w.manualLimits,false);
 });
+test('the stated Oda share scales documented purchases into a yearly estimate',()=>{
+ const {shop}=setup();shop.settings({odaShare:.5});
+ shop.importOrders({orders:[{orderNumber:'x',deliveryDate:'2026-10-01',currency:'NOK',grossAmount:100,products:[{product:{id:1,name:'Mel',description:'1 kg'},quantity:5,totalGrossAmount:'100.00'}]}]});
+ const w=shop.watch({name:'Mel',unit:'kg',storage:'pantry',productKeys:['oda:1'],targetPrice:100});
+ const item=shop.familyView().items.find(x=>x.id===w.id);assert.ok(item.annualAmount>9.9&&item.annualAmount<10.1);assert.equal(item.annualBasis,'oda-share-estimate');
+ shop.item({id:w.id,annualAmount:4});assert.equal(shop.familyView().items.find(x=>x.id===w.id).annualAmount,4);
+ assert.throws(()=>shop.settings({odaShare:0}),/Oda-andelen/);assert.throws(()=>shop.settings({odaShare:2}),/Oda-andelen/);
+});
 test('a stated yearly need wins over documented purchases, and family edits keep their data',()=>{
  const {shop}=setup();const flour=watch(shop,{purchaseAmount:30});
  const edited=shop.item({id:flour.id,annualAmount:6,shelfLifeMonths:6});assert.equal(edited.monthlyUsage,.5);assert.equal(edited.purchaseAmount,null);assert.equal(edited.targetPrice,100);
