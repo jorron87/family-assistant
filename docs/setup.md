@@ -21,6 +21,8 @@ Familievisningen er laget for en permanent **24-tommers touchskjerm i 16:9, 1920
 
 ## Akseptanse før automatikk
 
+Tunnelens gjenstartsforsøk kjører uten konsollvindu, også når Pi-en ikke svarer. `scripts/enable-dashboard-recovery.ps1` oppgraderer en eksisterende direkte SSH-oppgave til skjult oppstart uten å avbryte en aktiv tunnel. Den lille Windows Script Host-starteren genereres lokalt i `.local/runtime`; aktiver ikke deaktivert Windows Script Host for å omgå en maskinpolicy. Ringeklokkens arbeider gjenbruker en allerede kjørende gateway og skriver standardfeil separat i `gateway-error.log`.
+
 - En ny ukeplan er fullstendig lest, gir riktig dato og pakkeliste, og originalen kan åpnes fra telefon.
 - Ny gjennomgang av uendret plan lager ingen nye nedlastinger eller kalenderdubletter.
 - Søsken har individuelle avkryssinger. Skjul/gjenåpne synkroniserer med testkalenderen.

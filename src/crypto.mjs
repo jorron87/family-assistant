@@ -7,7 +7,7 @@ const MAGIC = Buffer.from("FAM1");
 
 function powershell(script, env, input) {
   return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.Security; ${script}`], {
-    env: { ...process.env, ...env }, input, encoding: "utf8", stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"]
+    env: { ...process.env, ...env }, input, encoding: "utf8", windowsHide: true, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"]
   }).trim();
 }
 
