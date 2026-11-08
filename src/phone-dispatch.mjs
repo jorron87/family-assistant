@@ -59,7 +59,20 @@ export function createPhoneDispatcher({store,root,launch=launchLuna,clock=Date.n
     if(running)return;
     const ready=pending().filter(item=>!item.dispatch?.retryAt||Date.parse(item.dispatch.retryAt)<=clock());
     const actions=store.calendarActions().filter(item=>{const sync=store.snapshot().events[item.eventId].visibility.sync;return !sync.retryAt||Date.parse(sync.retryAt)<=clock();});
-    if(!ready.length && !actions.length)return;
+    if(!ready.length && !actions.length){
+      // Shopping list items wait a minute, so several added together share one run.
+      const routes=store.shopping?.listRouteWork?.()?.filter(entry=>clock()-Date.parse(entry.addedAt)>=60000)??[];
+      if(!routes.length)return;
+      const routeLease=store.beginRun();
+      if(!routeLease.acquired)return;
+      running=true;leaseToken=routeLease.lease.token;
+      const routeToken=leaseToken,routeIds=routes.map(entry=>entry.id);
+      store.shopping.listRouteAttempt(routeIds);
+      const routePrompt=`Handleliste: sorter nye varer til beste kjøpssted. Dette er en AVGRENSET oppgave, ikke kildekontroll. Tjenesten har tatt kjøringslåsen ${routeToken}; ikke kall begin-run, og frigjør den med end-run i finally. Les AGENTS.md og avsnittet om handleliste i docs/runbook.md. Kjør node src/cli.mjs shopping-queue og behandle bare do:"shopping-list-route". For hver vare: finn hva familien mener, sjekk pris med node src/cli.mjs oda-search "søk" og kassal-search FIL, og velg sted etter regelen i runbooken: Oda med mindre et annet sted er minst 15 % og 25 kr billigere. Registrer med node src/cli.mjs shopping-list-route FIL, der FIL er UTF-8 JSON under tmp/agent med {id,storeName,reason,matchedName,unitPrice,unit,packAmount,packs,odaProductId}. Bruk odaProductId når valget er Oda, og hold reason kort og på norsk. Finnes ikke varen, velg "Nærmeste butikk". Ikke endre Oda-kurven, ikke bestill noe og ikke rør andre køelementer.`;
+      const finishRoute=()=>{if(store.snapshot().runLease?.token===routeToken)store.endRun(routeToken);if(store.snapshot().phone?.worker?.token===routeToken)store.phone.worker(null);running=false;leaseToken=null;};
+      try{const child=launch({root,prompt:routePrompt,onExit:finishRoute});if(child?.pid)store.phone.worker({pid:child.pid,token:routeToken,startedAt:new Date(clock()).toISOString()});}catch{finishRoute();}
+      return;
+    }
     const lease=store.beginRun();
     if(!lease.acquired)return;
     running=true;leaseToken=lease.lease.token;

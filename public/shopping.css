@@ -87,7 +87,6 @@
 .shopping-banner button { border: 0; background: transparent; color: var(--green, #345b3b); font: inherit; font-weight: 700; min-height: 42px; cursor: pointer; }
 body.kiosk .main-nav button { padding-left: 13px; padding-right: 13px; }
 @media (max-width: 480px) { .shop .shop-tabs { flex: 1; } .shop .shop-tabs button { flex: 1; padding: 8px 6px; } .shop-hero-number { font-size: 34px; } .shop-hero, .shop-card, .shop-store { padding: 15px; } }
-@media (prefers-color-scheme: dark) { #family-shopping.shop { --s-card: #151d19; --s-gold: #e6c98a; --s-gold-soft: #3a2c14; --s-red: #e08a7e; } #family-shopping .shop-refresh, #family-shopping .shop-badge.excellent, #family-shopping .primary { color: #0e1411 !important; } .shop-toast { color: #0e1411; } .shop-dialog { --s-card: #151d19; } }
 .shop-source { display: inline-flex; align-items: center; min-height: 44px; font-size: 15px; font-weight: 600; }
 .shop-fold .shop-store { padding: 10px 0 0; border: 0; border-top: 1px solid var(--s-line); border-radius: 0; background: transparent; }
 .shop-fold summary + .shop-store { border-top: 0; }
@@ -137,3 +136,22 @@ body.kiosk .main-nav button { padding-left: 13px; padding-right: 13px; }
 .shop .shop-list-text + .shop-step button { width: 40px; height: 40px; }
 .shop-check button[type=submit] { flex-shrink: 0; }
 @media (max-width: 480px) { .shop .shop-tabs button { padding: 8px 2px; font-size: 14px; } }
+.shop-warning { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 4px; padding: 8px 10px; border-radius: 8px; background: #f6dcd8; color: #7c2a22; font-size: 14px; font-weight: 600; }
+.shop .shop-warning button { min-height: 40px; padding: 6px 12px; border: 1px solid #7c2a2255; border-radius: 8px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.shop-limit { flex-basis: 100%; margin-top: 4px; padding: 6px 10px; border-radius: 8px; background: var(--s-gold-soft); color: var(--s-gold); font-size: 14px; font-weight: 600; }
+.shop-limit.quiet { padding: 0; background: transparent; font-weight: 400; font-size: 13px; }
+.shop-cart-line { margin-top: 10px; }
+.shop-cart-line strong { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.shop .shop-stock-done { min-height: 44px; padding: 8px 18px; border: 0; border-radius: 10px; background: var(--s-green); color: var(--s-on-green, #fff); font: inherit; font-weight: 600; cursor: pointer; }
+.shop .shop-stock-done[hidden] { display: none; }
+@media (prefers-color-scheme: dark) {
+  #family-shopping.shop, body:has(#family-shopping) .shop-dialog { --s-ink: #ece8df; --s-muted: #b4beb6; --s-line: #33413a; --s-green: #a7d0b3; --s-soft: #1f2e27; --s-card: #151d19; --s-gold: #eccf94; --s-gold-soft: #3a2c14; --s-red: #f0a79b; --s-on-green: #0e1411; color: var(--s-ink); }
+  body:has(#family-shopping) .shop-dialog { background: #10171a; }
+  #family-shopping .shop-refresh, #family-shopping .shop-badge.excellent, #family-shopping .primary, body:has(#family-shopping) .shop-dialog .primary, #family-shopping .shop-source-head button { color: #0e1411 !important; }
+  #family-shopping .shop-actions .primary { color: #0e1411 !important; }
+  #family-shopping .shop-toast { color: #0e1411; }
+  #family-shopping .shop-toast button { color: #0e1411; border-color: #0e141188; }
+  #family-shopping .shop-warning { background: #3b1f1c; color: #f6c5bc; }
+  #family-shopping input, #family-shopping select { color: var(--s-ink); }
+  #family-shopping input::placeholder { color: var(--s-muted); opacity: 1; }
+}

@@ -79,6 +79,28 @@ export function createOda({dataDir,shopping,redirectUrl,makeClient=()=>new Clien
     const query=String(input.query??'').trim();if(!query||query.length>200)throw Error('Skriv et varenavn.');
     return call('product_search',{queries:[query],page:1,size:10});
   });}
+  async function tools() {return exclusive(async()=>{const c=await connect();if(!c)throw Error('Fullfør Oda-innloggingen i nettleseren.');return c.listTools();});}
+  // Adds a large quantity, reads what Oda says, and always takes it back out.
+  // This only runs on an explicit family request; it never places an order.
+  async function probeLimit(input) {return exclusive(async()=>{
+    const {productId,quantity}=input;
+    if(!Number.isSafeInteger(productId)||productId<1||!Number.isInteger(quantity)||quantity<1||quantity>100)throw Error('Ugyldig grensetest.');
+    const before=await call('get_cart'),initial=cartQuantity(before,productId);
+    let during=null,accepted=null,error=null;
+    try{
+      during=await call('manipulate_cart',{operations:[{productId,quantity}]});
+      accepted=cartQuantity(during,productId)-initial;
+    }catch(problem){error=problem.message;}
+    finally{
+      await call('manipulate_cart',{operations:[{productId,quantity:-quantity}]}).catch(()=>{});
+      const fresh=await call('get_cart').catch(()=>null);
+      if(fresh&&cartQuantity(fresh,productId)>initial)await call('manipulate_cart',{operations:[{productId,quantity:initial-cartQuantity(fresh,productId)}]}).catch(()=>{});
+    }
+    const after=await call('get_cart'),lines=[];
+    const walk=value=>{if(!value||typeof value!=='object')return;if(value.product?.id===productId){lines.push(value);return;}for(const child of Object.values(value))if(child&&typeof child==='object')walk(child);};
+    walk(during?.groups);
+    return {productId,requested:quantity,accepted,error,validationMessages:during?.validationMessages??null,line:lines[0]??null,restored:cartQuantity(after,productId)===initial};
+  });}
   async function addToCart(input) {return exclusive(async()=>{
     const {requestId,productId,quantity}=input;
     if(!/^[a-zA-Z0-9-]{16,100}$/.test(requestId??'')||!Number.isSafeInteger(productId)||productId<1||!Number.isInteger(quantity)||quantity<1||quantity>100)throw Error('Ugyldig kurvhandling.');
@@ -95,5 +117,5 @@ export function createOda({dataDir,shopping,redirectUrl,makeClient=()=>new Clien
     }catch{shopping.cartReceipt(requestId,{status:'uncertain'});throw Error('Kurvhandlingen kunne ikke bekreftes. Kontroller handlekurven hos Oda; handlingen gjentas ikke automatisk.');}
   });}
   function status(){const configured=existsSync(path);let connected=!!client;try{connected||=configured&&!!read().tokens;}catch{lastError='Oda-oppsettet kunne ikke leses. Kontroller oppsettet lokalt.';}return {configured,connected,busy,error:lastError};}
-  return {authorize,callback,sync,search,addToCart,status,close,cart:()=>exclusive(()=>call('get_cart'))};
+  return {probeLimit,tools,authorize,callback,sync,search,addToCart,status,close,cart:()=>exclusive(()=>call('get_cart'))};
 }

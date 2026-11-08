@@ -89,6 +89,7 @@ async function handle(req, res) {
     if(path==='/api/shopping/checklist'&&method==='GET')return send(res,200,store.shopping.checklist());
     if(path==='/api/shopping/queue'&&method==='GET')return send(res,200,store.shopping.queue());
     if(path==='/api/shopping/catalog'&&method==='GET')return send(res,200,store.shopping.catalogEntries(new URL(req.url,`http://${host}`).searchParams.get('watchId')??undefined));
+    if(path==='/api/shopping/oda/tools'&&method==='GET')return send(res,200,await oda.tools());
     if(path==='/api/shopping/oda/callback'&&method==='GET'){
       await oda.callback(Object.fromEntries(new URL(req.url,`http://${host}`).searchParams));
       return send(res,200,'Oda er tilkoblet. Gå tilbake til Handel og hent ordrehistorikken.','text/plain; charset=utf-8');
@@ -118,6 +119,8 @@ async function handle(req, res) {
       if(path==='/api/shopping/catalog-review')return send(res,200,store.shopping.catalogReview(input));
       if(path==='/api/shopping/oda/connect')return send(res,200,await oda.authorize());
       if(path==='/api/shopping/oda/sync')return send(res,200,await oda.sync());
+      if(path==='/api/shopping/oda/probe'){const result=await oda.probeLimit(input);store.shopping.recordOdaLimit(result);return send(res,200,result);}
+      if(path==='/api/shopping/oda/review')return send(res,200,store.shopping.cartReview(await oda.cart()));
       if(path==='/api/shopping/oda/search')return send(res,200,await oda.search(input));
       if(path==='/api/shopping/oda/add')return send(res,200,await oda.addToCart(input));
       if(path==='/api/shopping/oda/cart')return send(res,200,await oda.cart());
@@ -414,8 +417,8 @@ doorbell.attach(servers.at(-1));
 servers.at(-1).listen(port, host, () => console.log(`Familien: http://${host}:${port}`));
 // Family controls are available on the living-room display; ingestion stays private.
 servers.push(createServer((req,res) => {
-  if(/^\/(?:api\/(?:resources|collector|google)(?:[/?]|$)|google-setup|shopping-setup|api\/shopping\/oda\/(?:connect|callback)|api\/shopping\/(?:orders|settings|offer|review|nutrition|catalog|link|feed))/.test(req.url))return send(res,req.method==='GET'?403:405,{error:'Kildeoriginaler og integrasjonsoppsett er bare tilgjengelige lokalt på agentporten.'});
-  if (req.method !== "GET" && !(req.method === "POST" && /^(?:\/api\/shopping\/(?:watch|pantry|item|deal|list|oda\/(?:sync|search|add|cart))|\/api\/home-assistant\/command|\/api\/doorbell\/frame|\/api\/profile\/edit|\/api\/events\/[a-f0-9]{24}\/(?:tasks\/[a-zA-Z0-9:_-]{1,100}|visibility)|\/api\/activities\/[a-f0-9]{24}\/reaction)$/.test(new URL(req.url,`http://${host}`).pathname))) return send(res,405,{error:"Handlingen er bare tilgjengelig lokalt på agentporten."});
+  if(/^\/(?:api\/(?:resources|collector|google)(?:[/?]|$)|google-setup|shopping-setup|api\/shopping\/oda\/(?:connect|callback|tools)|api\/shopping\/(?:orders|settings|offer|review|nutrition|catalog|link|feed))/.test(req.url))return send(res,req.method==='GET'?403:405,{error:'Kildeoriginaler og integrasjonsoppsett er bare tilgjengelige lokalt på agentporten.'});
+  if (req.method !== "GET" && !(req.method === "POST" && /^(?:\/api\/shopping\/(?:watch|pantry|item|deal|list|oda\/(?:sync|search|add|cart|probe|review))|\/api\/home-assistant\/command|\/api\/doorbell\/frame|\/api\/profile\/edit|\/api\/events\/[a-f0-9]{24}\/(?:tasks\/[a-zA-Z0-9:_-]{1,100}|visibility)|\/api\/activities\/[a-f0-9]{24}\/reaction)$/.test(new URL(req.url,`http://${host}`).pathname))) return send(res,405,{error:"Handlingen er bare tilgjengelig lokalt på agentporten."});
   return handle(req,res);
 }));
 doorbell.attach(servers.at(-1));

@@ -39,6 +39,7 @@ const HELD_TEXT={member:'krever medlemskap vi ikke har registrert','needs-review
 export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/shopping',compact=false}) {
   const draftEdits=new Map(),cartState=new Map(),cartIds=new Map();let cartBusy=false;
   const check={itemId:null,query:'',price:'',size:null,custom:'',customUnit:null};
+  let listNeed='later';
   let dirty=false,data=null,tab='buy',search='',location='all',stale=false,odaQuery='',toastTimer=null;
   const chosen=new Map(),openSections=new Set();
   panel.classList.add('shop');
@@ -118,7 +119,8 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     return item.stock.months!=null?`${what} · rekker ${item.stock.months<1?'noen uker':`ca. ${monthsText(item.stock.months)}`}`:what;
   }
   // Tapping is saved shortly after the last tap, so a count of six is one request.
-  function stockEditor(item,afterSave) {
+  function stockEditor(item,afterSave,{confirm=false}={}) {
+    const done=confirm?button('Ferdig',()=>save(),'shop-stock-done'):null;
     const wrap=el('div',undefined,'shop-stock'),counts=new Map(item.packs.map(p=>[p.amount,p.count])),values=new Map();
     let timer=null;
     const save=async()=>{
@@ -130,7 +132,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
         dirty=true;afterSave(reply.item);
       }catch(error){fail(error);}
     };
-    const change=(size,delta)=>{counts.set(size,Math.max(0,counts.get(size)+delta));values.get(size).textContent=String(counts.get(size));clearTimeout(timer);timer=setTimeout(save,700);};
+    const change=(size,delta)=>{counts.set(size,Math.max(0,counts.get(size)+delta));values.get(size).textContent=String(counts.get(size));if(confirm){done.hidden=false;return;}clearTimeout(timer);timer=setTimeout(save,700);};
     for(const pack of item.packs){
       const row=el('div',undefined,'shop-step'),label=packLabel(pack.amount,item.unit),value=el('span',String(pack.count),'shop-step-value');
       values.set(pack.amount,value);
@@ -141,6 +143,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     }
     const empty=button('Tomt',()=>{for(const size of counts.keys()){counts.set(size,0);values.get(size).textContent='0';}save();},'shop-empty');
     wrap.append(empty);
+    if(done){done.hidden=true;wrap.append(done);}
     return wrap;
   }
 
@@ -201,7 +204,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     if(notes.length)card.append(el('p',notes.join(' '),'shop-sub'));
     if(!deal.stock.known&&stockItem){
       const ask=el('div',undefined,'shop-ask');
-      ask.append(el('span','Hvor mange har dere hjemme?','shop-sub'),stockEditor(stockItem,async()=>{await load();render(true);}));
+      ask.append(el('span','Hvor mange har dere hjemme?','shop-sub'),stockEditor(stockItem,async()=>{await load();render(true);},{confirm:true}));
       card.append(ask);
     }
     const actions=el('div',undefined,'shop-actions');
@@ -379,7 +382,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     tick.onchange=()=>act(()=>api('/list',{action:tick.checked?'check':'uncheck',id:entry.id}),tick.checked&&entry.watchId?'Lagt på lager.':null);
     const text=el('div',undefined,'shop-list-text'),qty=entry.packs&&entry.packAmount?`${entry.packs} × ${packLabel(entry.packAmount,entry.unit)} `:'';
     text.append(el('strong',qty+entry.name));
-    const facts=[entry.detail,entry.unitPrice?`${price(entry.unitPrice)}/${entry.unit}`:null,entry.saving?`Spar ${kr(entry.saving)}`:null,entry.expired?'Tilbudet er over':entry.validTo?`Til ${dayLabel(entry.validTo)}`:null].filter(Boolean);
+    const facts=[entry.reason,entry.detail,entry.unitPrice?`${price(entry.unitPrice)}/${entry.unit}`:null,entry.saving?`Spar ${kr(entry.saving)}`:null,entry.expired?'Tilbudet er over':entry.validTo?`Til ${dayLabel(entry.validTo)}`:null].filter(Boolean);
     if(facts.length)text.append(el('span',facts.join(' · '),'shop-sub'+(entry.expired?' shop-expired':'')));
     row.append(tick,text);
     if(entry.sourceUrl&&!isKiosk()){const source=link('Kilde ↗',entry.sourceUrl);source.className='shop-list-source';row.append(source);}
@@ -389,7 +392,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
   }
   function odaDraftCard() {
     const draft=data.odaDraft,card=el('section',undefined,'shop-card');
-    const edit=item=>{if(!draftEdits.has(item.watchId))draftEdits.set(item.watchId,{on:true,packs:item.packs});return draftEdits.get(item.watchId);};
+    const edit=item=>{if(!draftEdits.has(item.watchId))draftEdits.set(item.watchId,{on:!item.elsewhere,packs:item.packs});return draftEdits.get(item.watchId);};
     const selected=()=>draft.items.filter(x=>edit(x).on&&cartState.get(x.watchId)?.state!=='done'&&cartState.get(x.watchId)?.state!=='uncertain');
     const summary=el('p','','shop-sub'),go=el('button','','primary');go.type='button';
     let armed=false;
@@ -409,10 +412,19 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
         const text=el('div',undefined,'shop-list-text'),note={excellent:'Svært bra pris nå',good:'Bra pris nå',dear:'Dyrere enn vanlig, derfor lite'}[item.tier];
         text.append(el('strong',item.name),el('span',[item.productName,`${price(item.packPrice)}`,note,draft.items.some(x=>x.stockKnown)&&!item.stockKnown?'Lager ikke talt':null].filter(Boolean).join(' · '),'shop-sub'));
         const value=el('span',String(state.packs),'shop-step-value'),step=el('div',undefined,'shop-step');
-        const change=delta=>{state.packs=Math.min(100,Math.max(1,state.packs+delta));value.textContent=String(state.packs);armed=false;refresh();};
+        const change=delta=>{state.packs=Math.min(item.maxAtOda??100,Math.max(1,state.packs+delta));value.textContent=String(state.packs);armed=false;refresh();};
         step.append(button('−',()=>change(-1)),value,button('+',()=>change(1)));
         const status=el('span',cartState.get(item.watchId)?.text??'','shop-draft-status');
-        row.append(on,text,step,status);node.append(row);rows.set(item.watchId,status);
+        row.append(on,text,step,status);
+        if(item.elsewhere){
+          const warn=el('div',undefined,'shop-warning');
+          warn.append(el('span','Bør ikke kjøpes på Oda: '+item.elsewhere.diffPct+' % billigere hos '+item.elsewhere.storeName+' ('+price(item.elsewhere.unitPrice)+'/'+item.unit+', spar '+kr(item.elsewhere.saving)+').'));
+          if(item.elsewhere.offerId)warn.append(button('Legg på listen dit',()=>act(()=>api('/list',{action:'add',offerId:item.elsewhere.offerId,packs:Math.max(1,Math.ceil(item.wanted*item.packAmount/item.elsewhere.packAmount))}),'Lagt på handlelisten.')));
+          row.append(warn);
+        }
+        if(item.maxAtOda!=null&&item.wanted>item.maxAtOda)row.append(el('div','Oda tillater maks '+item.maxAtOda+' per bestilling. Resten, '+(item.wanted-item.maxAtOda)+' pk, må kjøpes et annet sted.','shop-limit'));
+        else if(item.maxAtOda!=null)row.append(el('div','Maks '+item.maxAtOda+' hos Oda.','shop-limit quiet'));
+        node.append(row);rows.set(item.watchId,status);
       }
     },'shop-why');
     card.append(body);
@@ -426,25 +438,46 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
           if(!cartIds.has(key))cartIds.set(key,crypto.randomUUID());
           go.textContent=`Legger i kurven … ${added+1}`;
           const mark=(next,text)=>{cartState.set(item.watchId,{state:next,text});const node=rows.get(item.watchId);if(node)node.textContent=text;};
-          try{await api('/oda/add',{requestId:cartIds.get(key),productId:item.productId,quantity:state.packs});mark('done','I kurven ✓');added++;}
+          try{await api('/oda/add',{requestId:cartIds.get(key),productId:item.productId,quantity:state.packs});mark('done','I kurven ✓');added++;for(const id of item.entryIds??[])await api('/list',{action:'remove',id}).catch(()=>{});}
           catch(error){mark('uncertain','Sjekk i kurven');toast(error.message);break;}
         }
         cartBusy=false;refresh();if(added)toast(`${added} varer lagt i Oda-kurven. Se over og betal hos Oda.`);
       };
       const actions=el('div',undefined,'shop-actions');actions.append(go);card.append(actions);
+      const review=el('div');
+      const checkCart=button('Sjekk det som ligger i Oda-kurven',async()=>{
+        checkCart.disabled=true;review.replaceChildren(el('p','Leser kurven …','shop-sub'));
+        try{
+          const result=await api('/oda/review',{});
+          review.replaceChildren(el('p',result.lines.length?result.lines.length+' varer i kurven · '+kr(Number(result.total)):'Oda-kurven er tom.','shop-sub'));
+          for(const text of result.messages)review.append(el('div',text,'shop-limit'));
+          for(const line of result.lines){
+            if(!line.elsewhere&&!line.limit)continue;
+            const row=el('div',undefined,'shop-cart-line');row.append(el('strong',line.quantity+' × '+line.name));
+            if(line.elsewhere)row.append(el('div','Bør ikke kjøpes på Oda: '+line.elsewhere.diffPct+' % billigere hos '+line.elsewhere.storeName+' (spar '+kr(line.elsewhere.saving)+').','shop-warning'));
+            if(line.limit)row.append(el('div',line.limit,'shop-limit'));
+            review.append(row);
+          }
+          if(result.lines.length&&!result.lines.some(x=>x.elsewhere||x.limit)&&!result.messages.length)review.append(el('p','Ingen varer å advare om.','shop-sub'));
+        }catch(error){review.replaceChildren(el('p',error.message,'shop-sub'));}
+        checkCart.disabled=false;
+      },'shop-add');
+      card.append(checkCart,review);
     }else card.append(el('p','Oda må kobles til for å legge varer i kurven.','shop-sub'));
     refresh();
     return card;
   }
   function renderList(root) {
     const addCard=el('section',undefined,'shop-card'),form=el('form',undefined,'shop-check'),input=el('input'),go=el('button','Legg til');
+    const needChips=chips([['now','Trenger nå'],['later','Kan vente']],listNeed,value=>{listNeed=value;render(true);},'Hvor fort trengs det?');
     input.type='text';input.placeholder='Legg til vare';input.maxLength=120;input.className='shop-find';input.setAttribute('aria-label','Legg til vare');go.type='submit';
-    form.onsubmit=event=>{event.preventDefault();const name=input.value.trim();if(name)act(()=>api('/list',{action:'add',name}));};
-    form.append(input,go);addCard.append(el('h3','Handleliste'),form);root.append(addCard);
+    form.onsubmit=event=>{event.preventDefault();const name=input.value.trim();if(name)act(()=>api('/list',{action:'add',name,need:listNeed}));};
+    form.append(input,go);addCard.append(el('h3','Handleliste'),needChips,form,el('p',listNeed==='now'?'Går på listen til nærmeste butikk.':'Vi finner det beste stedet å kjøpe den.','shop-sub'));root.append(addCard);
     const groups=new Map();
-    for(const entry of data.list.open){const key=entry.storeName??'Hvor som helst';const list=groups.get(key)??[];list.push(entry);groups.set(key,list);}
+    for(const entry of data.list.open){const key=entry.routing==='pending'?'Finner beste sted …':entry.storeName??'Hvor som helst';const list=groups.get(key)??[];list.push(entry);groups.set(key,list);}
     if(!groups.size)root.append(el('p','Listen er tom. Legg på gode tilbud fra Kjøp nå, eller skriv inn det dere trenger.','shop-sub'));
-    for(const [store,entries] of [...groups].sort((a,b)=>(a[0]==='Hvor som helst')-(b[0]==='Hvor som helst'))){
+    const rank=name=>name==='Nærmeste butikk'?0:name==='Finner beste sted …'?3:name==='Hvor som helst'?2:1;
+    for(const [store,entries] of [...groups].sort((a,b)=>rank(a[0])-rank(b[0]))){
       const section=el('section',undefined,'shop-store'),head=el('div',undefined,'shop-store-head'),save=entries.reduce((n,x)=>n+(x.saving??0),0);
       head.append(el('h3',store),el('span',`${entries.length} ${entries.length===1?'vare':'varer'}${save?` · spar ${kr(save)}`:''}`,'shop-sub'));
       section.append(head,...entries.map(listRow));root.append(section);

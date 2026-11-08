@@ -52,6 +52,7 @@ export function phoneHandler({oda=null,store,root,send,body,json,onQueued=()=>{}
       if(req.method==='POST'&&path==='/send/api/shopping/pantry')return send(res,200,store.shopping.pantry(await json(req)));
       if(req.method==='POST'&&path==='/send/api/shopping/item')return send(res,200,store.shopping.item(await json(req)));
       if(req.method==='POST'&&path==='/send/api/shopping/deal')return send(res,200,store.shopping.dealAction(await json(req)));
+      if(req.method==='POST'&&path==='/send/api/shopping/oda/review'&&oda)return send(res,200,store.shopping.cartReview(await oda.cart()));
       if(req.method==='POST'&&path==='/send/api/shopping/oda/search'&&oda)return send(res,200,await oda.search(await json(req)));
       if(req.method==='POST'&&path==='/send/api/shopping/oda/add'&&oda)return send(res,200,await oda.addToCart(await json(req)));
       if(path==='/send/api/weather'&&req.method==='GET')return send(res,200,weather?await weather.get():{unavailable:true});

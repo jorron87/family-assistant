@@ -47,11 +47,49 @@ test('the Oda draft covers the usual gap, subtracts stock and listed items, and 
  assert.equal(draft.nextAround,'2027-01-17');assert.deepEqual(draft.missing,['Annen vare']);assert.notEqual(none.id,w.id);
  assert.equal(draft.items[0].productId,555);assert.equal(draft.items[0].packs,3);assert.equal(draft.items[0].cost,60);assert.equal(draft.items[0].stockKnown,false);
  shop.pantry({watchId:w.id,amount:1});assert.equal(shop.familyView().odaDraft.items[0].packs,2);
- shop.pantry({watchId:w.id,amount:null});shop.list({action:'add',watchId:w.id,packAmount:1});assert.equal(shop.familyView().odaDraft.items[0].packs,2);
+ shop.pantry({watchId:w.id,amount:null});shop.list({action:'add',watchId:w.id,packAmount:1});const merged=shop.familyView().odaDraft.items[0];assert.equal(merged.packs,3);assert.equal(merged.entryIds.length,1);
 });
 test('price level changes the Oda quantity, and full stock leaves the draft',()=>{
  const make=price=>{const {shop}=setup();orders(shop);const w=flour(shop,{priceGuide:{referencePrice:100,checkedAt:'2026-11-08T10:00:00Z',evidence:'Grunnlag'},excellentPrice:70});odaItem(shop,w.id,{price});return {shop,w};};
  let {shop,w}=make(60);assert.equal(shop.familyView().odaDraft.items[0].tier,'excellent');assert.equal(shop.familyView().odaDraft.items[0].packs,12);
  ({shop}=make(120));assert.equal(shop.familyView().odaDraft.items[0].tier,'dear');assert.equal(shop.familyView().odaDraft.items[0].packs,1);
  ({shop,w}=make(100));shop.pantry({watchId:w.id,amount:12});const draft=shop.familyView().odaDraft;assert.equal(draft.items.length,0);assert.equal(draft.covered,1);
+});
+
+const history=price=>Array.from({length:30},(_,i)=>({date:new Date(Date.parse('2026-10-10T10:00:00Z')+i*86400000).toISOString(),price}));
+function withChain(shop,w,price) {shop.settings({stores:[{id:'near',name:'Nærbutikk',url:'https://example.com/near',minSavings:0,chainCode:'SPAR_NO'}]});
+ const seen=shop.catalogObserve({watchId:w.id,products:[{id:9,store:'SPAR_NO',name:'Mel',currentPrice:price,lastChecked:'2026-11-08T10:00:00Z'}]});shop.catalogReview({watchId:w.id,id:9,store:'SPAR_NO',fingerprint:seen.entries[0].fingerprint,status:'approved',packAmount:1,unit:'kg',equivalenceEvidence:'Samme vare'});shop.market({watchId:w.id,products:[{id:9,store:'SPAR_NO',unit:'kg',packAmount:1,reviewed:true,equivalenceEvidence:'Samme vare',lastChecked:'2026-11-08T10:00:00Z',currentPrice:price,history:history(price)}]});}
+test('urgent items go to the nearest store without any routing',()=>{
+ const {shop}=setup();const e=shop.list({action:'add',name:'Brokkoli',need:'now'});
+ assert.equal(e.storeName,'Nærmeste butikk');assert.equal(e.routing,null);assert.deepEqual(shop.listRouteWork(),[]);
+});
+test('unknown items wait for agent routing, and known items are placed at once',()=>{
+ const {shop}=setup();shop.settings({monitoringEnabled:true,stores:[]});
+ const e=shop.list({action:'add',name:'Oppvasktabletter'});assert.equal(e.routing,'pending');
+ assert.equal(shop.queue().filter(x=>x.do==='shopping-list-route').length,1);
+ assert.throws(()=>shop.list({action:'route',id:e.id,storeName:'Oda'}),/Begrunnelse/);
+ shop.list({action:'route',id:e.id,storeName:'Oda',reason:'Oda er billigst',odaProductId:77,unitPrice:50,unit:'stk',packAmount:1,packs:2,matchedName:'Tabletter'});
+ assert.equal(shop.listRouteWork().length,0);assert.equal(shop.familyView().odaDraft.items.find(x=>x.productId===77).packs,2);
+ const w=flour(shop);odaItem(shop,w.id);
+ const placed=shop.list({action:'add',name:'mel'});assert.equal(placed.storeName,'Oda');assert.equal(placed.odaProductId,555);assert.equal(placed.reason,'Oda er omtrent like billig');
+});
+test('routing only moves away from Oda on a meaningful difference',()=>{
+ const run=chain=>{const {shop}=setup();orders(shop);const w=flour(shop);odaItem(shop,w.id,{price:30});withChain(shop,w,chain);return shop;};
+ assert.equal(run(28).list({action:'add',name:'mel'}).storeName,'Oda');
+ const moved=run(20).familyView().odaDraft.items[0];assert.equal(moved.elsewhere.storeName,'Nærbutikk');assert.equal(moved.elsewhere.diffPct,33);
+ const shop=run(20);const entry=shop.list({action:'add',watchId:shop.familyView().items[0].id,packAmount:1});assert.equal(entry.storeName,'Oda');
+ const big=run(5).list({action:'add',name:'mel'});assert.equal(big.storeName,'Nærbutikk');assert.match(big.reason,/billigere enn Oda/);
+});
+test('Oda limits cap the draft and are read from validation messages',()=>{
+ const {shop}=setup();const w=flour(shop);odaItem(shop,w.id,{productId:64921});
+ shop.importOrders({orders:[{orderNumber:'a',deliveryDate:'2026-03-01',currency:'NOK',grossAmount:1,products:[{product:{id:1,name:'x',description:'1 kg'},quantity:1,totalGrossAmount:'1.00'}]},{orderNumber:'b',deliveryDate:'2026-06-07',currency:'NOK',grossAmount:1,products:[{product:{id:1,name:'x',description:'1 kg'},quantity:1,totalGrossAmount:'1.00'}]},{orderNumber:'c',deliveryDate:'2026-09-13',currency:'NOK',grossAmount:1,products:[{product:{id:1,name:'x',description:'1 kg'},quantity:1,totalGrossAmount:'1.00'}]}]});
+ const limit=shop.recordOdaLimit({productId:64921,validationMessages:['Dessverre tilbyr vi maks 2 stk Hvetemel per person.'],line:{product:{name:'Vår Hvetemel 1 kg'}}});assert.equal(limit.max,2);
+ const row=shop.familyView().odaDraft.items[0];assert.equal(row.packs,2);assert.equal(row.wanted,3);assert.equal(row.maxAtOda,2);
+ assert.equal(shop.recordOdaLimit({productId:5,validationMessages:[],line:null}).max,null);
+});
+test('the cart review warns per line about limits and better places',()=>{
+ const {shop}=setup();const w=flour(shop);odaItem(shop,w.id,{price:30});withChain(shop,w,10);
+ const cart={groups:[{items:[{product:{id:555,name:'Hvetemel'},quantity:10,totalGrossAmount:'300.00'},{product:{id:9,name:'Noe annet'},quantity:1,totalGrossAmount:'10.00'}]}],validationMessages:['Dessverre tilbyr vi maks 2 stk Hvetemel per person.'],totalGrossAmount:'310.00'};
+ const review=shop.cartReview(cart);
+ assert.equal(review.lines.length,2);assert.equal(review.lines[0].elsewhere.storeName,'Nærbutikk');assert.match(review.lines[0].limit,/maks 2/);assert.equal(review.lines[1].elsewhere,null);assert.equal(review.lines[1].limit,null);
 });
