@@ -53,6 +53,7 @@ async function execute(command, args, flags) {
     case 'shopping-offer': result=await request('/api/shopping/offer','POST',json(args[0]));break;
     case 'shopping-review': result=await request('/api/shopping/review','POST',json(args[0]));break;
     case 'shopping-nutrition': result=await request('/api/shopping/nutrition','POST',json(args[0]));break;
+    case 'shopping-market': result=await request('/api/shopping/market','POST',json(args[0]));break;
     case 'oda-sync': result=await request('/api/shopping/oda/sync','POST',{});break;
     case 'kassal-configure': result=await request('/api/shopping/kassal/configure','POST',json(args[0]));break;
     case 'kassal-search': result=await request('/api/shopping/kassal/search','POST',json(args[0]));break;

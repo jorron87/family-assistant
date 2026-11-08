@@ -99,6 +99,7 @@ async function handle(req, res) {
       if(path==='/api/shopping/offer')return send(res,200,store.shopping.offer(input));
       if(path==='/api/shopping/review')return send(res,200,store.shopping.review(input));
       if(path==='/api/shopping/nutrition')return send(res,200,store.shopping.nutrition(input));
+      if(path==='/api/shopping/market')return send(res,200,store.shopping.market(input));
       if(path==='/api/shopping/oda/connect')return send(res,200,await oda.authorize());
       if(path==='/api/shopping/oda/sync')return send(res,200,await oda.sync());
       if(path==='/api/shopping/oda/search')return send(res,200,await oda.search(input));

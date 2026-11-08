@@ -120,6 +120,33 @@ test('price guides persist their basis and distinguish good and excellent thresh
  assert.throws(()=>shop.watch({...w,excellentPrice:110}),/Svært bra/);
  assert.throws(()=>shop.watch({...w,priceGuide:{...w.priceGuide,evidence:''}}),/grunnlag/);
 });
+
+test('market calibration drives thresholds and savings independently of historic household spend',()=>{
+ const {shop}=fixture();shop.importOrders({orders:[order('one','2026-01-01'),order('two','2026-10-01')]});
+ const w=shop.watch({name:'Staple',productKeys:['oda:1'],unit:'kg',storage:'pantry',maxPacks:20,targetPrice:120});
+ const history=Array.from({length:30},(_,i)=>({date:new Date(Date.parse('2026-10-10T10:00:00Z')+i*86400000).toISOString(),price:50}));
+ const products=[{id:1,ean:'12345678',store:'SYNTHETIC',unit:'kg',packAmount:.5,reviewed:true,equivalenceEvidence:'Same synthetic staple and pack',lastChecked:'2026-11-08T10:00:00Z',currentPrice:50,history}];
+ const result=shop.market({watchId:w.id,products});assert.equal(result.status,'ready');assert.equal(shop.view().watches[0].targetPrice,100);assert.equal(shop.view().watches[0].excellentPrice,null);
+ const offer={watchId:w.id,storeId:'near',externalId:'market',name:'Staple',price:45,packAmount:.4,unit:'kg',validFrom:'2026-11-08',validTo:'2026-11-14',sourceUrl:'https://example.com/flyer',evidence:'Current flyer',comparable:true,comparisonNote:'Equivalent'};
+ shop.offer(offer);assert.equal(shop.view().opportunities.length,0);
+ shop.offer({...offer,price:35});const [o]=shop.view().opportunities;assert.equal(o.referenceType,'market');assert.equal(o.referencePrice,100);assert.equal(o.saving,50);
+ shop.watch({...shop.view().watches[0],enabled:false});assert.equal(shop.view().watches[0].marketCalibration.status,'ready');
+ assert.throws(()=>shop.market({watchId:w.id,products:[{...products[0],equivalenceEvidence:''}]}),/sammenligningsbelegg/);
+ const current=shop.watch({...shop.view().watches[0],referenceCeiling:{price:80,checkedAt:'2026-11-08T10:00:00Z',sourceUrl:'https://example.com/current',evidence:'Verified cheaper equivalent outside the returned history'}});
+ const capped=shop.market({watchId:current.id,products});assert.equal(capped.goodPrice,80);assert.equal(shop.view().watches[0].targetPrice,80);assert.equal(shop.view().watches[0].referenceCeiling.price,80);
+});
+test('a campaign already in Kassal is compared with other chains rather than itself',()=>{
+ const {shop}=fixture();shop.importOrders({orders:[order('one','2026-01-01'),order('two','2026-10-01')]});
+ shop.settings({stores:shop.view().settings.stores.map(s=>({...s,chainCode:s.id==='near'?'CAMPAIGN':'OTHER'}))});
+ const w=shop.watch({name:'Staple',productKeys:['oda:1'],unit:'kg',storage:'pantry',maxPacks:20,purchaseAmount:4});
+ const history=Array.from({length:30},(_,i)=>({date:new Date(Date.parse('2026-10-10T10:00:00Z')+i*86400000).toISOString(),price:100}));
+ const p={id:1,unit:'kg',packAmount:1,reviewed:true,equivalenceEvidence:'Same reviewed staple',lastChecked:'2026-11-08T11:00:00Z',history};
+ shop.market({watchId:w.id,products:[{...p,store:'CAMPAIGN',currentPrice:60},{...p,store:'OTHER',currentPrice:90}]});
+ shop.offer({watchId:w.id,storeId:'near',externalId:'campaign',name:'Staple',price:60,packAmount:1,unit:'kg',validFrom:'2026-11-08',validTo:'2026-11-14',sourceUrl:'https://example.com/flyer',evidence:'Current flyer',comparable:true,comparisonNote:'Same staple'});
+ const [o]=shop.view().opportunities;assert.equal(o.referencePrice,90);assert.equal(o.saving,120);
+ shop.settings({stores:shop.view().settings.stores.map(({chainCode,...s})=>s)});assert.equal(shop.view().opportunities.length,0);
+});
+
 test('nutrition reports coverage and never treats unknown foods or volume as zero nutrients',()=>{
  const entry=validateNutrition({productKey:'oda:1',basis:'g',per100:{kcal:160,protein:20,fat:8,carbs:2},sourceUrl:'https://example.com/label',evidence:'Næringsinnhold per 100 g'});
  const orders=[{products:[{productKey:'oda:1',name:'Mat',category:'Mat',netTotal:40,quantity:2,pack:{amount:.4,unit:'kg'}},{productKey:'unknown',category:'Mat',netTotal:20,quantity:1,pack:{amount:1,unit:'l'}},{productKey:'soap',category:'Hus og hjem',netTotal:100,quantity:1}]}];

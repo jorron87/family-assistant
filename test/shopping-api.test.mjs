@@ -17,7 +17,7 @@ test('shopping stays private, kiosk actions are limited, and order state survive
   const state=await (await fetch(base+'/api/state')).json();assert.equal(state.shopping,undefined);
   const kiosk=`http://127.0.0.1:${port+1}`,mobile=`http://127.0.0.1:${port+2}`;
   for(const path of ['/shopping-setup','/api/shopping/oda/callback','/api/shopping/orders'])assert.ok([403,405].includes((await fetch(kiosk+path)).status));
-  for(const path of ['settings','orders','offer','review','nutrition','oda/connect','kassal/configure','kassal/search','kassal/stores','kassal/ean','kassal/product','kassal/history'])assert.equal((await post(kiosk+'/api/shopping/'+path,{})).status,405);
+  for(const path of ['settings','orders','offer','review','nutrition','market','oda/connect','kassal/configure','kassal/search','kassal/stores','kassal/ean','kassal/product','kassal/history'])assert.equal((await post(kiosk+'/api/shopping/'+path,{})).status,405);
   assert.equal((await post(base+'/api/shopping/kassal/configure',{apiKey:'synthetic-test-kassal-token'},{Origin:'https://untrusted.example'})).status,403);
   assert.equal((await post(base+'/api/shopping/kassal/configure',{apiKey:'synthetic-test-kassal-token'})).status,200);
   assert.ok(!JSON.stringify(await(await fetch(base+'/api/shopping')).json()).includes('synthetic-test-kassal-token'));

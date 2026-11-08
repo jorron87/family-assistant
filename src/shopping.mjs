@@ -1,5 +1,6 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {validateNutrition,purchaseNutrition} from './shopping-nutrition.mjs';
+import {calibrateMarket} from './shopping-market.mjs';
 
 const hash=value=>createHash('sha256').update(value).digest('hex').slice(0,24);
 const round=n=>Math.round((n+Number.EPSILON)*100)/100;
@@ -98,7 +99,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     if(input.monitoringEnabled!==undefined){if(typeof input.monitoringEnabled!=='boolean')throw Error('Ugyldig overvåkningsvalg.');next.monitoringEnabled=input.monitoringEnabled;}
     if(input.storageNote!==undefined)next.storageNote=text(input.storageNote,1500);
     if(input.stockUpDays!==undefined)next.stockUpDays=Math.min(365,positive(input.stockUpDays,'lagerhorisont'));
-    if(input.stores!==undefined){if(!Array.isArray(input.stores)||input.stores.length>50)throw Error('Ugyldig butikkliste.');next.stores=input.stores.map(x=>({id:safeId(x.id,'Butikk-ID'),name:required(x.name,'Butikk'),url:url(x.url),minSavings:positive(x.minSavings??50,'minste besparelse',true),memberEligible:x.memberEligible===true,pricesIncludeVat:x.pricesIncludeVat!==false}));if(new Set(next.stores.map(x=>x.id)).size!==next.stores.length)throw Error('Butikk-ID må være unik.');}
+    if(input.stores!==undefined){if(!Array.isArray(input.stores)||input.stores.length>50)throw Error('Ugyldig butikkliste.');next.stores=input.stores.map(x=>({id:safeId(x.id,'Butikk-ID'),name:required(x.name,'Butikk'),url:url(x.url),minSavings:positive(x.minSavings??50,'minste besparelse',true),memberEligible:x.memberEligible===true,pricesIncludeVat:x.pricesIncludeVat!==false,chainCode:x.chainCode==null?null:safeId(x.chainCode,'Kjedekode')}));if(new Set(next.stores.map(x=>x.id)).size!==next.stores.length)throw Error('Butikk-ID må være unik.');}
     return update(()=>s.settings=next);
   }
   function watch(input) {
@@ -108,6 +109,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     next.excellentPrice=input.excellentPrice==null?null:positive(input.excellentPrice,'svært bra pris');
     if(next.excellentPrice!==null&&(next.targetPrice===null||next.excellentPrice>next.targetPrice))throw Error('Svært bra pris må være lik eller lavere enn målprisen.');
     next.priceGuide=null;
+    next.marketCalibration=s.watches[id]?.marketCalibration??null;
     if(input.priceGuide!=null){const g=input.priceGuide;next.priceGuide={referencePrice:g.referencePrice==null?null:positive(g.referencePrice,'prisguidens referanse'),checkedAt:g.checkedAt,evidence:required(g.evidence,'prisguidens grunnlag')};if(!Number.isFinite(Date.parse(g.checkedAt))||Date.parse(g.checkedAt)>now().getTime()+60000)throw Error('Ugyldig kontrolltid for prisguide.');}
     next.referenceCeiling=null;
     if(input.referenceCeiling!=null){const r=input.referenceCeiling;next.referenceCeiling={price:positive(r.price,'aktuell alternativpris'),checkedAt:r.checkedAt,sourceUrl:url(r.sourceUrl),evidence:required(r.evidence,'alternativprisens kildebelegg')};if(!Number.isFinite(Date.parse(r.checkedAt))||Date.parse(r.checkedAt)>now().getTime()+60000)throw Error('Ugyldig kontrolltid for alternativpris.');}
@@ -153,10 +155,16 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
       if(!w||w.enabled===false||!store||!o.comparable||o.validFrom>horizon||o.validTo<today||now().getTime()-Date.parse(o.observedAt)>48*3600000||(o.memberOnly&&!store.memberEligible))continue;
       const rows=a.products.filter(p=>w.productKeys.includes(p.productKey)&&p.unit===w.unit&&p.baselineAmount>0);
       const paid=rows.reduce((n,p)=>n+p.baselineTotal,0),amount=rows.reduce((n,p)=>n+p.baselineAmount,0);
+      const market=w.marketCalibration?.status==='ready'?w.marketCalibration:null;
+      if(market&&market.products.some(p=>now().getTime()-Date.parse(p.lastChecked)>48*3600000))continue;
       const ceiling=w.referenceCeiling;
       if(ceiling&&now().getTime()-Date.parse(ceiling.checkedAt)>48*3600000)continue;
       const paidReference=amount>0?Math.min(...rows.map(p=>p.baselineTotal/p.baselineAmount)):null;
-      const reference=ceiling?Math.min(paidReference??Infinity,ceiling.price):paidReference??w.targetPrice;if(!reference)continue;
+      // Compare a campaign with other chains, so its own current price does not
+      // erase the saving. Without a reviewed chain mapping, use all alternatives.
+      const alternatives=market?.products.filter(p=>!store.chainCode||p.store!==store.chainCode).map(p=>p.currentUnitPrice).filter(p=>Number.isFinite(p)&&p>0)??[];
+      const marketReference=market?Math.min(market.referencePrice,paidReference??Infinity,...alternatives):null;
+      const reference=marketReference!==null?Math.min(marketReference,ceiling?.price??Infinity):ceiling?Math.min(paidReference??Infinity,ceiling.price):paidReference??w.targetPrice;if(!reference)continue;
       const alternative=!!ceiling&&(paidReference===null||ceiling.price<paidReference);
       const unitPrice=o.price/o.packAmount,discountPct=(reference-unitPrice)/reference*100;
       if(discountPct<w.minDiscountPct||(w.targetPrice!==null&&unitPrice>w.targetPrice))continue;
@@ -172,7 +180,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
       packs=Math.min(packs,w.maxPacks,o.maxPacks??Infinity);packs=Math.floor(packs/o.bundlePacks)*o.bundlePacks;
       const saving=round((reference-unitPrice)*packs*o.packAmount);
       if(!packs||saving<=0)continue;
-      result.push({...o,watchName:w.name,storeName:store.name,unitPrice:round(unitPrice),referencePrice:round(reference),referenceType:alternative?'alternative':amount>0?'paid':'target',referenceSourceUrl:alternative?ceiling.sourceUrl:null,discountPct:round(discountPct),packs,saving:amount>0||alternative?saving:null,bulk,checkStock:!stockKnown,quantityBasis:w.purchaseAmount!=null?'planned-amount':w.monthlyUsage!==null?'household-estimate':amount>0?'oda-lower-bound':'offer-pack',storage:w.storage});
+      result.push({...o,watchName:w.name,storeName:store.name,unitPrice:round(unitPrice),referencePrice:round(reference),referenceType:market?'market':alternative?'alternative':amount>0?'paid':'target',referenceSourceUrl:market?'https://kassal.app/api':alternative?ceiling.sourceUrl:null,discountPct:round(discountPct),packs,saving:amount>0||alternative||market?saving:null,bulk,checkStock:!stockKnown,quantityBasis:w.purchaseAmount!=null?'planned-amount':w.monthlyUsage!==null?'household-estimate':amount>0?'oda-lower-bound':'offer-pack',storage:w.storage});
     }
     const best=new Map();for(const o of result){const key=`${o.storeId}:${o.watchId}`,previous=best.get(key);if(!previous||(o.saving??0)>(previous.saving??0)||((o.saving??0)===(previous.saving??0)&&o.unitPrice<previous.unitPrice))best.set(key,o);}
     const candidates=[...best.values()];
@@ -185,7 +193,31 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     return s.settings.stores.filter(x=>!s.reviews[x.id]||s.reviews[x.id].nextCheck<=today).map(x=>({do:'shopping-review',storeId:x.id,name:x.name,url:x.url,lastReview:s.reviews[x.id]??null}));
   }
   function nutrition(input){const entry=validateNutrition(input);if(!orders().some(o=>o.products.some(p=>p.productKey===entry.productKey)))throw Error('Ukjent produkt.');return update(()=>s.nutrition[entry.productKey]=entry);}
+  function market(input){
+    const w=s.watches[input.watchId];if(!w)throw Error('Ukjent overvåkning.');
+    if(!Array.isArray(input.products)||input.products.length>500||input.products.some(p=>p.reviewed===true&&!text(p.equivalenceEvidence)))throw Error('Markedsprodukter krever konkret sammenligningsbelegg.');
+    const days=input.windowDays??90;if(!Number.isInteger(days)||days<1||days>90)throw Error('Markedsvindu må være1–90 dager.');
+    const result=calibrateMarket({unit:w.unit,products:input.products,now:now(),windowDays:days});
+    const ceiling=w.referenceCeiling;
+    if(result.status==='ready'&&ceiling&&now().getTime()-Date.parse(ceiling.checkedAt)<=48*3600000&&ceiling.price<result.goodPrice){
+      result.goodPrice=ceiling.price;
+      if(result.excellentPrice!==null&&result.excellentPrice>=result.goodPrice*.98)result.excellentPrice=null;
+      result.verifiedCurrentAlternative=structuredClone(ceiling);
+      result.warnings.push('lower-verified-current-alternative');
+    }
+    return update(()=>{
+      const {dailyBest,rejectedObservations,...summary}=result;
+      w.marketCalibration={...summary,rejectedObservationCount:rejectedObservations.length};
+      if(result.status==='ready'){
+        w.targetPrice=result.goodPrice;w.excellentPrice=result.excellentPrice;
+        w.priceGuide={referencePrice:result.referencePrice,checkedAt:result.checkedAt,evidence:`Kassal-markedshistorikk: ${result.coverage.observedDays} observerte dager, ${result.coverage.chainCount} kjeder, ${result.coverage.products} gjennomgåtte produkt/kjede-koblinger. Normalreferanse er median av dagens billigste sammenlignbare kjedepris i historikken. Bra kjøp er nedre kvartil, begrenset av faktisk aktuell markedspris. Svært bra krever gjentatt/vedvarende lavpris. Ingen utfylling av manglende dager. ${result.warnings.join(', ')}`};
+        // A fresh reviewed market alternative may supersede a dearer legacy ceiling.
+        if(w.referenceCeiling&&result.currentBestPrice<=w.referenceCeiling.price)w.referenceCeiling=null;
+      }
+      return {watchId:w.id,...result};
+    });
+  }
   function view() {const a=analysis();return {settings:structuredClone(s.settings),analysis:a,nutrition:purchaseNutrition(orders().filter(o=>o.deliveryDate>=a.from&&o.deliveryDate<=a.to),s.nutrition),watches:structuredClone(Object.values(s.watches)),opportunities:opportunities(a),reviews:structuredClone(Object.values(s.reviews)),queue:queue()};}
   function cartReceipt(id,patch) {return update(()=>s.cartReceipts[id]={...(s.cartReceipts[id]??{}),...patch,id,updatedAt:now().toISOString()});}
-  return {importOrders,settings,watch,offer,review,nutrition,analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
+  return {importOrders,settings,watch,offer,review,nutrition,market,analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
 }
