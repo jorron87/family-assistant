@@ -105,6 +105,8 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     const id=input.id===undefined?randomUUID():safeId(input.id,'overvåknings-ID');
     const next={id,name:required(input.name,'Varenavn'),enabled:input.enabled!==false,productKeys:[...new Set(input.productKeys??[])],unit:input.unit,storage:input.storage,maxPacks:positive(input.maxPacks??10,'maks antall'),monthlyUsage:input.monthlyUsage==null?null:positive(input.monthlyUsage,'samlet månedsforbruk'),minDiscountPct:positive(input.minDiscountPct??0,'minste rabatt',true),targetPrice:input.targetPrice==null?null:positive(input.targetPrice,'målpris'),stockAmount:input.stockAmount==null?null:positive(input.stockAmount,'lagerbeholdning',true),stockCheckedAt:input.stockAmount==null?null:now().toISOString(),note:text(input.note,1000)};
     next.purchaseAmount=input.purchaseAmount==null?null:positive(input.purchaseAmount,'planlagt innkjøpsmengde');
+    next.referenceCeiling=null;
+    if(input.referenceCeiling!=null){const r=input.referenceCeiling;next.referenceCeiling={price:positive(r.price,'aktuell alternativpris'),checkedAt:r.checkedAt,sourceUrl:url(r.sourceUrl),evidence:required(r.evidence,'alternativprisens kildebelegg')};if(!Number.isFinite(Date.parse(r.checkedAt))||Date.parse(r.checkedAt)>now().getTime()+60000)throw Error('Ugyldig kontrolltid for alternativpris.');}
     if(next.purchaseAmount!==null&&(next.monthlyUsage!==null||!['frozen','pantry'].includes(next.storage)))throw Error('Planlagt bulkmengde krever lagringsvare og kan ikke kombineres med månedsforbruk.');
     if(!['kg','l','stk'].includes(next.unit)||!['frozen','pantry','chilled','other'].includes(next.storage)||!Number.isInteger(next.maxPacks)||next.minDiscountPct>100||next.productKeys.some(k=>typeof k!=='string'||k.length>200))throw Error('Ugyldig overvåkning.');
     if(s.watches[id]?.stockAmount===next.stockAmount&&input.stockConfirmed!==true)next.stockCheckedAt=s.watches[id].stockCheckedAt;
@@ -147,7 +149,11 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
       if(!w||w.enabled===false||!store||!o.comparable||o.validFrom>horizon||o.validTo<today||now().getTime()-Date.parse(o.observedAt)>48*3600000||(o.memberOnly&&!store.memberEligible))continue;
       const rows=a.products.filter(p=>w.productKeys.includes(p.productKey)&&p.unit===w.unit&&p.baselineAmount>0);
       const paid=rows.reduce((n,p)=>n+p.baselineTotal,0),amount=rows.reduce((n,p)=>n+p.baselineAmount,0);
-      const reference=amount>0?Math.min(...rows.map(p=>p.baselineTotal/p.baselineAmount)):w.targetPrice;if(!reference)continue;
+      const ceiling=w.referenceCeiling;
+      if(ceiling&&now().getTime()-Date.parse(ceiling.checkedAt)>48*3600000)continue;
+      const paidReference=amount>0?Math.min(...rows.map(p=>p.baselineTotal/p.baselineAmount)):null;
+      const reference=ceiling?Math.min(paidReference??Infinity,ceiling.price):paidReference??w.targetPrice;if(!reference)continue;
+      const alternative=!!ceiling&&(paidReference===null||ceiling.price<paidReference);
       const unitPrice=o.price/o.packAmount,discountPct=(reference-unitPrice)/reference*100;
       if(discountPct<w.minDiscountPct||(w.targetPrice!==null&&unitPrice>w.targetPrice))continue;
       const stockKnown=w.stockAmount!==null&&now().getTime()-Date.parse(w.stockCheckedAt)<30*86400000;
@@ -162,7 +168,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
       packs=Math.min(packs,w.maxPacks,o.maxPacks??Infinity);packs=Math.floor(packs/o.bundlePacks)*o.bundlePacks;
       const saving=round((reference-unitPrice)*packs*o.packAmount);
       if(!packs||saving<=0)continue;
-      result.push({...o,watchName:w.name,storeName:store.name,unitPrice:round(unitPrice),referencePrice:round(reference),referenceType:amount>0?'paid':'target',discountPct:round(discountPct),packs,saving:amount>0?saving:null,bulk,checkStock:!stockKnown,quantityBasis:w.purchaseAmount!=null?'planned-amount':w.monthlyUsage!==null?'household-estimate':amount>0?'oda-lower-bound':'offer-pack',storage:w.storage});
+      result.push({...o,watchName:w.name,storeName:store.name,unitPrice:round(unitPrice),referencePrice:round(reference),referenceType:alternative?'alternative':amount>0?'paid':'target',referenceSourceUrl:alternative?ceiling.sourceUrl:null,discountPct:round(discountPct),packs,saving:amount>0||alternative?saving:null,bulk,checkStock:!stockKnown,quantityBasis:w.purchaseAmount!=null?'planned-amount':w.monthlyUsage!==null?'household-estimate':amount>0?'oda-lower-bound':'offer-pack',storage:w.storage});
     }
     const best=new Map();for(const o of result){const key=`${o.storeId}:${o.watchId}`,previous=best.get(key);if(!previous||(o.saving??0)>(previous.saving??0)||((o.saving??0)===(previous.saving??0)&&o.unitPrice<previous.unitPrice))best.set(key,o);}
     const candidates=[...best.values()];

@@ -96,6 +96,16 @@ test('MCP historical product prices do not substitute for paid line totals',()=>
  shop.importOrders({orders:[input]});assert.equal(shop.analysis().products[0].spent,600);assert.equal(shop.analysis().products[0].baselineUnitPrice,null);
 });
 
+test('a lower current alternative reduces savings and stale alternative evidence requires a new check',()=>{
+ const {shop}=fixture();shop.importOrders({orders:[order('one','2026-01-01'),order('two','2026-10-01')]});
+ const w=shop.watch({name:'Staple',productKeys:['oda:1'],unit:'kg',storage:'pantry',maxPacks:20,referenceCeiling:{price:125,checkedAt:'2026-11-08T10:00:00Z',sourceUrl:'https://example.com/current',evidence:'Equivalent current alternative price'}});
+ const offer={watchId:w.id,storeId:'near',externalId:'current',name:'Staple',price:50,packAmount:.4,unit:'kg',validFrom:'2026-11-08',validTo:'2026-11-14',sourceUrl:'https://example.com/flyer',evidence:'Current flyer',comparable:true,comparisonNote:'Equivalent'};
+ shop.offer(offer);assert.equal(shop.view().opportunities.length,0);
+ shop.offer({...offer,price:40});assert.equal(shop.view().opportunities[0].saving,100);assert.equal(shop.view().opportunities[0].referenceType,'alternative');
+ shop.watch({...w,referenceCeiling:{...w.referenceCeiling,checkedAt:'2026-11-01T10:00:00Z'}});assert.equal(shop.view().opportunities.length,0);
+ assert.throws(()=>shop.watch({...w,referenceCeiling:{...w.referenceCeiling,checkedAt:'2026-11-09T10:00:00Z'}}),/kontrolltid/);
+});
+
 test('a target-price watch without purchase history does not invent consumption or paid savings',()=>{
  const {shop}=fixture();const w=shop.watch({name:'Exact household item',productKeys:[],unit:'l',storage:'pantry',targetPrice:20,maxPacks:1});
  shop.offer({watchId:w.id,storeId:'near',externalId:'delivered-bundle',name:'Exact item 3 x 10 l',price:570,packAmount:30,unit:'l',validFrom:'2026-11-08',validTo:'2026-11-08',sourceUrl:'https://example.com/item',evidence:'Three boxes, shipping included',comparable:true,comparisonNote:'Exact variant, delivered price'});
