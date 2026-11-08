@@ -1,4 +1,4 @@
-export async function renderPdf(holder,url) {
+export async function renderPdf(holder,url,{page=1}={}) {
   holder.textContent="Laster dokumentet …";
   let loadingTask, rendering, disposed=false;
   const cleanup=()=>{
@@ -23,7 +23,7 @@ export async function renderPdf(holder,url) {
     const next=document.createElement("button"); next.textContent="Neste side →";
     const canvas=document.createElement("canvas"); canvas.setAttribute("role","img");
     controls.append(previous,count,next); holder.append(controls,canvas);
-    let number=1;
+    let number=Math.min(Math.max(page,1),pdf.numPages);
     async function render() {
       if (disposed) return;
       previous.disabled=true; next.disabled=true;

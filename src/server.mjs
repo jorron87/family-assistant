@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import { createStore, DATA_DIR } from "./store.mjs";
 import { refreshWaste } from './waste.mjs';
 import {phoneHandler} from './phone-server.mjs';
+import {createSourceFetcher,flyerPage} from './shopping-source.mjs';
+const offerSources=createSourceFetcher();
 import {createPhoneDispatcher} from './phone-dispatch.mjs';
 import QRCode from 'qrcode';
 import {createHomeAssistant} from './home-assistant.mjs';
@@ -82,6 +84,8 @@ async function handle(req, res) {
     if(path==='/api/shopping/family'&&method==='GET')return send(res,200,{...store.shopping.familyView(),oda:oda.status()});
     if(path==='/api/shopping/summary'&&method==='GET')return send(res,200,store.shopping.familySummary());
     if(path==='/api/shopping/feed'&&method==='POST')return send(res,200,store.shopping.feed(await json(req)));
+    if(path==='/api/shopping/source'&&method==='GET'){const offer=store.shopping.offerSource(new URL(req.url,`http://${host}`).searchParams.get('offerId'));const loaded=await offerSources.load(offer.sourceUrl);return send(res,200,loaded.kind==='pdf'?{kind:'pdf',page:flyerPage(offer.evidence)}:{kind:'page',qr:await QRCode.toDataURL(offer.sourceUrl,{width:360,margin:2})});}
+    if(path==='/api/shopping/source/file'&&method==='GET'){const offer=store.shopping.offerSource(new URL(req.url,`http://${host}`).searchParams.get('offerId'));const loaded=await offerSources.load(offer.sourceUrl);if(loaded.kind!=='pdf')return send(res,404,{error:'Kilden er ikke en PDF.'});return send(res,200,loaded.bytes,'application/pdf');}
     if(path==='/api/shopping/checklist'&&method==='GET')return send(res,200,store.shopping.checklist());
     if(path==='/api/shopping/queue'&&method==='GET')return send(res,200,store.shopping.queue());
     if(path==='/api/shopping/catalog'&&method==='GET')return send(res,200,store.shopping.catalogEntries(new URL(req.url,`http://${host}`).searchParams.get('watchId')??undefined));

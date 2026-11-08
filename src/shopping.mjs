@@ -346,6 +346,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     const body={monitoring:s.settings.monitoringEnabled===true,today,deals:main,smallDeals:small,belowTrip:found.belowTrip.map(d=>({...pick(d),alsoAt:[]})),covered:found.covered.map(pick),held:found.held,items,purchases:s.purchases.slice().reverse().slice(0,30).map(({previousStock,...p})=>p),saved:{year:sum(s.purchases.filter(p=>p.at.slice(0,4)===year)),all:sum(s.purchases)},stores,storesCheckedToday:stores.filter(x=>x.status==='ok'&&x.checkedAt&&shoppingDay(new Date(x.checkedAt))===today).length,analysis:{orderCount:a.orderCount,from:a.from,to:a.to,orderTotal:a.orderTotal,categories:a.categories,top:a.products.slice(0,15).map(p=>({name:p.name,spent:p.spent,orders:p.orders}))},nutrition:{spendPct:n.coverage.spendPct}};
     return {...body,rev:hash(JSON.stringify(body)),summary:summaryOf(main)};
   }
+  function offerSource(id){const o=s.offers[id];if(!o)throw Error('Tilbudet finnes ikke lenger.');return {sourceUrl:o.sourceUrl,evidence:o.evidence};}
   function familySummary(){const f=familyView();return {rev:f.rev,...f.summary};}
   function pantry(input) {
     const w=s.watches[input.watchId];if(!w)throw Error('Ukjent vare.');
@@ -394,5 +395,5 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     return update(()=>{s.productLinks[key]={watchId:w?.id??null,evidence,at:now().toISOString()};if(w&&!w.productKeys.includes(key))w.productKeys.push(key);return s.productLinks[key];});
   }
   function cartReceipt(id,patch) {return update(()=>s.cartReceipts[id]={...(s.cartReceipts[id]??{}),...patch,id,updatedAt:now().toISOString()});}
-  return {feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
+  return {offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
 }

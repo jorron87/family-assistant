@@ -105,6 +105,28 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     return act(()=>api('/pantry',{watchId:item.id??item.watchId,months}),null);
   }
 
+  // The living-room display has no browser chrome, so a new tab has no way back.
+  const isKiosk=()=>document.body.classList.contains('kiosk');
+  async function sourceDialog(deal) {
+    const box=el('dialog',undefined,'shop-dialog shop shop-source-dialog');
+    const head=el('div',undefined,'shop-source-head'),holder=el('div','Henter kilden …','shop-source-body');
+    const close=()=>{holder.cleanup?.();box.close();box.remove();};
+    head.append(el('h2',`${deal.watchName} · ${deal.storeName}`),button('Lukk',close,'primary'));
+    box.append(head,holder);box.oncancel=event=>{event.preventDefault();close();};
+    document.body.append(box);box.showModal();
+    try{
+      const info=await api(`/source?offerId=${encodeURIComponent(deal.offerId)}`);
+      if(!box.isConnected)return;
+      if(info.kind==='pdf'){
+        const {renderPdf}=await import('/document-viewer.mjs');
+        await renderPdf(holder,`${base}/source/file?offerId=${encodeURIComponent(deal.offerId)}`,{page:info.page??1});
+      }else{
+        const qr=el('img',undefined,'shop-qr');qr.src=info.qr;qr.alt='QR-kode til tilbudet';
+        holder.replaceChildren(qr,el('p','Denne kilden kan ikke vises her. Skann koden for å åpne den på mobilen.','shop-sub'));
+      }
+    }catch(error){if(box.isConnected)holder.textContent=error.message;}
+  }
+
   // ---- Kjøp nå ----
   function dealCard(deal) {
     const card=el('article',undefined,'shop-deal '+deal.tier);
@@ -113,8 +135,9 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     badges.append(el('span',TIER_LABEL[deal.tier],'shop-badge '+deal.tier));
     if(deal.lowestSeen)badges.append(el('span','Laveste vi har sett','shop-badge low'));
     if(deal.validFrom>data.today)badges.append(el('span',`Fra ${dayLabel(deal.validFrom)}`,'shop-badge later'));
-    const source=link(`Se tilbudet hos ${deal.storeName.replace(/\s*\(.*\)$/,'')} ↗`,deal.sourceUrl);
-    source.className='shop-source';
+    const sourceLabel=`Se tilbudet hos ${deal.storeName.replace(/\s*\(.*\)$/,'')}`;
+    const source=isKiosk()?button(sourceLabel,()=>sourceDialog(deal),'shop-source'):link(`${sourceLabel} ↗`,deal.sourceUrl);
+    if(!isKiosk())source.className='shop-source';
     card.append(badges,el('h4',deal.watchName),el('p',deal.name,'shop-sub'),source);
     const line=el('p',undefined,'shop-price');
     line.append(el('strong',`${price(deal.unitPrice)}/${deal.unit}`),el('span',` · ${deal.referenceType==='target'?'grensen er':'vanlig'} ${price(deal.referencePrice)}/${deal.unit}${deal.discountPct>=1?` · ${nf(0).format(deal.discountPct)} % lavere`:''}`));
@@ -236,7 +259,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
             qty.type='number';qty.min='1';qty.max='100';qty.value='1';qty.className='shop-qty';qty.setAttribute('aria-label',`Antall ${product.name}`);
             const add=button('Legg til',async()=>{
               add.disabled=true;
-              try{const receipt=await api('/oda/add',{requestId:crypto.randomUUID(),productId:product.id,quantity:Number(qty.value)});row.append(link('Lagt til · se kurven',receipt.url));}catch(error){add.disabled=false;fail(error);}
+              try{const receipt=await api('/oda/add',{requestId:crypto.randomUUID(),productId:product.id,quantity:Number(qty.value)});row.append(isKiosk()?el('span','Lagt i Oda-kurven','shop-sub'):link('Lagt til · se kurven',receipt.url));}catch(error){add.disabled=false;fail(error);}
             });
             add.disabled=product.availability?.isAvailable!==true;
             const text=el('div');text.append(el('strong',product.name),el('span',`${product.description} · ${product.price} kr`,'shop-sub'));
