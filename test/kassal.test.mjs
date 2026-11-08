@@ -23,6 +23,8 @@ test('Kassal credentials remain encrypted, fixed-origin requests do not follow r
   const restored=createKassal({dataDir,encryptionKey,fetchImpl});await restored.search({query:'Synthetic item',page:2});
   assert.equal(request.url.origin,'https://kassal.app');assert.equal(request.url.searchParams.get('unique'),'0');assert.equal(request.url.searchParams.get('page'),'2');assert.equal(request.options.redirect,'error');assert.equal(request.options.headers.Authorization,'Bearer '+token);
   assert.ok(!JSON.stringify(restored.status()).includes(token));
+  await restored.history({eans:['12345678','12345678'],days:90});assert.equal(request.url.pathname,'/api/v1/products/prices-bulk');assert.equal(request.options.method,'POST');assert.deepEqual(JSON.parse(request.options.body),{eans:['12345678'],days:90,aggregation:'min'});
+  assert.throws(()=>restored.history({eans:['12345678'],days:365}),/1–90/);assert.throws(()=>restored.history({eans:['not-an-ean']}),/EAN/);
   assert.throws(()=>restored.ean({ean:'../bad'}),/EAN/);assert.throws(()=>restored.product({id:-1}),/ID/);
   const rejected=createKassal({dataDir,encryptionKey,fetchImpl:async()=>({ok:false,status:401})});await assert.rejects(rejected.search({query:'Synthetic'}),/avviste/);
   assert.ok(!JSON.stringify(rejected.status()).includes(token));

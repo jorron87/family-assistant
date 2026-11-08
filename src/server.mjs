@@ -92,6 +92,7 @@ async function handle(req, res) {
       if(path==='/api/shopping/kassal/stores')return send(res,200,await kassal.stores(input));
       if(path==='/api/shopping/kassal/product')return send(res,200,await kassal.product(input));
       if(path==='/api/shopping/kassal/ean')return send(res,200,await kassal.ean(input));
+      if(path==='/api/shopping/kassal/history')return send(res,200,await kassal.history(input));
       if(path==='/api/shopping/orders')return send(res,200,store.shopping.importOrders(input));
       if(path==='/api/shopping/settings')return send(res,200,store.shopping.settings(input));
       if(path==='/api/shopping/watch')return send(res,200,store.shopping.watch(input));

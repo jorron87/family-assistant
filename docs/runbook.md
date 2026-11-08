@@ -10,6 +10,8 @@ For eldre lagret tegnskade: ta `/api/maintenance/backup`, les originalbelegget o
 
 ## Handel og tilbud
 
+`kassal-history FIL` tar `{eans:["12345678"],days:90,aggregation:"min"}` og bruker Kassals autoriserte POST-endepunkt for samlet prishistorikk. Maks100 unike EAN-koder og90dager per kall. Faktisk returnerte datoer/kjeder/mengder avgjør dekningen; et90dagers kall betyr ikke90dager med observasjoner. Samme ratebegrensning og lokale tilgangsregler gjelder som for øvrige Kassal-kall.
+
 En butikkilde kan uttrykkelig avgrenses til Kassal-kjedepriser. Da må butikkens navn/kontrollbelegg angi at dette er API-priskontroll, hvilke søk som er kontrollert til listeslutt, ferske priskvitteringer og hva som fortsatt ikke er kontrollert lokalt. `shopping-review ok` kvitterer bare dette kildeomfanget og betyr aldri at en lokal kundeavis er lest. En kilde satt opp som kundeavis beholder kravet om faktisk gjennomgang av relevante sider. API-kandidater blir ikke godkjente sparetilbud uten ordinær ekvivalens-/vilkårskontroll.
 
 Prisguiden bruker overvåkningens `targetPrice` som grense for bra kjøp og valgfri `excellentPrice` som en lavere eller lik grense for svært bra kjøp. `priceGuide:{referencePrice,checkedAt,evidence}` lagrer den eksplisitte kalibreringens grunnlag. Grensene er planleggingsvalg, ikke påstått markedsfasit eller en ny faktisk prisobservasjon. En faktisk aktuell alternativpris føres separat i `referenceCeiling`. Hold kg/l/stk, stykningsdel, innhold og nettovekt/avrent vekt konsistent; manglende historie skal vises som ukjent. Et bredt kategorinavn gir ikke tillatelse til å slå sammen ulike produkter eller telle samme varebehov to ganger.

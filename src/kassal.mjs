@@ -24,13 +24,13 @@ export function createKassal({dataDir,fetchImpl=fetch,encryptionKey}={}) {
   const value=String(input.apiKey??'').trim();if(!/^[A-Za-z0-9._-]{20,250}$/.test(value))throw Error('Ugyldig Kassal API-nøkkel.');
   const temporary=path+'.tmp';writeFileSync(temporary,encrypt(Buffer.from(JSON.stringify({apiKey:value})),key()));renameSync(temporary,path);secret=value;lastError=null;return {configured:true};
  }
- async function get(route,params={}){
+ async function get(route,params={},body){
   if(busy)throw Error('En Kassal-forespørsel pågår.');const token=read();if(!token)throw Error('Kassal er ikke konfigurert.');
   busy=true;
   try{
    await delay(Math.max(0,1100-(Date.now()-lastRequest)));lastRequest=Date.now();
    const url=new URL('https://kassal.app/api/v1/'+route);for(const [k,v]of Object.entries(params))if(v!==undefined&&v!==null&&v!=='')url.searchParams.set(k,String(v));
-   const r=await fetchImpl(url,{headers:{Authorization:'Bearer '+token,Accept:'application/json'},redirect:'error',signal:AbortSignal.timeout(30000)});
+   const r=await fetchImpl(url,{method:body===undefined?'GET':'POST',headers:{Authorization:'Bearer '+token,Accept:'application/json',...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)}),redirect:'error',signal:AbortSignal.timeout(30000)});
    if(!r.ok)throw Error(r.status===401||r.status===403?'Kassal avviste API-nøkkelen.':r.status===429?'Kassals forespørselsgrense er nådd; prøv senere.':'Kassal svarte med HTTP '+r.status+'.');
    const data=await r.json();lastError=null;return {...data,quotes:kassalQuotes(data),fetchedAt:new Date().toISOString(),note:'Kjedepriser. Bekrefter ikke lokal lagerstatus, kundeavistilbud, medlemspris eller antallsgrense.'};
   }catch(e){lastError=/^Kassal/.test(e.message)?e.message:'Kassal kunne ikke hentes.';throw Error(lastError);}finally{busy=false;}
@@ -40,6 +40,7 @@ export function createKassal({dataDir,fetchImpl=fetch,encryptionKey}={}) {
  return {
   configure,
   status:()=>({configured:existsSync(path),busy,error:lastError}),
+  history:input=>{const eans=[...new Set(input.eans??[])],days=input.days??90,aggregation=input.aggregation??'min';if(!Array.isArray(input.eans)||eans.length<1||eans.length>100||eans.some(e=>typeof e!=='string'||!/^\d{8,14}$/.test(e))||!Number.isInteger(days)||days<1||days>90||!['min','max','avg'].includes(aggregation))throw Error('Oppgi1–100 gyldige EAN-koder,1–90 dager og gyldig aggregering.');return get('products/prices-bulk',{}, {eans,days,aggregation});},
   search:input=>get('products',{search:query(input),...page(input),unique:0}),
   stores:input=>{if(input.group&&!/^[A-Z0-9_]{2,30}$/.test(input.group))throw Error('Ugyldig kjede.');return get('physical-stores',{search:query(input),...page(input),group:input.group});},
   product:input=>{if(!Number.isSafeInteger(input.id)||input.id<1)throw Error('Ugyldig Kassal-ID.');return get('products/id/'+input.id);},

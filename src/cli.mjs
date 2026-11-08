@@ -58,6 +58,7 @@ async function execute(command, args, flags) {
     case 'kassal-search': result=await request('/api/shopping/kassal/search','POST',json(args[0]));break;
     case 'kassal-product': result=await request('/api/shopping/kassal/product','POST',json(args[0]));break;
     case 'kassal-ean': result=await request('/api/shopping/kassal/ean','POST',json(args[0]));break;
+    case 'kassal-history': result=await request('/api/shopping/kassal/history','POST',json(args[0]));break;
     case 'kassal-stores': result=await request('/api/shopping/kassal/stores','POST',json(args[0]));break;
     case 'next': {
       const [phone, calendarActions, completion, queue, activities, collector, feed, shopping] = await Promise.all([
