@@ -147,6 +147,25 @@ test('a campaign already in Kassal is compared with other chains rather than its
  shop.settings({stores:shop.view().settings.stores.map(({chainCode,...s})=>s)});assert.equal(shop.view().opportunities.length,0);
 });
 
+test('new variants and material product changes require review before market comparison',()=>{
+ const {shop}=fixture();shop.settings({monitoringEnabled:true});
+ const w=shop.watch({name:'Chopped tomatoes',unit:'kg',storage:'pantry'});
+ const metadata={id:7,store:'CHAIN',name:'Brand A chopped tomatoes 400 g',ingredients:'Tomatoes, tomato juice',weight:400,weightUnit:'g',sourceUrl:'https://example.com/tomatoes',currentPrice:8,lastChecked:'2026-11-08T10:00:00Z'};
+ const observed=shop.catalogObserve({watchId:w.id,products:[metadata]});
+ assert.equal(shop.queue().filter(x=>x.do==='shopping-product-review').length,1);
+ const history=Array.from({length:30},(_,i)=>({date:new Date(Date.parse('2026-10-10T10:00:00Z')+i*86400000).toISOString(),price:8}));
+ const price={id:7,store:'CHAIN',name:metadata.name,packAmount:.4,unit:'kg',reviewed:true,equivalenceEvidence:'Caller assertion cannot approve a pending variant',lastChecked:metadata.lastChecked,currentPrice:8,history};
+ assert.equal(shop.market({watchId:w.id,products:[price]}).status,'insufficient');
+ shop.catalogReview({watchId:w.id,id:7,store:'CHAIN',fingerprint:observed.entries[0].fingerprint,status:'approved',packAmount:.4,unit:'kg',equivalenceEvidence:'Plain chopped tomatoes in juice, actual400g net pack; brands interchangeable'});
+ assert.equal(shop.market({watchId:w.id,products:[price]}).status,'ready');
+ shop.catalogObserve({watchId:w.id,products:[{...metadata,currentPrice:7,lastChecked:'2026-11-08T11:00:00Z'}]});assert.equal(shop.catalogEntries()[0].status,'approved');
+ shop.catalogObserve({watchId:w.id,products:[{...metadata,ingredients:'Tomatoes, basil and sugar'}]});
+ assert.equal(shop.view().watches[0].marketCalibration.status,'needs-review');
+ assert.equal(shop.market({watchId:w.id,products:[price]}).status,'insufficient');
+ assert.equal(shop.view().catalog.pending,1);
+ shop.watch({...shop.view().watches[0],enabled:false});assert.equal(shop.view().watches[0].catalogManaged,true);assert.equal(shop.queue().filter(x=>x.do==='shopping-product-review').length,0);
+});
+
 test('nutrition reports coverage and never treats unknown foods or volume as zero nutrients',()=>{
  const entry=validateNutrition({productKey:'oda:1',basis:'g',per100:{kcal:160,protein:20,fat:8,carbs:2},sourceUrl:'https://example.com/label',evidence:'Næringsinnhold per 100 g'});
  const orders=[{products:[{productKey:'oda:1',name:'Mat',category:'Mat',netTotal:40,quantity:2,pack:{amount:.4,unit:'kg'}},{productKey:'unknown',category:'Mat',netTotal:20,quantity:1,pack:{amount:1,unit:'l'}},{productKey:'soap',category:'Hus og hjem',netTotal:100,quantity:1}]}];

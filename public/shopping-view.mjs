@@ -44,17 +44,19 @@ export function installShoppingView({panel,banner,onOpen}) {
     }else analysis.append(el('p','Hent historikken etter at Oda er tilkoblet.'));
     const sync=button('Hent Oda-historikk',()=>action(async()=>{sync.disabled=true;try{const result=await request('/oda/sync',{});if(!result.complete)throw Error(result.note);}finally{sync.disabled=false;}}));sync.disabled=!data.oda.connected;analysis.append(sync);panel.append(analysis);
     const watch=el('section');watch.append(el('h3','Vi følger med på'),button('Legg til prisovervåkning',()=>watchForm()));
+    if(data.catalog?.total)watch.append(el('p',`${data.catalog.approved} produktvarianter er godkjent for sammenligning. ${data.catalog.pending?`${data.catalog.pending} nye eller endrede varianter venter på agentens vurdering.`:'Ingen registrerte varianter venter på vurdering.'} Nye merker, endret innhold og endrede pakninger vurderes før de påvirker prisgrensene.`));
     const groups=data.watches.map(w=>{const rows=a.products.filter(p=>w.productKeys.includes(p.productKey));return {w,rows,spent:rows.reduce((sum,p)=>sum+p.spent,0),household:rows.some(p=>['Hus og hjem','Hygiene og skjønnhet','Baby og barn'].includes(p.category))};}).filter(g=>g.rows.length||(g.w.storage==='frozen'&&g.w.targetPrice!==null)).sort((x,y)=>y.spent-x.spent);
     if(groups.length){
       const filter=el('input'),kind=el('select'),guideRows=el('div'),count=el('p');filter.type='search';filter.placeholder='Finn en varegruppe';filter.setAttribute('aria-label','Filtrer prisguiden');kind.setAttribute('aria-label','Varetype');
       for(const [value,label]of [['all','Alle varer'],['food','Mat'],['household','Husholdning']]){const option=el('option',label);option.value=value;kind.append(option);}
       function renderGuide(){
-        const selected=groups.filter(g=>g.w.name.toLocaleLowerCase('nb-NO').includes(filter.value.toLocaleLowerCase('nb-NO'))&&(kind.value==='all'||(kind.value==='household')===g.household));
+        const selected=groups.filter(g=>[g.w.name,...(g.w.marketCalibration?.products??[]).map(p=>p.name)].join(' ').toLocaleLowerCase('nb-NO').includes(filter.value.toLocaleLowerCase('nb-NO'))&&(kind.value==='all'||(kind.value==='household')===g.household));
         count.textContent=`${selected.filter(g=>g.w.marketCalibration?.status==='ready').length} av ${selected.length} grupper har tilstrekkelig gjennomgått markedshistorikk.`;
         const price=v=>v!=null?priceMoney(v):'—';
         guideRows.replaceChildren(table(['Varegruppe og grunnlag','Oda-beløp','Registrert mengde','Referanse / enhet','Bra kjøp / enhet','Svært bra / enhet','Bulkmengde'],selected.map(({w,rows,spent})=>{
           const m=w.marketCalibration,label=el('span',w.name);
-          const basis=m?.status==='ready'?`Kassal: ${m.coverage.observedDays} dager · ${m.coverage.chainCount} kjeder`:m?'For lite sikker markedshistorikk':w.priceGuide?'Oda-basis · foreløpig':'Ikke markedskalibrert';
+          const variants=new Set((m?.products??[]).map(p=>p.ean??p.name)).size;
+          const basis=m?.status==='ready'?`Kassal: ${m.coverage.observedDays} dager · ${m.coverage.chainCount} kjeder · ${variants} varianter`:m?.status==='needs-review'?'Endret vare venter på vurdering':m?'For lite sikker markedshistorikk':w.priceGuide?'Oda-basis · foreløpig':'Ikke markedskalibrert';
           label.append(el('small',basis));if(w.priceGuide)label.title=w.priceGuide.evidence;
           return [label,rows.length?money(spent):'Ukjent',rows.length&&rows.every(p=>p.unit===w.unit)?`${number(rows.reduce((sum,p)=>sum+p.baselineAmount,0))} ${w.unit}`:'Ukjent',`${price(w.priceGuide?.referencePrice)} / ${w.unit}`,`${price(w.targetPrice)} / ${w.unit}`,`${price(w.excellentPrice)} / ${w.unit}`,w.purchaseAmount!=null?`${number(w.purchaseAmount)} ${w.unit}`:'Vurderes ved tilbud'];
         })));

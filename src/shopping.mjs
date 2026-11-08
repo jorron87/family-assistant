@@ -1,6 +1,7 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {validateNutrition,purchaseNutrition} from './shopping-nutrition.mjs';
 import {calibrateMarket} from './shopping-market.mjs';
+import {createMarketCatalog} from './shopping-catalog.mjs';
 
 const hash=value=>createHash('sha256').update(value).digest('hex').slice(0,24);
 const round=n=>Math.round((n+Number.EPSILON)*100)/100;
@@ -86,6 +87,8 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
   state.shopping??={orders:{},watches:{},offers:{},reviews:{},cartReceipts:{},settings:{monitoringEnabled:false,historyFrom:null,stores:[],storageNote:'',stockUpDays:60}};
   const s=state.shopping;
   s.nutrition??={};
+  s.marketCatalog??={};
+  const catalog=createMarketCatalog(s.marketCatalog,{save,now});
   const orders=()=>Object.values(s.orders);
   const update=fn=>{const result=fn();save();return structuredClone(result);};
   function importOrders(input) {
@@ -110,6 +113,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     if(next.excellentPrice!==null&&(next.targetPrice===null||next.excellentPrice>next.targetPrice))throw Error('Svært bra pris må være lik eller lavere enn målprisen.');
     next.priceGuide=null;
     next.marketCalibration=s.watches[id]?.marketCalibration??null;
+    next.catalogManaged=s.watches[id]?.catalogManaged===true;
     if(input.priceGuide!=null){const g=input.priceGuide;next.priceGuide={referencePrice:g.referencePrice==null?null:positive(g.referencePrice,'prisguidens referanse'),checkedAt:g.checkedAt,evidence:required(g.evidence,'prisguidens grunnlag')};if(!Number.isFinite(Date.parse(g.checkedAt))||Date.parse(g.checkedAt)>now().getTime()+60000)throw Error('Ugyldig kontrolltid for prisguide.');}
     next.referenceCeiling=null;
     if(input.referenceCeiling!=null){const r=input.referenceCeiling;next.referenceCeiling={price:positive(r.price,'aktuell alternativpris'),checkedAt:r.checkedAt,sourceUrl:url(r.sourceUrl),evidence:required(r.evidence,'alternativprisens kildebelegg')};if(!Number.isFinite(Date.parse(r.checkedAt))||Date.parse(r.checkedAt)>now().getTime()+60000)throw Error('Ugyldig kontrolltid for alternativpris.');}
@@ -153,6 +157,8 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     for(const o of Object.values(s.offers)) {
       const w=s.watches[o.watchId],store=s.settings.stores.find(x=>x.id===o.storeId);
       if(!w||w.enabled===false||!store||!o.comparable||o.validFrom>horizon||o.validTo<today||now().getTime()-Date.parse(o.observedAt)>48*3600000||(o.memberOnly&&!store.memberEligible))continue;
+      if(w.marketCalibration?.status==='needs-review')continue;
+      if(w.catalogManaged&&!catalog.entries(w.id).some(p=>p.status==='approved'))continue;
       const rows=a.products.filter(p=>w.productKeys.includes(p.productKey)&&p.unit===w.unit&&p.baselineAmount>0);
       const paid=rows.reduce((n,p)=>n+p.baselineTotal,0),amount=rows.reduce((n,p)=>n+p.baselineAmount,0);
       const market=w.marketCalibration?.status==='ready'?w.marketCalibration:null;
@@ -190,14 +196,34 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
   function queue() {
     if(!s.settings.monitoringEnabled)return [];
     const today=shoppingDay(now());
-    return s.settings.stores.filter(x=>!s.reviews[x.id]||s.reviews[x.id].nextCheck<=today).map(x=>({do:'shopping-review',storeId:x.id,name:x.name,url:x.url,lastReview:s.reviews[x.id]??null}));
+    return [...catalog.pending().filter(p=>s.watches[p.watchId]?.enabled!==false).map(p=>({do:'shopping-product-review',watchId:p.watchId,watchName:s.watches[p.watchId]?.name,productId:p.id,store:p.store,name:p.name,fingerprint:p.fingerprint,sourceUrl:p.sourceUrl})),...s.settings.stores.filter(x=>!s.reviews[x.id]||s.reviews[x.id].nextCheck<=today).map(x=>({do:'shopping-review',storeId:x.id,name:x.name,url:x.url,lastReview:s.reviews[x.id]??null}))];
+  }
+  function catalogObserve(input){
+    const w=s.watches[input.watchId];if(!w)throw Error('Ukjent overvåkning.');
+    const result=catalog.observe(input);w.catalogManaged=true;
+    const pending=catalog.pending().filter(p=>p.watchId===w.id);
+    if(w.marketCalibration?.status==='ready'&&pending.some(p=>w.marketCalibration.products.some(old=>String(old.id)===String(p.id)&&old.store===p.store)))w.marketCalibration={...w.marketCalibration,status:'needs-review'};
+    save();return result;
+  }
+  function catalogReview(input){
+    const w=s.watches[input.watchId];if(!w)throw Error('Ukjent overvåkning.');
+    if(input.status==='approved'&&input.unit!==w.unit)throw Error('Katalogens enhet stemmer ikke med overvåkningen.');
+    const entry=catalog.review(input);
+    if(w.marketCalibration?.status==='ready'&&w.marketCalibration.products.some(p=>String(p.id)===entry.id&&p.store===entry.store)){w.marketCalibration={...w.marketCalibration,status:'needs-review'};save();}
+    return entry;
   }
   function nutrition(input){const entry=validateNutrition(input);if(!orders().some(o=>o.products.some(p=>p.productKey===entry.productKey)))throw Error('Ukjent produkt.');return update(()=>s.nutrition[entry.productKey]=entry);}
   function market(input){
     const w=s.watches[input.watchId];if(!w)throw Error('Ukjent overvåkning.');
     if(!Array.isArray(input.products)||input.products.length>500||input.products.some(p=>p.reviewed===true&&!text(p.equivalenceEvidence)))throw Error('Markedsprodukter krever konkret sammenligningsbelegg.');
     const days=input.windowDays??90;if(!Number.isInteger(days)||days<1||days>90)throw Error('Markedsvindu må være1–90 dager.');
-    const result=calibrateMarket({unit:w.unit,products:input.products,now:now(),windowDays:days});
+    const approved=new Map(catalog.entries(w.id).filter(p=>p.status==='approved').map(p=>[`${p.store}\0${p.id}`,p]));
+    const products=input.products.map(p=>{
+      if(!w.catalogManaged)return p;
+      const entry=approved.get(`${p.store}\0${p.id}`);
+      return {...p,reviewed:p.reviewed===true&&!!entry&&entry.packAmount===p.packAmount&&entry.unit===p.unit,equivalenceEvidence:entry?.equivalenceEvidence??p.equivalenceEvidence};
+    });
+    const result=calibrateMarket({unit:w.unit,products,now:now(),windowDays:days});
     const ceiling=w.referenceCeiling;
     if(result.status==='ready'&&ceiling&&now().getTime()-Date.parse(ceiling.checkedAt)<=48*3600000&&ceiling.price<result.goodPrice){
       result.goodPrice=ceiling.price;
@@ -217,7 +243,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
       return {watchId:w.id,...result};
     });
   }
-  function view() {const a=analysis();return {settings:structuredClone(s.settings),analysis:a,nutrition:purchaseNutrition(orders().filter(o=>o.deliveryDate>=a.from&&o.deliveryDate<=a.to),s.nutrition),watches:structuredClone(Object.values(s.watches)),opportunities:opportunities(a),reviews:structuredClone(Object.values(s.reviews)),queue:queue()};}
+  function view() {const a=analysis(),entries=catalog.entries();return {settings:structuredClone(s.settings),analysis:a,nutrition:purchaseNutrition(orders().filter(o=>o.deliveryDate>=a.from&&o.deliveryDate<=a.to),s.nutrition),watches:structuredClone(Object.values(s.watches)),opportunities:opportunities(a),reviews:structuredClone(Object.values(s.reviews)),queue:queue(),catalog:{total:entries.length,pending:entries.filter(p=>p.status==='pending').length,approved:entries.filter(p=>p.status==='approved').length,excluded:entries.filter(p=>p.status==='excluded').length}};}
   function cartReceipt(id,patch) {return update(()=>s.cartReceipts[id]={...(s.cartReceipts[id]??{}),...patch,id,updatedAt:now().toISOString()});}
-  return {importOrders,settings,watch,offer,review,nutrition,market,analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
+  return {importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
 }
