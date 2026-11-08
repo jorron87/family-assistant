@@ -162,7 +162,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
       if(!packs||saving<=0)continue;
       result.push({...o,watchName:w.name,storeName:store.name,unitPrice:round(unitPrice),referencePrice:round(reference),referenceType:amount>0?'paid':'target',discountPct:round(discountPct),packs,saving:amount>0?saving:null,bulk,checkStock:!stockKnown,quantityBasis:w.monthlyUsage!==null?'household-estimate':amount>0?'oda-lower-bound':'offer-pack',storage:w.storage});
     }
-    const best=new Map();for(const o of result){const key=`${o.storeId}:${o.watchId}`;if(!best.has(key)||(o.saving??0)>(best.get(key).saving??0))best.set(key,o);}
+    const best=new Map();for(const o of result){const key=`${o.storeId}:${o.watchId}`,previous=best.get(key);if(!previous||(o.saving??0)>(previous.saving??0)||((o.saving??0)===(previous.saving??0)&&o.unitPrice<previous.unitPrice))best.set(key,o);}
     const candidates=[...best.values()];
     const totals=new Map();for(const o of candidates)totals.set(o.storeId,(totals.get(o.storeId)??0)+(o.saving??0));
     return candidates.filter(o=>o.referenceType==='target'||totals.get(o.storeId)>=s.settings.stores.find(x=>x.id===o.storeId).minSavings).sort((a,b)=>(b.saving??0)-(a.saving??0));

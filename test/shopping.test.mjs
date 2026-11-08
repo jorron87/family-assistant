@@ -89,6 +89,8 @@ test('a target-price watch without purchase history does not invent consumption 
  const {shop}=fixture();const w=shop.watch({name:'Exact household item',productKeys:[],unit:'l',storage:'pantry',targetPrice:20,maxPacks:1});
  shop.offer({watchId:w.id,storeId:'near',externalId:'delivered-bundle',name:'Exact item 3 x 10 l',price:570,packAmount:30,unit:'l',validFrom:'2026-11-08',validTo:'2026-11-08',sourceUrl:'https://example.com/item',evidence:'Three boxes, shipping included',comparable:true,comparisonNote:'Exact variant, delivered price'});
  const [o]=shop.view().opportunities;assert.equal(o.packs,1);assert.equal(o.quantityBasis,'offer-pack');assert.equal(o.referenceType,'target');assert.equal(o.saving,null);assert.equal(o.unitPrice,19);
+ shop.offer({...o,externalId:'better-delivered-bundle',name:'Exact item 4 x 10 l',price:720,packAmount:40});
+ assert.equal(shop.view().opportunities.length,1);assert.equal(shop.view().opportunities[0].unitPrice,18);
 });
 test('nutrition reports coverage and never treats unknown foods or volume as zero nutrients',()=>{
  const entry=validateNutrition({productKey:'oda:1',basis:'g',per100:{kcal:160,protein:20,fat:8,carbs:2},sourceUrl:'https://example.com/label',evidence:'Næringsinnhold per 100 g'});
