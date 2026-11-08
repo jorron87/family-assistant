@@ -1,8 +1,9 @@
-// Household stock-up planning. A good deal targets a full year of the known
-// need, limited by how long the specific product stays good. Known need is a
-// lower bound from documented purchases unless the household has stated it.
+// Household stock-up planning. Only an excellent deal targets a full year of the
+// known need; a merely good one targets a quarter. Shelf life limits both. Known
+// need is a lower bound from documented purchases unless the household stated it.
 
 export const HORIZON_MONTHS=12;
+export const GOOD_DEAL_MONTHS=3;
 export const TRIP_MONTHS=1;
 export const BULK_MIN_DISCOUNT_PCT=8;
 export const EXCELLENT_DISCOUNT_PCT=25;
@@ -71,8 +72,8 @@ export function planQuantities({tier,need,shelfMonths,stock,offer,caps,unitSavin
   const single={key:'pack',label:'Tilbudet',months:null,packs,amount:round(packs*packAmount),cost:round(price*packs),saving:round(unitSaving*packs*packAmount)};
   return {options:packs?[single]:[],recommended:packs?single:null,fullMonths:null,covered:false};
  }
- const fullMonths=Math.min(HORIZON_MONTHS,shelfMonths),limit=tier==='small'?Math.min(3,fullMonths):fullMonths;
- const fullLabel=limit>=HORIZON_MONTHS?'Et helt år':limit<1?'Noen uker':`${limit} mnd`;
+ const fullMonths=Math.min(HORIZON_MONTHS,shelfMonths),limit=Math.min(fullMonths,tier==='excellent'?HORIZON_MONTHS:tier==='good'?GOOD_DEAL_MONTHS:TRIP_MONTHS);
+ const fullLabel=limit>=HORIZON_MONTHS?'Et helt år':limit<1?'Noen uker':limit===1?'Neste tur':`${limit} mnd`;
  const points=[['trip','Neste tur',Math.min(TRIP_MONTHS,limit)],['quarter','3 mnd',Math.min(3,limit)],['full',fullLabel,limit]];
  const options=[];
  for(const point of points){
@@ -83,7 +84,7 @@ export function planQuantities({tier,need,shelfMonths,stock,offer,caps,unitSavin
   options.push(entry);
  }
  const covered=(stock.amount??0)>=need.amount/12*limit;
- return {options,recommended:(tier==='small'?options[0]:options.at(-1))??null,fullMonths,covered};
+ return {options,recommended:options.at(-1)??null,fullMonths:limit,covered};
 }
 
 const CHAIN_NAMES={ODA_NO:'Oda',MENY_NO:'MENY',SPAR_NO:'SPAR',EUROPRIS_NO:'Europris',KIWI:'KIWI',REMA_1000:'REMA 1000',COOP_EXTRA:'Extra'};

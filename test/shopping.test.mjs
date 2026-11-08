@@ -67,7 +67,7 @@ test('sparse capped Oda history uses observed shopping quantities, and basket sa
  const {shop}=fixture();shop.importOrders({orders:[order('one','2026-01-01'),order('two','2026-10-01')]});
  const w=shop.watch({name:'Kjøttdeig',productKeys:['oda:1'],unit:'kg',storage:'frozen',maxPacks:20,minDiscountPct:0});
  const offer={watchId:w.id,storeId:'near',externalId:'next-week',name:'Kjøttdeig',price:50,packAmount:.4,unit:'kg',validFrom:'2026-11-09',validTo:'2026-11-15',sourceUrl:'https://example.com/flyer',evidence:'Neste ukes lokale avis',comparable:true,comparisonNote:'Tilsvarende vare'};
- shop.offer(offer);const first=shop.view().opportunities[0];assert.equal(first.packs,7);assert.equal(first.saving,70);assert.equal(first.shelfMonths,4);assert.equal(first.quantityBasis,'oda-lower-bound');
+ shop.offer(offer);const first=shop.view().opportunities[0];assert.equal(first.tier,'good');assert.equal(first.packs,5);assert.equal(first.saving,50);assert.equal(first.shelfMonths,4);assert.equal(first.quantityBasis,'oda-lower-bound');
  shop.offer({...offer,externalId:'duplicate-offer'});assert.equal(shop.view().opportunities.length,1);
  const changed=shop.watch({...w,stockAmount:3});shop.watch({...changed,enabled:false});assert.equal(shop.view().opportunities.length,0);
 });
@@ -77,15 +77,15 @@ test('wholesale quotes require VAT and compare gross prices with household purch
  const w=shop.watch({name:'Matvare',productKeys:['oda:1'],unit:'kg',storage:'frozen',maxPacks:20,minDiscountPct:0});
  const offer={watchId:w.id,storeId:'wholesale',externalId:'food',name:'Matvare',price:100,packAmount:1,unit:'kg',validFrom:'2026-11-09',validTo:'2026-11-14',sourceUrl:'https://example.com/wholesale',evidence:'100 kr eks. mva per kg',comparable:true,comparisonNote:'Samme matvare'};
  assert.throws(()=>shop.offer(offer),/momssats/);assert.throws(()=>shop.offer({...offer,vatRate:15}),/andel/);
- shop.offer({...offer,vatRate:.15});const result=shop.view().opportunities[0];assert.equal(result.price,115);assert.equal(result.unitPrice,115);assert.equal(result.priceBeforeVat,100);assert.equal(result.saving,280);
+ shop.offer({...offer,vatRate:.15});const result=shop.view().opportunities[0];assert.equal(result.price,115);assert.equal(result.unitPrice,115);assert.equal(result.priceBeforeVat,100);assert.equal(result.saving,70);
  shop.offer({...offer,vatRate:.25});assert.equal(shop.view().opportunities[0].price,125);
 });
 
 test('explicit bulk plans can exceed a typical shop but still honor stock and customer limits',()=>{
  const {shop}=fixture();shop.importOrders({orders:[order('one','2026-01-01'),order('two','2026-10-01')]});
  const w=shop.watch({name:'Stock-up category',productKeys:['oda:1'],unit:'kg',storage:'pantry',purchaseAmount:20,maxPacks:100,stockAmount:2});
- const offer={watchId:w.id,storeId:'near',externalId:'bulk',name:'Equivalent goods',price:50,packAmount:.4,unit:'kg',validFrom:'2026-11-08',validTo:'2026-11-14',sourceUrl:'https://example.com/offer',evidence:'Current 400 g price',comparable:true,comparisonNote:'Same product',bundlePacks:2};
- shop.offer(offer);const planned=shop.view().opportunities[0];assert.equal(planned.packs,44);assert.equal(planned.saving,440);assert.equal(planned.quantityBasis,'planned-amount');assert.equal(shop.view().watches[0].monthlyUsage,null);
+ const offer={watchId:w.id,storeId:'near',externalId:'bulk',name:'Equivalent goods',price:30,packAmount:.4,unit:'kg',validFrom:'2026-11-08',validTo:'2026-11-14',sourceUrl:'https://example.com/offer',evidence:'Current 400 g price',comparable:true,comparisonNote:'Same product',bundlePacks:2};
+ shop.offer(offer);const planned=shop.view().opportunities[0];assert.equal(planned.tier,'excellent');assert.equal(planned.packs,44);assert.equal(planned.saving,1320);assert.equal(planned.quantityBasis,'planned-amount');assert.equal(shop.view().watches[0].monthlyUsage,null);
  shop.offer({...offer,maxPacks:8});assert.equal(shop.view().opportunities[0].packs,8);
  shop.watch({...w,stockAmount:20});assert.equal(shop.view().opportunities.length,0);
  assert.throws(()=>shop.watch({...w,monthlyUsage:3}),/månedsforbruk/);
@@ -101,7 +101,7 @@ test('a lower current alternative reduces savings and stale alternative evidence
  const w=shop.watch({name:'Staple',productKeys:['oda:1'],unit:'kg',storage:'pantry',maxPacks:20,referenceCeiling:{price:125,checkedAt:'2026-11-08T10:00:00Z',sourceUrl:'https://example.com/current',evidence:'Equivalent current alternative price'}});
  const offer={watchId:w.id,storeId:'near',externalId:'current',name:'Staple',price:50,packAmount:.4,unit:'kg',validFrom:'2026-11-08',validTo:'2026-11-14',sourceUrl:'https://example.com/flyer',evidence:'Current flyer',comparable:true,comparisonNote:'Equivalent'};
  shop.offer(offer);assert.equal(shop.view().opportunities.length,0);
- shop.offer({...offer,price:40});assert.equal(shop.view().opportunities[0].saving,200);assert.equal(shop.view().opportunities[0].referenceType,'alternative');
+ shop.offer({...offer,price:40});assert.equal(shop.view().opportunities[0].saving,50);assert.equal(shop.view().opportunities[0].referenceType,'alternative');
  shop.watch({...w,referenceCeiling:{...w.referenceCeiling,checkedAt:'2026-11-01T10:00:00Z'}});assert.equal(shop.view().opportunities.length,0);
  assert.throws(()=>shop.watch({...w,referenceCeiling:{...w.referenceCeiling,checkedAt:'2026-11-09T10:00:00Z'}}),/kontrolltid/);
 });
@@ -129,7 +129,7 @@ test('market calibration drives thresholds and savings independently of historic
  const result=shop.market({watchId:w.id,products});assert.equal(result.status,'ready');assert.equal(shop.view().watches[0].targetPrice,100);assert.equal(shop.view().watches[0].excellentPrice,null);
  const offer={watchId:w.id,storeId:'near',externalId:'market',name:'Staple',price:45,packAmount:.4,unit:'kg',validFrom:'2026-11-08',validTo:'2026-11-14',sourceUrl:'https://example.com/flyer',evidence:'Current flyer',comparable:true,comparisonNote:'Equivalent'};
  shop.offer(offer);assert.equal(shop.view().opportunities.length,0);
- shop.offer({...offer,price:35});const [o]=shop.view().opportunities;assert.equal(o.referenceType,'market');assert.equal(o.referencePrice,100);assert.equal(o.saving,100);
+ shop.offer({...offer,price:35});const [o]=shop.view().opportunities;assert.equal(o.referenceType,'market');assert.equal(o.referencePrice,100);assert.equal(o.saving,25);
  shop.watch({...shop.view().watches[0],enabled:false});assert.equal(shop.view().watches[0].marketCalibration.status,'ready');
  assert.throws(()=>shop.market({watchId:w.id,products:[{...products[0],equivalenceEvidence:''}]}),/sammenligningsbelegg/);
  const current=shop.watch({...shop.view().watches[0],referenceCeiling:{price:80,checkedAt:'2026-11-08T10:00:00Z',sourceUrl:'https://example.com/current',evidence:'Verified cheaper equivalent outside the returned history'}});

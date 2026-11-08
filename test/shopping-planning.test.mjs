@@ -14,7 +14,7 @@ const offer=(watchId,extra={})=>({watchId,storeId:'near',externalId:'o1',name:'V
 const watch=(shop,extra={})=>shop.watch({name:'Mel',unit:'kg',storage:'pantry',targetPrice:100,maxPacks:100,purchaseAmount:12,...extra});
 const best=shop=>shop.view().opportunities[0];
 
-test('a good deal defaults to a full year, limited by the product shelf life',()=>{
+test('an excellent deal targets a full year, limited by the product shelf life',()=>{
  const {shop}=setup();
  const flour=watch(shop);shop.offer(offer(flour.id));
  assert.equal(best(shop).packs,12);assert.equal(best(shop).recommendedKey,'full');assert.equal(best(shop).options.at(-1).label,'Et helt år');
@@ -25,9 +25,15 @@ test('a good deal defaults to a full year, limited by the product shelf life',()
  const custom=setup().shop,long=watch(custom,{name:'Laksefilet',storage:'frozen',shelfLifeMonths:6});custom.offer(offer(long.id));
  assert.equal(best(custom).packs,6);
 });
-test('a marginal discount never recommends a year of stock',()=>{
+test('a merely good deal stops at three months, even when the product keeps for a year',()=>{
+ const {shop}=setup();const flour=watch(shop);shop.offer(offer(flour.id,{price:85}));
+ const deal=best(shop);assert.equal(deal.tier,'good');assert.equal(deal.packs,3);assert.deepEqual(deal.options.map(x=>x.label),['Neste tur','3 mnd']);assert.equal(deal.fullMonths,3);
+ shop.pantry({watchId:flour.id,months:3});assert.equal(shop.view().opportunities.length,0);assert.equal(shop.familyView().covered.length,1);
+ const fish=setup().shop,salmon=watch(fish,{name:'Lettmelk',storage:'chilled',purchaseAmount:120});fish.offer(offer(salmon.id,{price:85}));assert.equal(best(fish).packs,5);
+});
+test('a marginal discount only covers the next trip',()=>{
  const {shop}=setup();const flour=watch(shop,{referenceCeiling:{price:100,checkedAt:'2026-11-08T10:00:00Z',sourceUrl:'https://example.com/current',evidence:'Fersk alternativpris'}});shop.offer(offer(flour.id,{price:99}));
- const deal=best(shop);assert.equal(deal.tier,'small');assert.equal(deal.packs,1);assert.deepEqual(deal.options.map(x=>x.key),['trip','full']);
+ const deal=best(shop);assert.equal(deal.tier,'small');assert.equal(deal.packs,1);assert.deepEqual(deal.options.map(x=>x.label),['Neste tur']);
  assert.equal(shop.familyView().deals.length,0);assert.equal(shop.familyView().smallDeals.length,1);assert.equal(shop.familyView().summary.dealCount,0);
 });
 test('excellent is reached by the price limit or by a very deep discount',()=>{
@@ -41,8 +47,8 @@ test('packs larger than the need and multibuys stay visible, counting only usabl
  const big=setup().shop,flour=watch(big,{purchaseAmount:3,targetPrice:100,priceGuide:null});
  big.importOrders({orders:[{orderNumber:'o1',deliveryDate:'2026-10-01',currency:'NOK',grossAmount:300,linePricesVerified:true,products:[{product:{id:1,name:'Mel',description:'1 kg'},quantity:3,totalGrossAmount:'300.00'}]}]});
  big.watch({...big.view().watches[0],productKeys:['oda:1']});
- big.offer(offer(flour.id,{packAmount:5,price:400}));
- const deal=best(big);assert.equal(deal.packs,1);assert.equal(deal.saving,60);
+ big.offer(offer(flour.id,{packAmount:5,price:350}));
+ const deal=best(big);assert.equal(deal.tier,'excellent');assert.equal(deal.packs,1);assert.equal(deal.saving,90);
  const multi=setup().shop,item=watch(multi,{purchaseAmount:2});multi.offer(offer(item.id,{bundlePacks:3,price:80}));
  assert.equal(best(multi).packs,3);
 });

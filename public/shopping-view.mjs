@@ -125,7 +125,8 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     if(option.saving!=null)total.append(el('strong',`Spar ${kr(option.saving)}`));
     card.append(total);
     const notes=[];
-    if(deal.fullMonths!=null&&deal.fullMonths<12)notes.push(`Holder ca. ${monthsText(deal.fullMonths)}, så vi foreslår ikke mer.`);
+    if(deal.tier==='good'&&deal.fullMonths===3)notes.push('Bra, men ikke et kupp, så vi foreslår 3 måneder.');
+    else if(deal.tier!=='small'&&deal.fullMonths!=null&&deal.fullMonths<(deal.tier==='excellent'?12:3))notes.push(`Holder ca. ${monthsText(deal.fullMonths)}, så vi foreslår ikke mer.`);
     if(deal.stock.known&&deal.stock.months!=null)notes.push(`Dere har ca. ${monthsText(deal.stock.months)} på lager.`);
     if(deal.maxPacks)notes.push(`Maks ${deal.maxPacks} per kunde.`);
     if(deal.bundlePacks>1)notes.push(`Kjøp ${deal.bundlePacks} og ${deal.bundlePacks}.`);
@@ -152,13 +153,12 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     return card;
   }
   function verdict(item,value) {
-    const {normal,good,excellent}=item.prices,unit=item.unit,enough=item.stock.known&&item.stock.months!=null&&item.stock.months>=Math.min(12,item.shelfLifeMonths);
+    const {normal,good,excellent}=item.prices,unit=item.unit,hasAtLeast=months=>item.stock.known&&item.stock.months!=null&&item.stock.months>=Math.min(months,item.shelfLifeMonths);
     if(!(value>0))return `Skriv inn prisen per ${unit}.`;
     if(!normal&&!item.prices.targetPrice)return 'Vi har for lite prisdata på denne varen ennå.';
-    const longest=item.shelfLifeMonths>=12?'for et helt år':`for ${monthsText(item.shelfLifeMonths)}`;
-    const buy=enough?'Men dere har nok på lager.':`Kjøp ${longest}.`;
-    if(excellent!=null&&value<=excellent)return `Svært bra pris. ${buy}`;
-    if(good!=null&&value<=good)return `Bra pris. ${buy}`;
+    const buy=months=>{const span=Math.min(months,item.shelfLifeMonths);return hasAtLeast(months)?'Men dere har nok på lager.':`Kjøp ${span>=12?'for et helt år':`for ${monthsText(span)}`}.`;};
+    if(excellent!=null&&value<=excellent)return `Svært bra pris. ${buy(12)}`;
+    if(good!=null&&value<=good)return `Bra pris. ${buy(3)}`;
     if(normal==null||value<=normal)return 'Vanlig pris. Kjøp bare det dere trenger nå.';
     return `Dyrt. Vanlig pris er ${price(normal)}/${unit}.`;
   }
