@@ -108,3 +108,15 @@ body.kiosk .main-nav button { padding-left: 13px; padding-right: 13px; }
 .shop-step-value { min-width: 28px; text-align: center; font-size: 18px; font-weight: 600; }
 .shop-step-label { font-size: 14px; color: var(--s-muted); }
 .shop .shop-empty { min-height: 44px; padding: 8px 14px; border: 1px solid var(--s-line); border-radius: 10px; background: transparent; color: var(--s-muted); font: inherit; font-size: 14px; cursor: pointer; }
+.shop-find { width: 100%; box-sizing: border-box; min-height: 46px; padding: 8px 12px; border: 1px solid var(--s-line); border-radius: 10px; background: transparent; color: var(--s-ink); font: inherit; font-size: 16px; }
+.shop-picked { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.shop-picked strong { font-size: 17px; }
+.shop .shop-picked button { min-height: 44px; padding: 8px 12px; border: 1px solid var(--s-line); border-radius: 10px; background: transparent; color: var(--s-green); font: inherit; font-size: 14px; cursor: pointer; }
+.shop .shop-check input.shop-price-input { flex: 1 1 120px; width: auto; min-width: 0; font-size: 18px; }
+.shop-check { margin-top: 8px; }
+.shop-result { margin-top: 12px; padding: 14px; border-radius: 12px; background: var(--s-soft); }
+.shop-result > strong { font-size: 20px; color: var(--s-green); }
+.shop-result.dear > strong { color: var(--s-red); }
+.shop-result.normal > strong { color: var(--s-ink); }
+.shop-result .shop-sub { margin-top: 2px; }
+.shop-advice { margin-top: 8px; font-size: 17px; font-weight: 600; }

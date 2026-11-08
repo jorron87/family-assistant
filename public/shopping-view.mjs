@@ -37,6 +37,7 @@ const BASIS_TEXT={'household-estimate':'etter det dere har oppgitt','planned-amo
 const HELD_TEXT={member:'krever medlemskap vi ikke har registrert','needs-review':'venter på at en vare sjekkes','stale-prices':'venter på ferske priser'};
 
 export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/shopping',compact=false}) {
+  const check={itemId:null,query:'',price:'',size:null,custom:'',customUnit:null};
   let dirty=false,data=null,tab='buy',search='',location='all',stale=false,odaQuery='',toastTimer=null;
   const chosen=new Map(),openSections=new Set();
   panel.classList.add('shop');
@@ -212,28 +213,85 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     },'shop-why'));
     return card;
   }
-  function verdict(item,value) {
-    const {normal,good,excellent}=item.prices,unit=item.unit,hasAtLeast=months=>item.stock.known&&item.stock.months!=null&&item.stock.months>=Math.min(months,item.shelfLifeMonths);
-    if(!(value>0))return `Skriv inn prisen per ${unit}.`;
-    if(!normal&&!item.prices.targetPrice)return 'Vi har for lite prisdata på denne varen ennå.';
-    const buy=months=>{const span=Math.min(months,item.shelfLifeMonths);return hasAtLeast(months)?'Men dere har nok på lager.':`Kjøp ${span>=12?'for et helt år':`for ${monthsText(span)}`}.`;};
-    if(excellent!=null&&value<=excellent)return `Svært bra pris. ${buy(12)}`;
-    if(good!=null&&value<=good)return `Bra pris. ${buy(3)}`;
-    if(normal==null||value<=normal)return 'Vanlig pris. Kjøp bare det dere trenger nå.';
-    return `Dyrt. Vanlig pris er ${price(normal)}/${unit}.`;
+  // Same horizons as the server's deal planning: quantities, never durations.
+  function priceAdvice(item,unitPrice,size) {
+    const {normal,good,excellent,targetPrice,current,currentChain}=item.prices,unit=item.unit,goodLine=good??targetPrice;
+    const discount=normal?(1-unitPrice/normal)*100:0;
+    const tier=(excellent!=null&&unitPrice<=excellent)||discount>=25?'excellent':goodLine!=null&&unitPrice<=goodLine?'good':normal==null||unitPrice<=normal?'normal':'dear';
+    const title={excellent:'Svært bra pris',good:'Bra pris',normal:'Vanlig pris',dear:'Dyrt'}[tier];
+    const months={excellent:Math.min(12,item.shelfLifeMonths),good:Math.min(3,item.shelfLifeMonths),normal:Math.min(1,item.shelfLifeMonths)}[tier];
+    let action;
+    if(tier==='dear')action=`Vent hvis dere kan. Vanlig pris er ${price(normal)}/${unit}.`;
+    else if(item.annualAmount==null)action='Vi vet ikke hvor mye dere bruker, så kjøp det dere trenger nå.';
+    else{
+      const need=item.annualAmount/12*months-(item.stock.amount??0);
+      if(need<=0)action=`Dere har nok hjemme: ${stockSummary(item)}.`;
+      else if(size){
+        const packs=Math.max(1,Math.floor(need/size+.75));
+        action=`Kjøp ${packs} ${packs===1?'pakke':'pakker'} à ${packLabel(size,unit)} (${amount(packs*size,unit)}).`;
+      }else action=`Kjøp ${amount(Math.ceil(need*10)/10,unit)}.`;
+      if(tier==='normal'&&need>0)action=`Bare til neste tur: ${action.replace('Kjøp ','')}`;
+    }
+    return {tier,title,action,cheaper:current&&current<unitPrice*.98?`Billigere nå: ${price(current)}/${unit} hos ${currentChain}.`:null};
   }
   function priceCheck() {
-    const card=el('section',undefined,'shop-card');
-    const select=el('select'),input=el('input'),out=el('p','','shop-verdict');
-    select.setAttribute('aria-label','Velg vare');
-    for(const item of [...data.items].sort((a,b)=>a.name.localeCompare(b.name,'nb')))if(item.prices.normal||item.prices.targetPrice){const option=el('option',item.name);option.value=item.id;select.append(option);}
-    input.type='number';input.inputMode='decimal';input.min='0';input.step='0.01';input.placeholder='kr';input.setAttribute('aria-label','Pris per enhet');
-    const unit=el('span','','shop-unit');
-    const update=()=>{const item=data.items.find(x=>x.id===select.value);if(!item)return;unit.textContent=`kr/${item.unit}`;out.textContent=input.value?verdict(item,Number(input.value)):'';};
-    select.onchange=update;input.oninput=update;
-    const row=el('div',undefined,'shop-check');row.append(select,input,unit);
-    card.append(el('h3','Er dette en god pris?'),row,out);
-    update();
+    const card=el('section',undefined,'shop-card'),picker=el('div'),form=el('div'),out=el('div');
+    const items=data.items.filter(x=>x.prices.normal||x.prices.targetPrice),selected=()=>items.find(x=>x.id===check.itemId);
+    const sizeOf=item=>check.size==='custom'?customSize(item):check.size==='per'?null:check.size;
+    const customSize=item=>{const n=Number(check.custom);if(!(n>0))return undefined;return check.customUnit==='g'||check.customUnit==='ml'?n/1000:check.customUnit==='dl'?n/10:n;};
+    function drawResult() {
+      const item=selected();out.replaceChildren();
+      if(!item)return;
+      const value=Number(check.price),size=sizeOf(item);
+      if(!(value>0)||size===undefined)return;
+      const unitPrice=size?value/size:value,advice=priceAdvice(item,unitPrice,size);
+      const box=el('div',undefined,'shop-result '+advice.tier);
+      box.append(el('strong',advice.title),el('p',`${price(unitPrice)}/${item.unit}${item.prices.normal?` · vanlig ${price(item.prices.normal)}/${item.unit}`:''}`,'shop-sub'),el('p',advice.action,'shop-advice'));
+      if(advice.cheaper)box.append(el('p',advice.cheaper,'shop-sub'));
+      out.append(box);
+    }
+    function drawForm() {
+      const item=selected();form.replaceChildren();
+      if(!item)return;
+      const {normal,good,excellent}=item.prices,unit=item.unit,show=v=>v!=null?`${price(v)}/${unit}`:'–';
+      form.append(el('p',`Vanlig ${show(normal)} · bra ${show(good)} · svært bra ${show(excellent)}`,'shop-sub'));
+      const input=el('input'),row=el('div',undefined,'shop-check');
+      input.type='number';input.inputMode='decimal';input.min='0';input.step='0.01';input.value=check.price;input.className='shop-price-input';
+      input.placeholder=check.size==='per'?`Pris per ${unit}`:'Hyllepris';input.setAttribute('aria-label','Pris i kroner');
+      input.oninput=()=>{check.price=input.value;drawResult();};
+      row.append(input,el('span','kr','shop-unit'));form.append(row);
+      if(check.size===null)check.size=item.packs[0]?.amount??'per';
+      const options=[...item.packs.map(p=>[p.amount,packLabel(p.amount,unit)]),['custom',unit==='stk'?'Annet antall':'Annen vekt'],['per',`Pris per ${unit}`]];
+      form.append(chips(options,check.size,value=>{check.size=value;drawForm();drawResult();},'Velg pakning'));
+      if(check.size==='custom'){
+        const units={kg:['g','kg'],l:['dl','l'],stk:['stk']}[unit];
+        check.customUnit=units.includes(check.customUnit)?check.customUnit:units[0];
+        const amountInput=el('input'),unitSelect=el('select'),custom=el('div',undefined,'shop-check');
+        amountInput.type='number';amountInput.inputMode='decimal';amountInput.min='0';amountInput.step='any';amountInput.value=check.custom;amountInput.placeholder=unit==='stk'?'Antall':'Vekt';amountInput.className='shop-price-input';amountInput.setAttribute('aria-label','Pakningsstørrelse');
+        for(const value of units)unitSelect.append(Object.assign(el('option',value),{value}));
+        unitSelect.value=check.customUnit;unitSelect.setAttribute('aria-label','Enhet');
+        amountInput.oninput=()=>{check.custom=amountInput.value;drawResult();};
+        unitSelect.onchange=()=>{check.customUnit=unitSelect.value;drawResult();};
+        custom.append(amountInput,unitSelect);form.append(custom);
+      }
+    }
+    function choose(id) {check.itemId=id;check.size=null;check.custom='';drawPicker();drawForm();drawResult();}
+    function drawPicker() {
+      picker.replaceChildren();
+      const item=selected();
+      if(item){
+        const row=el('div',undefined,'shop-picked');
+        row.append(el('strong',item.name),button('Bytt vare',()=>{check.itemId=null;check.query='';check.price='';check.size=null;drawPicker();drawForm();drawResult();}));
+        picker.append(row);return;
+      }
+      const input=el('input'),matches=el('div');
+      input.type='search';input.placeholder='Hvilken vare?';input.value=check.query;input.className='shop-find';input.setAttribute('aria-label','Finn vare');
+      const drawMatches=()=>{const needle=check.query.toLocaleLowerCase('nb-NO'),found=items.filter(x=>x.name.toLocaleLowerCase('nb-NO').includes(needle)).slice(0,6);matches.replaceChildren(found.length?chips(found.map(x=>[x.id,x.name]),null,choose,'Velg vare'):el('p','Fant ingen vare med det navnet.','shop-sub'));};
+      input.oninput=()=>{check.query=input.value;drawMatches();};
+      picker.append(input,matches);drawMatches();
+    }
+    card.append(el('h3','Er dette en god pris?'),picker,form,out);
+    drawPicker();drawForm();drawResult();
     return card;
   }
   function storeSections(deals) {
