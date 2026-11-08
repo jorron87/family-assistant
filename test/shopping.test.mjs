@@ -113,6 +113,13 @@ test('a target-price watch without purchase history does not invent consumption 
  shop.offer({...o,externalId:'better-delivered-bundle',name:'Exact item 4 x 10 l',price:720,packAmount:40});
  assert.equal(shop.view().opportunities.length,1);assert.equal(shop.view().opportunities[0].unitPrice,18);
 });
+
+test('price guides persist their basis and distinguish good and excellent thresholds',()=>{
+ const {shop}=fixture();const w=shop.watch({name:'Staple',unit:'kg',storage:'pantry',targetPrice:100,excellentPrice:80,priceGuide:{referencePrice:120,checkedAt:'2026-11-08T10:00:00Z',evidence:'Conservative historical paid price; thresholds are planning choices'}});
+ assert.equal(shop.view().watches[0].excellentPrice,80);assert.equal(w.priceGuide.referencePrice,120);
+ assert.throws(()=>shop.watch({...w,excellentPrice:110}),/Svært bra/);
+ assert.throws(()=>shop.watch({...w,priceGuide:{...w.priceGuide,evidence:''}}),/grunnlag/);
+});
 test('nutrition reports coverage and never treats unknown foods or volume as zero nutrients',()=>{
  const entry=validateNutrition({productKey:'oda:1',basis:'g',per100:{kcal:160,protein:20,fat:8,carbs:2},sourceUrl:'https://example.com/label',evidence:'Næringsinnhold per 100 g'});
  const orders=[{products:[{productKey:'oda:1',name:'Mat',category:'Mat',netTotal:40,quantity:2,pack:{amount:.4,unit:'kg'}},{productKey:'unknown',category:'Mat',netTotal:20,quantity:1,pack:{amount:1,unit:'l'}},{productKey:'soap',category:'Hus og hjem',netTotal:100,quantity:1}]}];
