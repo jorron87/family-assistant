@@ -89,6 +89,34 @@ test('one stale product keeps a group visible; a wholly stale group is reported'
  clock.at='2026-11-10T23:00:00Z';shop.offer(offer(flour.id,{validTo:'2026-11-20'}));
  const view=shop.view();assert.equal(view.opportunities.length,0);assert.equal(view.heldOffers[0].reason,'stale-prices');
 });
+test('deals below a store trip threshold stay visible but out of the headline',()=>{
+ const {shop}=setup();shop.settings({stores:[{id:'near',name:'Langt unna',url:'https://example.com/near',minSavings:500}]});
+ const flour=watch(shop,{referenceCeiling:{price:100,checkedAt:'2026-11-08T10:00:00Z',sourceUrl:'https://example.com/current',evidence:'Fersk pris'}});shop.offer(offer(flour.id,{price:85}));
+ const family=shop.familyView();assert.equal(family.deals.length,0);assert.equal(family.belowTrip.length,1);assert.equal(family.summary.dealCount,0);
+ assert.deepEqual(shop.view().offerCounts.byStore.near,{comparable:1,notComparable:0});
+});
+test('agents get a complete price table and a daily market refresh task',()=>{
+ const {shop,clock}=setup();shop.settings({monitoringEnabled:true,stores:[]});
+ const flour=watch(shop),paused=watch(shop,{name:'Pauset',enabled:false});
+ assert.deepEqual(shop.checklist().map(x=>x.watchId),[flour.id]);assert.equal(shop.checklist()[0].good,100);assert.notEqual(paused.id,flour.id);
+ assert.equal(shop.queue().filter(x=>x.do==='shopping-market-refresh').length,0);
+ shop.market({watchId:flour.id,products:[{id:1,store:'OTHER',unit:'kg',packAmount:1,reviewed:true,equivalenceEvidence:'Samme vare',lastChecked:'2026-11-08T10:00:00Z',currentPrice:100,history:history()}]});
+ assert.equal(shop.queue().filter(x=>x.do==='shopping-market-refresh').length,0);
+ clock.at='2026-11-09T07:00:00Z';assert.equal(shop.queue().filter(x=>x.do==='shopping-market-refresh').length,1);
+});
+test('community group posts become feed work, then an acknowledged store review',()=>{
+ const {state,shop,clock}=setup();
+ shop.settings({monitoringEnabled:true,stores:[{id:'reko',name:'REKO',url:'https://example.com/group',minSavings:0,facebookGroup:'examplegroup'}]});
+ state.collector={items:{a:{kind:'post',externalId:'facebook:post:1',shoppingStoreId:'reko',token:'t1',text:'Egg 18 stk 70 kr',postedAt:NOW,url:'https://example.com/p/1'},b:{kind:'post',externalId:'facebook:post:2',activitySourceId:'x',token:'t2',text:'Annet'}}};
+ assert.deepEqual(shop.queue().map(x=>[x.do,x.unread]),[['shopping-feed-review',1]]);
+ assert.equal(shop.feed({storeId:'reko'})[0].text,'Egg 18 stk 70 kr');
+ assert.throws(()=>shop.feed({storeId:'reko',ack:true}),/Kontrollbelegg/);
+ assert.equal(shop.feed({storeId:'reko',ack:true,evidence:'Lest ett innlegg, ingen treff'}).reviewed,1);
+ assert.deepEqual(shop.queue(),[]);assert.equal(shop.view().reviews[0].status,'ok');
+ state.collector.items.a.token='t3';assert.equal(shop.queue()[0].unread,1);
+ clock.at='2026-12-20T12:00:00Z';assert.deepEqual(shop.queue().filter(x=>x.do==='shopping-feed-review'),[]);
+ assert.throws(()=>shop.feed({storeId:'missing'}),/Ukjent/);
+});
 test('member-only offers are reported rather than silently dropped',()=>{
  const {shop}=setup();const flour=watch(shop);shop.offer(offer(flour.id,{memberOnly:true}));
  assert.equal(shop.familyView().deals.length,0);assert.equal(shop.familyView().held[0].reason,'member');

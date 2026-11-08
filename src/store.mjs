@@ -1156,6 +1156,14 @@ export function createStore(dataDir = DATA_DIR) {
       try { configured = (readConfig('sources.json').facebookGroupUrls ?? []).map((url) => String(url).split('/').filter(Boolean).at(-1)); } catch { /* ingen konfigurasjon */ }
       // Bare konfigurerte grupper tas imot; alt annet på Facebook ignoreres uten feil.
       const activity=facebookTargets().find(target=>target.activitySourceId&&(target.id===groupId||target.groupId===groupId));
+      const shoppingFeed=facebookTargets().find(target=>target.shoppingStoreId&&target.id===groupId);
+      if(shoppingFeed){
+        if(input.kind!=='posts')return {ok:true,ignored:'bare innlegg brukes i handelskilder'};
+        const posts=normalizeFacebookPosts(input.items).map(item=>mergeFacebookPost(collector.items[item.externalId],item));
+        for(const item of posts)storeCollected({...item,shoppingStoreId:shoppingFeed.shoppingStoreId},`shopping:${shoppingFeed.shoppingStoreId}`);
+        collector.sweeps['facebook:posts:'+groupId]={at,count:posts.length,complete:false};
+        save();return {ok:true,results:[{shoppingStoreId:shoppingFeed.shoppingStoreId,count:posts.length}]};
+      }
       if (!configured.includes(groupId)&&!activity) return { ok: true, ignored: 'ukjent gruppe' };
       const unchangedReviewedIds = new Set();
       const posts = input.kind==='posts'?normalizeFacebookPosts(input.items).filter(item=>{
@@ -1235,7 +1243,9 @@ export function createStore(dataDir = DATA_DIR) {
     const groups=facebookGroupIds().flatMap(id=>[{id,url:`https://www.facebook.com/groups/${id}/?sorting_setting=CHRONOLOGICAL`},{id:id+':events',url:`https://www.facebook.com/groups/${id}/events`}]);
     try{const activities=readConfig('activity-sources.json').sources.filter(s=>/facebook\.com/.test(s.url));
       for(const source of activities){const group=source.url.match(/\/groups\/(\d+)/)?.[1];groups.push({id:group??source.id,groupId:group??null,url:source.url,activitySourceId:source.id});if(group)groups.push({id:group+':events',groupId:group,url:source.url+'/events',activitySourceId:source.id});}
-    }catch{/* optional activity sources */}return groups;
+    }catch{/* optional activity sources */}
+    for(const store of state.shopping?.settings?.stores??[])if(store.facebookGroup)groups.push({id:store.facebookGroup,groupId:null,url:`https://www.facebook.com/groups/${store.facebookGroup}/?sorting_setting=CHRONOLOGICAL`,shoppingStoreId:store.id});
+    return groups;
   }
   const activityContentKey = item => hash(JSON.stringify([item.kind,item.title,item.text,item.postedAt,
     (item.attachments??[]).map(a=>[a.nativeId??a.id??null,a.name??a.fileName,a.version??null])]));

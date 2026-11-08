@@ -211,6 +211,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
       root.append(card);
     }
     if(data.smallDeals.length)root.append(details('small',`Små tilbud på turer dere uansett tar (${data.smallDeals.length})`,node=>node.append(...data.smallDeals.map(dealCard)),'shop-fold'));
+    if(data.belowTrip.length)root.append(details('below',`Bra pris, men ikke verdt en egen tur (${data.belowTrip.length})`,node=>node.append(...data.belowTrip.map(dealCard)),'shop-fold'));
     if(data.covered.length)root.append(details('covered',`Godt tilbud, men dere har nok (${data.covered.length})`,node=>{for(const deal of data.covered)node.append(el('p',`${deal.watchName} hos ${deal.storeName}: ${price(deal.unitPrice)}/${deal.unit}. Dere har ca. ${monthsText(deal.stock.months??0)} på lager.`,'shop-sub'));},'shop-fold'));
     if(data.held.length)root.append(details('held',`Tilbud vi ikke kan vise ennå (${data.held.length})`,node=>{for(const entry of data.held)node.append(el('p',`${entry.watchName} hos ${entry.storeName} ${HELD_TEXT[entry.reason]??'venter'}.`,'shop-sub'));},'shop-fold'));
     root.append(odaSearch());

@@ -57,6 +57,8 @@ async function execute(command, args, flags) {
     case 'shopping-catalog': result=await request('/api/shopping/catalog');break;
     case 'shopping-catalog-observe': result=await request('/api/shopping/catalog','POST',json(args[0]));break;
     case 'shopping-catalog-review': result=await request('/api/shopping/catalog-review','POST',json(args[0]));break;
+    case 'shopping-feed': result=await request('/api/shopping/feed','POST',{storeId:args[0],ack:flags.has('--ack'),evidence:args[1]});break;
+    case 'shopping-checklist': result=await request('/api/shopping/checklist');break;
     case 'shopping-link': result=await request('/api/shopping/link','POST',json(args[0]));break;
     case 'oda-sync': result=await request('/api/shopping/oda/sync','POST',{});break;
     case 'kassal-configure': result=await request('/api/shopping/kassal/configure','POST',json(args[0]));break;

@@ -81,6 +81,8 @@ async function handle(req, res) {
     if(path==='/api/shopping'&&method==='GET')return send(res,200,{...store.shopping.view(),oda:oda.status(),kassal:kassal.status()});
     if(path==='/api/shopping/family'&&method==='GET')return send(res,200,{...store.shopping.familyView(),oda:oda.status()});
     if(path==='/api/shopping/summary'&&method==='GET')return send(res,200,store.shopping.familySummary());
+    if(path==='/api/shopping/feed'&&method==='POST')return send(res,200,store.shopping.feed(await json(req)));
+    if(path==='/api/shopping/checklist'&&method==='GET')return send(res,200,store.shopping.checklist());
     if(path==='/api/shopping/queue'&&method==='GET')return send(res,200,store.shopping.queue());
     if(path==='/api/shopping/catalog'&&method==='GET')return send(res,200,store.shopping.catalogEntries(new URL(req.url,`http://${host}`).searchParams.get('watchId')??undefined));
     if(path==='/api/shopping/oda/callback'&&method==='GET'){
@@ -407,7 +409,7 @@ doorbell.attach(servers.at(-1));
 servers.at(-1).listen(port, host, () => console.log(`Familien: http://${host}:${port}`));
 // Family controls are available on the living-room display; ingestion stays private.
 servers.push(createServer((req,res) => {
-  if(/^\/(?:api\/(?:resources|collector|google)(?:[/?]|$)|google-setup|shopping-setup|api\/shopping\/oda\/(?:connect|callback)|api\/shopping\/(?:orders|settings|offer|review|nutrition|catalog|link))/.test(req.url))return send(res,req.method==='GET'?403:405,{error:'Kildeoriginaler og integrasjonsoppsett er bare tilgjengelige lokalt på agentporten.'});
+  if(/^\/(?:api\/(?:resources|collector|google)(?:[/?]|$)|google-setup|shopping-setup|api\/shopping\/oda\/(?:connect|callback)|api\/shopping\/(?:orders|settings|offer|review|nutrition|catalog|link|feed))/.test(req.url))return send(res,req.method==='GET'?403:405,{error:'Kildeoriginaler og integrasjonsoppsett er bare tilgjengelige lokalt på agentporten.'});
   if (req.method !== "GET" && !(req.method === "POST" && /^(?:\/api\/shopping\/(?:watch|pantry|item|deal|oda\/(?:sync|search|add|cart))|\/api\/home-assistant\/command|\/api\/doorbell\/frame|\/api\/profile\/edit|\/api\/events\/[a-f0-9]{24}\/(?:tasks\/[a-zA-Z0-9:_-]{1,100}|visibility)|\/api\/activities\/[a-f0-9]{24}\/reaction)$/.test(new URL(req.url,`http://${host}`).pathname))) return send(res,405,{error:"Handlingen er bare tilgjengelig lokalt på agentporten."});
   return handle(req,res);
 }));
