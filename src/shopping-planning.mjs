@@ -89,7 +89,7 @@ export function dealTier({unitPrice,excellentPrice,discountPct,referenceType}) {
  return discountPct>=BULK_MIN_DISCOUNT_PCT?'good':'small';
 }
 
-function packsFor(needed,{packAmount,bundlePacks,cap}) {
+export function packsFor(needed,{packAmount,bundlePacks,cap}) {
  if(needed<=0)return 0;
  // A tiny remainder does not justify another pack; any real need buys at least one.
  const wanted=Math.min(Math.max(1,Math.floor(needed/packAmount+.75)),cap);

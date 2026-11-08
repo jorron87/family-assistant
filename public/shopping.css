@@ -120,3 +120,20 @@ body.kiosk .main-nav button { padding-left: 13px; padding-right: 13px; }
 .shop-result.normal > strong { color: var(--s-ink); }
 .shop-result .shop-sub { margin-top: 2px; }
 .shop-advice { margin-top: 8px; font-size: 17px; font-weight: 600; }
+.shop-list-row, .shop-draft-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--s-line); }
+.shop-store-head + .shop-list-row { border-top: 0; }
+.shop-list-row input[type=checkbox], .shop-draft-row input[type=checkbox] { flex: 0 0 26px; width: 26px; height: 26px; margin: 0; accent-color: var(--s-green); }
+.shop-list-text { flex: 1; min-width: 0; }
+.shop-list-text strong { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.shop-list-row.done strong { color: var(--s-muted); text-decoration: line-through; }
+.shop-expired { color: var(--s-red); }
+.shop-list-source { flex-shrink: 0; font-size: 13px; }
+.shop .shop-list-remove { flex-shrink: 0; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; color: var(--s-muted); font-size: 20px; cursor: pointer; }
+.shop-onlist { align-self: center; flex: 1; text-align: center; color: var(--s-green); font-weight: 600; }
+.shop-draft-row { flex-wrap: wrap; }
+.shop-draft-status { flex-basis: 100%; font-size: 13px; color: var(--s-green); }
+.shop-draft-status:empty { display: none; }
+.shop .shop-low button { min-height: 44px; padding: 8px 12px; font-size: 14px; }
+.shop .shop-list-text + .shop-step button { width: 40px; height: 40px; }
+.shop-check button[type=submit] { flex-shrink: 0; }
+@media (max-width: 480px) { .shop .shop-tabs button { padding: 8px 2px; font-size: 14px; } }

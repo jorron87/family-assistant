@@ -48,6 +48,7 @@ export function phoneHandler({oda=null,store,root,send,body,json,onQueued=()=>{}
       }
       if(path==='/send/api/shopping/family'&&req.method==='GET')return send(res,200,{...store.shopping.familyView(),oda:oda?.status()??{connected:false}});
       if(path==='/send/api/shopping/summary'&&req.method==='GET')return send(res,200,store.shopping.familySummary());
+      if(req.method==='POST'&&path==='/send/api/shopping/list')return send(res,200,store.shopping.list(await json(req)));
       if(req.method==='POST'&&path==='/send/api/shopping/pantry')return send(res,200,store.shopping.pantry(await json(req)));
       if(req.method==='POST'&&path==='/send/api/shopping/item')return send(res,200,store.shopping.item(await json(req)));
       if(req.method==='POST'&&path==='/send/api/shopping/deal')return send(res,200,store.shopping.dealAction(await json(req)));

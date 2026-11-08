@@ -2,7 +2,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {validateNutrition,purchaseNutrition} from './shopping-nutrition.mjs';
 import {calibrateMarket} from './shopping-market.mjs';
 import {createMarketCatalog} from './shopping-catalog.mjs';
-import {annualNeed,chainName,commonPacks,dealScore,dealTier,defaultShelfLifeMonths,estimateStock,packBreakdown,planQuantities,shelfLifeMonths,shelfWithDate} from './shopping-planning.mjs';
+import {annualNeed,chainName,commonPacks,dealScore,packsFor,dealTier,defaultShelfLifeMonths,estimateStock,packBreakdown,planQuantities,shelfLifeMonths,shelfWithDate} from './shopping-planning.mjs';
 
 const hash=value=>createHash('sha256').update(value).digest('hex').slice(0,24);
 const round=n=>Math.round((n+Number.EPSILON)*100)/100;
@@ -94,6 +94,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
   s.priceHistory??={};
   s.productLinks??={};
   s.feedReviewed??={};
+  s.shoppingList??=[];
   const catalog=createMarketCatalog(s.marketCatalog,{save,now});
   const orders=()=>Object.values(s.orders);
   const update=fn=>{const result=fn();save();return structuredClone(result);};
@@ -344,7 +345,8 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
   const summaryOf=main=>({dealCount:main.length,excellentCount:main.filter(d=>d.tier==='excellent').length,potential:round(main.reduce((n,d)=>n+(d.saving??0),0)),top:main[0]?.watchName??null});
   function familyView() {
     const a=analysis(),at=now().getTime(),today=shoppingDay(now()),year=today.slice(0,4),found=deals(a);
-    const pick=d=>({evidence:d.evidence,bestBefore:d.bestBefore,offerId:d.id,watchId:d.watchId,watchName:d.watchName,storeId:d.storeId,storeName:d.storeName,name:d.name,tier:d.tier,lowestSeen:d.lowestSeen,unit:d.unit,price:d.price,unitPrice:d.unitPrice,referencePrice:d.referencePrice,referenceType:d.referenceType,discountPct:d.discountPct,packAmount:d.packAmount,bundlePacks:d.bundlePacks,maxPacks:d.maxPacks,validFrom:d.validFrom,validTo:d.validTo,memberOnly:d.memberOnly,conditions:d.conditions,comparisonNote:d.comparisonNote,sourceUrl:d.sourceUrl,storage:d.storage,annualAmount:d.annualAmount,quantityBasis:d.quantityBasis,shelfMonths:d.shelfMonths,fullMonths:d.fullMonths,stock:d.stock,saving:d.saving,recommendedKey:d.recommendedKey,options:d.options});
+    const onList=new Set(listOpen().map(x=>x.offerId));
+    const pick=d=>({onList:onList.has(d.id),evidence:d.evidence,bestBefore:d.bestBefore,offerId:d.id,watchId:d.watchId,watchName:d.watchName,storeId:d.storeId,storeName:d.storeName,name:d.name,tier:d.tier,lowestSeen:d.lowestSeen,unit:d.unit,price:d.price,unitPrice:d.unitPrice,referencePrice:d.referencePrice,referenceType:d.referenceType,discountPct:d.discountPct,packAmount:d.packAmount,bundlePacks:d.bundlePacks,maxPacks:d.maxPacks,validFrom:d.validFrom,validTo:d.validTo,memberOnly:d.memberOnly,conditions:d.conditions,comparisonNote:d.comparisonNote,sourceUrl:d.sourceUrl,storage:d.storage,annualAmount:d.annualAmount,quantityBasis:d.quantityBasis,shelfMonths:d.shelfMonths,fullMonths:d.fullMonths,stock:d.stock,saving:d.saving,recommendedKey:d.recommendedKey,options:d.options});
     const byWatch=new Map();for(const d of found.opportunities){const list=byWatch.get(d.watchId)??[];list.push(d);byWatch.set(d.watchId,list);}
     const primary=[...byWatch.values()].map(list=>({...pick(list[0]),alsoAt:list.slice(1).map(x=>({storeName:x.storeName,unitPrice:x.unitPrice}))}));
     const main=primary.filter(d=>d.tier!=='small'),small=primary.filter(d=>d.tier==='small');
@@ -354,7 +356,7 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     const stores=s.settings.stores.map(x=>{const r=reviews.find(y=>y.storeId===x.id);return {id:x.id,name:x.name,status:r?.status??'unchecked',checkedAt:r?.checkedAt??null};});
     const n=purchaseNutrition(orders().filter(o=>o.deliveryDate>=a.from&&o.deliveryDate<=a.to),s.nutrition);
     const sum=list=>round(list.reduce((x,p)=>x+(p.saving??0),0));
-    const body={monitoring:s.settings.monitoringEnabled===true,today,deals:main,smallDeals:small,belowTrip:found.belowTrip.map(d=>({...pick(d),alsoAt:[]})),covered:found.covered.map(pick),held:found.held,items,purchases:s.purchases.slice().reverse().slice(0,30).map(({previousStock,...p})=>p),saved:{year:sum(s.purchases.filter(p=>p.at.slice(0,4)===year)),all:sum(s.purchases)},stores,storesCheckedToday:stores.filter(x=>x.status==='ok'&&x.checkedAt&&shoppingDay(new Date(x.checkedAt))===today).length,analysis:{orderCount:a.orderCount,from:a.from,to:a.to,orderTotal:a.orderTotal,categories:a.categories,top:a.products.slice(0,15).map(p=>({name:p.name,spent:p.spent,orders:p.orders}))},nutrition:{spendPct:n.coverage.spendPct}};
+    const body={list:listView(today),odaDraft:odaDraft(a,today,at),monitoring:s.settings.monitoringEnabled===true,today,deals:main,smallDeals:small,belowTrip:found.belowTrip.map(d=>({...pick(d),alsoAt:[]})),covered:found.covered.map(pick),held:found.held,items,purchases:s.purchases.slice().reverse().slice(0,30).map(({previousStock,...p})=>p),saved:{year:sum(s.purchases.filter(p=>p.at.slice(0,4)===year)),all:sum(s.purchases)},stores,storesCheckedToday:stores.filter(x=>x.status==='ok'&&x.checkedAt&&shoppingDay(new Date(x.checkedAt))===today).length,analysis:{orderCount:a.orderCount,from:a.from,to:a.to,orderTotal:a.orderTotal,categories:a.categories,top:a.products.slice(0,15).map(p=>({name:p.name,spent:p.spent,orders:p.orders}))},nutrition:{spendPct:n.coverage.spendPct}};
     return {...body,rev:hash(JSON.stringify(body)),summary:summaryOf(main)};
   }
   function offerSource(id){const o=s.offers[id];if(!o)throw Error('Tilbudet finnes ikke lenger.');return {sourceUrl:o.sourceUrl,evidence:o.evidence};}
@@ -407,6 +409,82 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
       return {saved:true,saving};
     });
   }
+  const listOpen=()=>s.shoppingList.filter(x=>!x.checkedAt);
+  function listView(today) {
+    const decorate=({undoStock,boughtOffer,...entry})=>{const o=entry.offerId?s.offers[entry.offerId]:null;return {...entry,expired:!!o&&o.validTo<today,sourceUrl:o?.sourceUrl??null,validTo:o?.validTo??null};};
+    return {open:listOpen().map(decorate),done:s.shoppingList.filter(x=>x.checkedAt).sort((x,y)=>y.checkedAt.localeCompare(x.checkedAt)).slice(0,20).map(decorate)};
+  }
+  function listAdd(input) {
+    const base={id:randomUUID(),addedAt:now().toISOString(),checkedAt:null,offerId:null,watchId:null,detail:null,storeId:null,storeName:null,packs:null,packAmount:null,unit:null,unitPrice:null,saving:null};
+    if(input.offerId!=null){
+      const o=s.offers[input.offerId];if(!o)throw Error('Tilbudet finnes ikke lenger.');
+      const packs=Number(input.packs);if(!Number.isInteger(packs)||packs<1||packs>1000||(o.maxPacks!==null&&packs>o.maxPacks))throw Error('Ugyldig antall pakker.');
+      const w=s.watches[o.watchId],store=s.settings.stores.find(x=>x.id===o.storeId),found=deals(),deal=[...found.opportunities,...found.belowTrip,...found.covered].find(d=>d.id===o.id);
+      const saving=deal&&deal.referenceType!=='target'?round((deal.referencePrice-deal.unitPrice)*packs*o.packAmount):null;
+      const existing=listOpen().find(x=>x.offerId===o.id);
+      if(existing){existing.packs=packs;existing.saving=saving;return existing;}
+      const entry={...base,offerId:o.id,watchId:o.watchId,name:w?.name??o.name,detail:o.name,storeId:o.storeId,storeName:store?.name??null,packs,packAmount:o.packAmount,unit:o.unit,unitPrice:round(o.price/o.packAmount),saving};
+      s.shoppingList.push(entry);return entry;
+    }
+    if(input.watchId!=null){
+      const w=s.watches[input.watchId];if(!w)throw Error('Ukjent vare.');
+      const size=positive(input.packAmount,'pakningsstørrelse'),rate=rateOf(needOf(w,analysis()));
+      const existing=listOpen().find(x=>x.watchId===w.id&&!x.offerId);if(existing)return existing;
+      const entry={...base,watchId:w.id,name:w.name,packs:rate?Math.max(1,Math.ceil(rate/size)):1,packAmount:size,unit:w.unit};
+      s.shoppingList.push(entry);return entry;
+    }
+    const entry={...base,name:required(input.name,'Varenavn').slice(0,120)};
+    s.shoppingList.push(entry);return entry;
+  }
+  function list(input) {
+    const find=()=>{const entry=s.shoppingList.find(x=>x.id===input.id);if(!entry)throw Error('Finner ikke varen på listen.');return entry;};
+    if(input.action==='add')return update(()=>listAdd(input));
+    if(input.action==='check'){
+      const entry=find();if(entry.checkedAt)return structuredClone(entry);
+      if(entry.offerId&&s.offers[entry.offerId]){dealAction({offerId:entry.offerId,action:'bought',packs:entry.packs});entry.boughtOffer=true;}
+      else if(entry.watchId&&entry.packAmount&&s.watches[entry.watchId]){
+        const w=s.watches[entry.watchId],stock=estimateStock(w,rateOf(needOf(w,analysis())),now().getTime());
+        entry.undoStock={amount:w.stockAmount,checkedAt:w.stockCheckedAt,packs:w.stockPacks?{...w.stockPacks}:null};
+        if(!stock.known)w.stockPacks={};
+        if(w.stockPacks)addCounted(w,entry.packAmount,entry.packs);
+        w.stockAmount=round((stock.amount??0)+entry.packs*entry.packAmount);w.stockCheckedAt=now().toISOString();
+      }
+      return update(()=>{entry.checkedAt=now().toISOString();const cutoff=new Date(now().getTime()-14*86400000).toISOString();s.shoppingList=s.shoppingList.filter(x=>!x.checkedAt||x.checkedAt>=cutoff);return entry;});
+    }
+    if(input.action==='uncheck'){
+      const entry=find();
+      if(entry.boughtOffer)dealAction({offerId:entry.offerId,action:'undo'});
+      else if(entry.undoStock&&s.watches[entry.watchId]){const w=s.watches[entry.watchId];w.stockAmount=entry.undoStock.amount;w.stockCheckedAt=entry.undoStock.checkedAt;w.stockPacks=entry.undoStock.packs;}
+      return update(()=>{entry.checkedAt=null;delete entry.boughtOffer;delete entry.undoStock;return entry;});
+    }
+    if(input.action==='remove'){find();return update(()=>{s.shoppingList=s.shoppingList.filter(x=>x.id!==input.id);return {removed:true};});}
+    if(input.action==='clear')return update(()=>{s.shoppingList=listOpen();return {cleared:true};});
+    throw Error('Ukjent listevalg.');
+  }
+  // A proposed cart for the next big delivery. It only ever suggests; adding to
+  // the real cart stays a separate, explicit family action.
+  function odaDraft(a,today,at) {
+    const dates=[...new Set(orders().map(o=>o.deliveryDate))].sort(),gaps=dates.slice(1).map((day,i)=>(Date.parse(day)-Date.parse(dates[i]))/86400000).sort((x,y)=>x-y);
+    const gapDays=gaps.length>=2?gaps[Math.floor((gaps.length-1)/2)]:s.settings.stockUpDays??60,gapMonths=gapDays/30.44;
+    const estimated=dates.length?shoppingDay(new Date(Date.parse(dates.at(-1))+gapDays*86400000)):today;
+    const listed=new Map();for(const e of listOpen())if(e.watchId&&e.packAmount)listed.set(e.watchId,(listed.get(e.watchId)??0)+e.packs*e.packAmount);
+    const odaItems=new Map();for(const e of catalog.entries()){const id=e.status==='approved'&&e.store==='ODA_NO'&&e.priceFresh&&e.packAmount?e.sourceUrl?.match(/\/products\/(\d+)-/)?.[1]:null;if(id){const list=odaItems.get(e.watchId)??[];list.push({...e,productId:Number(id),unitPrice:e.currentPrice/e.packAmount});odaItems.set(e.watchId,list);}}
+    const items=[],missing=[];let covered=0;
+    for(const w of Object.values(s.watches)){
+      if(w.enabled===false)continue;
+      const need=needOf(w,a);if(need.amount===null)continue;
+      const options=odaItems.get(w.id);if(!options){missing.push(w.name);continue;}
+      const best=[...options].sort((x,y)=>x.unitPrice-y.unitPrice)[0],normal=w.priceGuide?.referencePrice??null,discountPct=normal?(normal-best.unitPrice)/normal*100:0;
+      const dear=!!normal&&best.unitPrice>normal*1.05,tier=dear?'dear':normal?dealTier({unitPrice:best.unitPrice,excellentPrice:w.excellentPrice,discountPct,referenceType:'market'}):'small';
+      const shelf=shelfLifeMonths(w),months=Math.min(shelf,dear?Math.min(1,gapMonths):tier==='excellent'?12:tier==='good'?Math.max(3,gapMonths):gapMonths);
+      const stock=estimateStock(w,rateOf(need),at),needed=need.amount/12*months-(stock.amount??0)-(listed.get(w.id)??0);
+      if(needed<=0){covered++;continue;}
+      const packs=packsFor(needed,{packAmount:best.packAmount,bundlePacks:1,cap:100});
+      items.push({watchId:w.id,name:w.name,productId:best.productId,productName:best.name,packAmount:best.packAmount,unit:w.unit,packs,packPrice:best.currentPrice,unitPrice:round(best.unitPrice),cost:round(best.currentPrice*packs),tier,stockKnown:stock.known,storage:w.storage});
+    }
+    items.sort((x,y)=>y.cost-x.cost);
+    return {nextAround:estimated<today?today:estimated,items,missing,covered,total:round(items.reduce((n,x)=>n+x.cost,0))};
+  }
   function link(input) {
     const key=required(input.productKey,'Produktnøkkel');if(!orders().some(o=>o.products.some(p=>p.productKey===key)))throw Error('Ukjent produkt.');
     const w=input.watchId==null?null:s.watches[input.watchId];if(input.watchId!=null&&!w)throw Error('Ukjent overvåkning.');
@@ -414,5 +492,5 @@ export function shoppingStore(state,{save,now=()=>new Date()}={}) {
     return update(()=>{s.productLinks[key]={watchId:w?.id??null,evidence,at:now().toISOString()};if(w&&!w.productKeys.includes(key))w.productKeys.push(key);return s.productLinks[key];});
   }
   function cartReceipt(id,patch) {return update(()=>s.cartReceipts[id]={...(s.cartReceipts[id]??{}),...patch,id,updatedAt:now().toISOString()});}
-  return {offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
+  return {list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
 }
