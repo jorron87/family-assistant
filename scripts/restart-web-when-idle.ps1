@@ -29,16 +29,45 @@ try {
         Start-Sleep -Seconds 15
     }
     Record-Deployment 'restarting' 'Starter nettsidetjenesten på nytt; innhentingslåsen beholdes.'
-    try {
-        $null = Invoke-RestMethod -Method Post -Uri "$base/api/maintenance/restart" -Headers @{'X-Family-Request'='1'} -ContentType 'application/json' -Body '{}'
-        $deadline = (Get-Date).AddMinutes(2)
+    $accepted = $false
+    $legacy = $false
+    $busyUntil = (Get-Date).AddMinutes(15)
+    while (-not $accepted -and -not $legacy) {
+        try {
+            $null = Invoke-RestMethod -Method Post -Uri "$base/api/maintenance/restart" -Headers @{'X-Family-Request'='1'} -ContentType 'application/json' -Body '{}' -TimeoutSec 20
+            $accepted = $true
+        } catch {
+            $code = if ($_.Exception.Response) {[int]$_.Exception.Response.StatusCode} else {0}
+            if ($code -eq 404) {
+                $legacy = $true
+            } elseif ($code -eq 409) {
+                # Nothing has been closed yet, so the service keeps running.
+                if ((Get-Date) -gt $busyUntil) {throw 'Tjenesten er opptatt. Omstart er utsatt, og tjenesten kjorer videre.'}
+                Record-Deployment 'waiting' 'Venter til lange foresporsler er ferdige.'
+                Start-Sleep -Seconds 5
+            } elseif ($code -eq 0) {
+                # The answer was lost. If the service is gone, the drain has begun.
+                Start-Sleep -Seconds 3
+                try {$null = Invoke-RestMethod "$base/health" -TimeoutSec 5} catch {$accepted = $true}
+            } else {
+                throw
+            }
+        }
+    }
+    if ($accepted) {
+        # The listeners are closed now, so from here the service must always come
+        # back. The server ends its own drain; stopping it is only for a hung process.
+        $deadline = (Get-Date).AddSeconds(75)
+        $stopped = $false
         while (Get-Process -Id $oldHealth.pid -ErrorAction SilentlyContinue) {
-            if ((Get-Date) -gt $deadline) {throw 'Aktive forespørsler bruker fortsatt tjenesten. Omstart avbrytes uten tvungen avslutning.'}
+            if (-not $stopped -and (Get-Date) -gt $deadline) {
+                Stop-Process -Id $oldHealth.pid -Force -Confirm:$false
+                $stopped = $true
+            }
             Start-Sleep -Milliseconds 500
         }
-    } catch {
+    } else {
         # One-time upgrade of the legacy server, which has no drain endpoint.
-        if ([int]$_.Exception.Response.StatusCode -ne 404) {throw}
         $latest = Invoke-RestMethod "$base/api/state"
         if ($latest.phone.worker) {throw 'Eldre tjeneste har en mobilagent. Ingen tvungen omstart.'}
         Stop-ScheduledTask -TaskName 'FamilienWeb'

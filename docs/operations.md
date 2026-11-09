@@ -8,6 +8,6 @@ Ved nettleserfeil: finn den eksisterende Chrome-utvidelsesforbindelsen i nettles
 
 Gi kjente feil et kort lokalt kontrollpunkt under `docs/drift` (ikke commit). Registrer relevante ID-er, faktisk feil, forsøkte metoder og neste kontrollbetingelse. Ingen hemmeligheter eller privat råtekst i slike notater. Varsle bare nye/forverrede feil eller nødvendig familiehandling; en kjent uendret blokkering skal fortsatt stå synlig i systemet.
 
-`scripts/restart-web-when-idle.ps1` bruker skånsom omstart. Ikke slipp en annen agents lease eller stopp en tjenestestartet agent midt i skriving. Bruk egne testporter/dataområder. Vanlig familiebruk skal fungere mens ingest kjører.
+`scripts/restart-web-when-idle.ps1` bruker skånsom omstart. Tjenesten nekter å starte omstart mens en forespørsel har pågått i over tre sekunder, og kjører da videre mens skriptet venter. Når omstarten først er godtatt, avslutter tjenesten gjenstående forespørsler etter høyst 45 sekunder, og skriptet starter alltid tjenesten igjen. Ikke slipp en annen agents lease eller stopp en tjenestestartet agent midt i skriving. Bruk egne testporter/dataområder. Vanlig familiebruk skal fungere mens ingest kjører.
 
 Sikkerhetskopier hele dataområdet med nøkkelen og dokumenter DPAPI-bruker/maskin. Test gjenoppretting under riktige Windows-tilganger før nødsituasjonen. Krypterte arkiv og nøkler hører aldri hjemme i GitHub. Se SECURITY.md.

@@ -47,6 +47,7 @@ PUBLIC_FILES.set('doorbell-view.mjs','text/javascript; charset=utf-8');PUBLIC_FI
 PUBLIC_FILES.set('member-colors.mjs','text/javascript; charset=utf-8');
 let wasteRefresh;
 let restarting=false;
+const inFlight=new Set(),RESTART_BUSY_MS=Number(process.env.FAMILIEN_RESTART_BUSY_MS??3000),RESTART_DRAIN_MS=Number(process.env.FAMILIEN_RESTART_DRAIN_MS??45000);
 const servers=[];
 const dispatchTick=()=>{if(!restarting&&!process.env.FAMILIEN_NO_DISPATCH)phoneDispatcher.tick();};
 const host = "127.0.0.1";
@@ -82,6 +83,7 @@ async function json(req) {
 }
 
 async function handle(req, res) {
+  if(!req.url.startsWith('/api/doorbell/events')){const entry={at:Date.now()};inFlight.add(entry);res.once('close',()=>inFlight.delete(entry));}
   try {
     const path = new URL(req.url, `http://${host}:${port}`).pathname;
     const method = req.method;
@@ -178,17 +180,21 @@ async function handle(req, res) {
       // Independent ingestion retains its lease; a child agent needs this parent.
       if(phoneDispatcher.status().running||ingestionDispatcher.status().running)return send(res,409,{error:'En agent startet av tjenesten kjører. Prøv omstart når denne er ferdig.'});
       if(restarting)return send(res,409,{error:'Omstart pågår.'});
+      // The listeners close for good once a drain starts, so let slow work finish
+      // first. Until then the family keeps a working service.
+      const slow=[...inFlight].filter(entry=>Date.now()-entry.at>RESTART_BUSY_MS).length;
+      if(slow)return send(res,409,{error:'Tjenesten er opptatt med en lang forespørsel.',busy:slow});
       restarting=true;
       res.setHeader('Connection','close');
       res.once('finish',()=>{
         doorbell.close();homeAssistant.close();
         let remaining=servers.length;
-        for(const server of servers) {
-          server.close(()=>{if(--remaining===0)process.exit(0);});
-          // The restart response is still active during its finish event.
-          // Reap sockets after they transition to idle; active requests drain.
-          setImmediate(()=>server.closeIdleConnections());
-        }
+        for(const server of servers)server.close(()=>{if(--remaining===0)process.exit(0);});
+        // Keep reaping: a keep-alive client that goes on sending requests over one
+        // socket would otherwise hold the drain open while nobody can connect.
+        setInterval(()=>{for(const server of servers)server.closeIdleConnections();},100);
+        setTimeout(()=>{for(const server of servers)server.closeAllConnections();},RESTART_DRAIN_MS);
+        setTimeout(()=>process.exit(0),RESTART_DRAIN_MS+3000);
       });
       return send(res,202,{accepted:true,note:'Avslutter åpne forespørsler og bevarer kjøringslåsen.'});
     }
