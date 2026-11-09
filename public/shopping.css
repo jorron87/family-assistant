@@ -196,3 +196,4 @@ body.kiosk .main-nav button { padding-left: 13px; padding-right: 13px; }
 .shop-elsewhere-row .shop-list-text{flex:1 1 auto;min-width:0}
 .shop-elsewhere-note{margin:2px 0 0;font-weight:600}
 .shop-return{flex-basis:100%;margin-top:2px}
+.shop-group-label{margin:12px 0 2px;font-size:14px;font-weight:600}

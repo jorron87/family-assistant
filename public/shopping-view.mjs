@@ -50,6 +50,11 @@ export function refreshDraftChoices(edits,previous=[],next=[]) {
   }
 }
 
+/** Lines that are cheaper elsewhere come first, the biggest saving on top. */
+export function splitCheaper(rows,saving=row=>row.savings?.annual??0) {
+  return {cheaper:rows.filter(x=>x.places?.length).sort((a,b)=>saving(b)-saving(a)),rest:rows.filter(x=>!x.places?.length)};
+}
+
 export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/shopping',compact=false}) {
   const draftEdits=new Map(),cartState=new Map(),cartIds=new Map();let cartBusy=false;
   const check={itemId:null,query:'',price:'',size:null,custom:'',customUnit:null};
@@ -57,7 +62,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
   const cartPending=new Map();
   const stockDraft={text:'',location:'',mode:'minimum',files:[],intakeId:null,clientId:crypto.randomUUID()},stockPreviews=new Map();let stockSending=false;
   let dirty=false,data=null,tab='buy',search='',location='all',stale=false,odaQuery='',toastTimer=null;
-  const chosen=new Map(),openSections=new Set();
+  const chosen=new Map(),openSections=new Set(['draft-elsewhere']);
   panel.classList.add('shop');
   const toastNode=el('div',undefined,'shop-toast');toastNode.setAttribute('role','status');toastNode.hidden=true;
 
@@ -544,8 +549,10 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     if(cart.stale)card.append(el('p','Kunne ikke hente kurven akkurat nå. Viser sist kjente.','shop-sub'));
     const listed=cart.lines.map(x=>x.limit);
     for(const text of cart.messages)if(!listed.includes(text))card.append(el('div',text,'shop-limit'));
-    const order=[...cart.lines].sort((x,y)=>Number(!!(y.elsewhere||y.limit))-Number(!!(x.elsewhere||x.limit)));
-    card.append(...order.map(cartLine));
+    const lineSaving=x=>(x.savings?.perUnit??0)*x.quantity*(x.packAmount??0),cartGroups=splitCheaper(cart.lines,lineSaving),inCartSaving=cartGroups.cheaper.reduce((n,x)=>n+lineSaving(x),0);
+    if(cartGroups.cheaper.length)card.append(el('p',`Billigere et annet sted (${cartGroups.cheaper.length})${inCartSaving?` · spar opptil ${kr(inCartSaving)} på antallet i kurven`:''}`,'shop-group-label'),...cartGroups.cheaper.map(cartLine));
+    if(cartGroups.cheaper.length&&cartGroups.rest.length)card.append(el('p','Resten av kurven','shop-group-label'));
+    card.append(...[...cartGroups.rest].sort((x,y)=>Number(!!y.limit)-Number(!!x.limit)).map(cartLine));
     if(count&&cart.url&&!isKiosk()){const go=link('Til kassen hos Oda ↗',cart.url);go.className='shop-source';card.append(go);}
     cartHolder.replaceChildren(card);
   }
@@ -564,8 +571,8 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     };
     card.append(el('h3','Forslag til neste storhandel'),el('p',`Forslag til bestilling rundt ${dayLabel(draft.nextAround)}. Fersk frukt og andre varer velger dere selv.${draft.items.some(x=>x.stockKnown)?'':' Lageret er ikke talt ennå, så mengdene regner med at dere ikke har noe hjemme.'}`,'shop-sub'),summary);
     const rows=new Map();
-    const body=details('draft',`Se varene (${draft.items.length})`,node=>{
-      for(const item of draft.items){
+    const renderRows=(node,list)=>{
+      for(const item of list){
         const row=el('div',undefined,'shop-draft-row'),state=edit(item);
         const on=el('input');on.type='checkbox';on.checked=state.on;on.setAttribute('aria-label',`Ta med ${item.name}`);
         on.onchange=()=>{state.on=on.checked;state.userOn=true;armed=false;refresh();};
@@ -584,8 +591,10 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
         else if(item.maxAtOda!=null)row.append(el('div','Maks '+item.maxAtOda+' hos Oda.','shop-limit quiet'));
         node.append(row);rows.set(item.watchId,status);
       }
-    },'shop-why');
-    card.append(body);
+    };
+    const groups=splitCheaper(draft.items),yearly=groups.cheaper.reduce((n,x)=>n+(x.savings?.annual??0),0);
+    if(groups.cheaper.length)card.append(details('draft-elsewhere',`Billigere et annet sted (${groups.cheaper.length})${yearly?` · spar opptil ${kr(yearly)} på 12 måneder`:''}`,node=>renderRows(node,groups.cheaper),'shop-why'));
+    card.append(details('draft',`${groups.cheaper.length?'Resten av varene':'Se varene'} (${groups.rest.length})`,node=>renderRows(node,groups.rest),'shop-why'));
     if(draft.missing.length)card.append(details('draft-missing',`Må velges selv (${draft.missing.length})`,node=>node.append(el('p',draft.missing.join(', '),'shop-sub')),'shop-why'));
     if(data.oda.connected){
       go.onclick=async()=>{
@@ -620,7 +629,11 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     for(const [store,entries] of [...groups].sort((a,b)=>rank(a[0])-rank(b[0]))){
       const section=el('section',undefined,'shop-store'),head=el('div',undefined,'shop-store-head'),save=entries.reduce((n,x)=>n+(x.saving??0),0);
       head.append(el('h3',store),el('span',`${entries.length} ${entries.length===1?'vare':'varer'}${save?` · spar ${kr(save)}`:''}`,'shop-sub'));
-      section.append(head,...entries.map(listRow));root.append(section);
+      const lineGroups=splitCheaper(entries);
+      section.append(head);
+      if(lineGroups.cheaper.length)section.append(el('p',`Billigere et annet sted (${lineGroups.cheaper.length})`,'shop-group-label'),...lineGroups.cheaper.map(listRow));
+      if(lineGroups.cheaper.length&&lineGroups.rest.length)section.append(el('p','Resten','shop-group-label'));
+      section.append(...lineGroups.rest.map(listRow));root.append(section);
     }
     cartHolder=el('div');
     if(data.oda.connected)root.append(cartHolder);
