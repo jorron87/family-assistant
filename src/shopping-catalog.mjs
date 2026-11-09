@@ -101,8 +101,17 @@ export function createMarketCatalog(state,{now=()=>new Date(),save=()=>{}}={}) {
   if(!Number.isFinite(result.getTime()))throw Error('Invalid catalog clock.');
   return result;
  };
+ // Stored rows are replaced, never edited, so a validated row can be reused.
+ const validated=new WeakMap();
  function read(key) {
   if(!hashPattern.test(key)||!own(state,key))return null;
+  const known=record(state[key])?validated.get(state[key]):undefined;
+  if(known)return known;
+  const parsed=parse(key);
+  if(parsed)validated.set(state[key],parsed);
+  return parsed;
+ }
+ function parse(key) {
   try{
    const raw=state[key];if(!record(raw)||raw.version!==VERSION||raw.key!==key)return null;
    const watchId=safeId(raw.watchId,'watch ID'),id=safeId(raw.id,'product ID',{numeric:true}),store=safeId(raw.store,'chain ID');

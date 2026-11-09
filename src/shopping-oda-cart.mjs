@@ -28,7 +28,7 @@ export function createOdaCart({oda,shopping,now=Date.now}) {
  /** Adds to the list; an item that belongs at Oda goes straight into the cart. */
  async function list(input) {
   const entry=shopping.list(input);
-  if(!['add','route'].includes(input.action)||entry.storeName!=='Oda'||!entry.odaProductId||!oda.status().connected)return entry;
+  if(!['add','route','choose'].includes(input.action)||entry.storeName!=='Oda'||!entry.odaProductId||!oda.status().connected)return entry;
   const limit=shopping.odaLimit(entry.odaProductId),wanted=Math.max(1,Math.round(entry.packs??1)),quantity=Math.min(100,limit??100,wanted);
   try{
    await oda.addToCart({requestId:entry.id,productId:entry.odaProductId,quantity});

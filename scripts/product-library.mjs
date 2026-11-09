@@ -1,6 +1,7 @@
 import {readProductLibrary} from '../src/product-library.mjs';
+import {writeShoppingIndex} from '../src/shopping-library.mjs';
 
-const usage='Usage: node scripts/product-library.mjs FILE summary | search QUERY | compare GROUP_ID | audit [--now ISO_TIMESTAMP] [--limit N] [--pretty]';
+const usage='Usage: node scripts/product-library.mjs FILE summary | search QUERY | compare GROUP_ID | audit | shopping-index OUTPUT [--now ISO_TIMESTAMP] [--limit N] [--pretty]';
 function main(args) {
  if(args.length===1&&args[0]==='--help'){console.log(usage);return;}
  const positional=[],options={};
@@ -15,6 +16,7 @@ function main(args) {
   positional.push(arg);
  }
  const [file,command,...values]=positional;
+ if(command==='shopping-index'){if(values.length!==1)throw Error(usage);console.log(JSON.stringify(writeShoppingIndex(file,values[0])));return;}
  if(!file||!['summary','search','compare','audit'].includes(command)||!['search','compare'].includes(command)&&values.length||command==='compare'&&values.length!==1||command==='search'&&!values.length)throw Error(usage);
  if(options.now!==undefined&&(!/^\d{4}-\d{2}-\d{2}T/.test(options.now)||!/(?:Z|[+-]\d{2}:\d{2})$/.test(options.now)||!Number.isFinite(Date.parse(options.now))))throw Error('--now must be an ISO timestamp with timezone.');
  if(options.limit!==undefined&&(!/^[1-9]\d*$/.test(options.limit)||!['search','audit'].includes(command)))throw Error('--limit requires a positive integer for search or audit.');

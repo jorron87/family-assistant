@@ -1,0 +1,169 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {libraryPriceProvider,writeShoppingIndex} from '../src/shopping-library.mjs';
+import {shoppingStore,namedPackConflict} from '../src/shopping.mjs';
+import {productMetadataFingerprint,groupMetadataFingerprint} from '../src/product-library.mjs';
+
+const NOW='2026-11-09T12:10:00Z',RECEIPT='2026-11-09T12:05:00Z';
+const tomato=grams=>`Tomater (${grams} g per 100 g ketchup), eddik`;
+function libraryData() {
+ const g={id:'ketchup-standard',name:'Tomatketchup vanlig',category:'Kolonial, pålegg og snacks',canonicalUnit:'kg',inclusionCriteria:'Vanlig tomatketchup',exclusions:['Sukkerfri'],qualityBasis:'Samme bruk',comparisonBasis:'Per kg'};
+ const row=(store,id,name,price,extra={})=>{const sourceUrl=store==='ODA_NO'?`https://oda.com/no/products/${id}-vare/`:`https://example.com/${store}/${id}`,p={productKey:`kassal:${store}:${id}`,source:'kassal',store,id:String(id),name,ean:extra.ean??null,brand:extra.brand??null,ingredients:extra.ingredients??'Tomater, eddik',description:'',sourceUrl,canonicalPackAmount:extra.pack===undefined?.5:extra.pack,unit:'kg',packEvidence:'Etikett',nutrition:extra.nutrition??null,attributes:extra.attributes??null};p.metadataFingerprint=productMetadataFingerprint(p);return {p,price:{productKey:p.productKey,grossPackPrice:price,receiptAt:RECEIPT,availabilityScope:'chain',sourceUrl}};};
+ const rows=[row('ODA_NO',1,'Vanlig ketchup 500 g',30,{brand:'Merke A',ingredients:tomato(148),ean:'7030000000017'}),row('ODA_NO',2,'Billig ketchup 500 g',10,{brand:'Merke B',ingredients:tomato(100),attributes:{organic:false}}),row('ODA_NO',3,'Økologisk ketchup 500 g',40,{brand:'Merke C',ingredients:tomato(200),attributes:{organic:true}}),row('MENY_NO',4,'Meny ketchup 500 g',12,{brand:'Merke D',ean:'7030000000024'}),row('JOKER_NO',5,'Joker ketchup 500 g',5,{brand:'Merke E'}),row('ODA_NO',6,'Avvist ketchup 500 g',8,{brand:'Merke F'})];
+ const d={schemaVersion:1,createdAt:NOW,updatedAt:NOW,groups:[g],products:rows.map(x=>x.p),prices:rows.map(x=>x.price),memberships:rows.map(({p})=>({groupId:g.id,productKey:p.productKey,status:'approved',equivalenceEvidence:'Vanlig tomatketchup lest',qualityEvidence:'Samme bruk',reviewedFingerprint:p.metadataFingerprint,reviewedGroupFingerprint:groupMetadataFingerprint(g),reviewedAt:'2026-11-09T11:00:00Z',sourceReceipts:[{url:p.sourceUrl,observedAt:'2026-11-09T11:00:00Z',evidence:'Etikett lest'}]}))};
+ return {d,g,rows};
+}
+function fixture(t) {
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'library-links-')),file=path.join(dir,'library.json');t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const {d,g,rows}=libraryData(),write=()=>fs.writeFileSync(file,JSON.stringify(d));write();
+ const clock={at:NOW},provider=libraryPriceProvider(file,{now:()=>new Date(clock.at)}),state={},shop=shoppingStore(state,{save(){},now:()=>new Date(clock.at),libraryPrices:provider});
+ shop.settings({monitoringEnabled:true,stores:[{id:'meny',name:'MENY – Kassal-kjedepriser',url:'https://example.com/meny',minSavings:0,chainCode:'MENY_NO'},{id:'web',name:'Rest (nettbutikk)',url:'https://example.com/web',minSavings:0,chainCode:'JOKER_NO'}]});
+ const w=shop.watch({name:'Tomatketchup',unit:'kg',storage:'pantry',purchaseAmount:6,targetPrice:200});
+ const native=(row,status='approved',pack=.5)=>{const p=row.p,seen=shop.catalogObserve({watchId:w.id,products:[{id:p.id,store:p.store,name:p.name,ean:p.ean,brand:p.brand,ingredients:p.ingredients,description:p.description,sourceUrl:p.sourceUrl,currentPrice:row.price.grossPackPrice,lastChecked:RECEIPT}]}).entries[0];return shop.catalogReview({watchId:w.id,id:p.id,store:p.store,fingerprint:seen.fingerprint,status,packAmount:status==='approved'?pack:undefined,unit:status==='approved'?'kg':undefined,equivalenceEvidence:'Vurdert'});};
+ const link=(extra={})=>shop.libraryLink({watchId:w.id,evidence:'Gruppen dekker varen',links:[{groupId:g.id,groupFingerprint:groupMetadataFingerprint(g),evidence:'Samme bruk og innhold',...extra}]});
+ return {d,g,rows,write,clock,provider,state,shop,w,native,link,file,dir};
+}
+
+test('a library group lends nothing until the watch has an explicit link, and exclusions and chains hold',t=>{
+ const f=fixture(t);f.native(f.rows[0]);f.native(f.rows[5],'excluded');
+ let view=f.shop.familyView();assert.equal(view.items[0].prices.current,60);
+ assert.deepEqual(view.odaDraft.items[0].variants.map(x=>x.productId),[1]);
+ assert.ok(f.shop.queue().some(x=>x.do==='shopping-library-link'&&x.reason==='undecided'));
+ f.link();view=f.shop.familyView();
+ assert.equal(view.items[0].prices.current,20,'cheapest linked product at an allowed chain');
+ const ids=view.odaDraft.items[0].variants.map(x=>x.productId);
+ assert.ok(ids.includes(2)&&ids.includes(3));assert.ok(!ids.includes(6),'a family exclusion wins over the group');
+ assert.equal(view.odaDraft.items[0].productId,1,'a cheaper brand is offered, never swapped in');
+ assert.ok(!f.shop.queue().some(x=>x.do==='shopping-library-link'));
+});
+
+test('quality is compared only between the same measurement, and only linked brands and attributes pass',t=>{
+ const f=fixture(t);f.native(f.rows[0]);f.link();
+ let variants=f.shop.familyView().odaDraft.items[0].variants;
+ assert.deepEqual(variants.map(x=>x.quality?.score??null),[null,50,74,100],'a missing label is unknown, never zero');
+ assert.equal(variants.find(x=>x.productId===2).library,true);assert.equal(variants.find(x=>x.productId===1).library,false);
+ f.link({requires:['organic']});variants=f.shop.familyView().odaDraft.items[0].variants;assert.deepEqual(variants.map(x=>x.productId),[1,3]);
+ f.link({brands:['Merke B']});variants=f.shop.familyView().odaDraft.items[0].variants;assert.deepEqual(variants.map(x=>x.productId),[2,1]);
+ assert.throws(()=>f.link({requires:['cheap']}),/Ugyldige krav/);
+});
+
+test('a changed library group stops lending and asks for a new review; a decline stays closed',t=>{
+ const f=fixture(t);f.native(f.rows[0]);f.link();assert.equal(f.shop.familyView().items[0].prices.current,16);
+ assert.throws(()=>f.shop.libraryLink({watchId:f.w.id,evidence:'x',links:[{groupId:f.g.id,groupFingerprint:'0'.repeat(64),evidence:'y'}]}),/endret/);
+ f.g.inclusionCriteria='Strengere regel';for(const m of f.d.memberships)m.reviewedGroupFingerprint=groupMetadataFingerprint(f.g);f.write();
+ assert.equal(f.shop.familyView().items[0].prices.current,60);
+ assert.equal(f.shop.queue().find(x=>x.do==='shopping-library-link').reason,'group-changed');
+ f.shop.libraryLink({watchId:f.w.id,evidence:'Familien krever eksakt variant',links:[]});
+ assert.ok(!f.shop.queue().some(x=>x.do==='shopping-library-link'));assert.equal(f.shop.familyView().items[0].prices.current,60);
+});
+
+test('fresh prices expire on their own without reloading, and links never cross units',t=>{
+ const f=fixture(t);f.native(f.rows[0]);f.link();
+ f.clock.at='2026-11-12T12:00:00Z';assert.equal(f.shop.familyView().items[0].prices.current,null);
+ const other=f.shop.watch({name:'Annen',unit:'l',storage:'pantry'});
+ assert.throws(()=>f.shop.libraryLink({watchId:other.id,evidence:'x',links:[{groupId:f.g.id,groupFingerprint:groupMetadataFingerprint(f.g),evidence:'y'}]}),/enhet/);
+});
+
+test('free text never reaches the cart on a guess',t=>{
+ const f=fixture(t);f.native(f.rows[0]);
+ const exact=f.shop.list({action:'add',name:'tomatketchup'});assert.equal(exact.storeName,'Oda');assert.equal(exact.odaProductId,1);
+ f.shop.list({action:'remove',id:exact.id});
+ const guess=f.shop.list({action:'add',name:'ketchup'});
+ assert.equal(guess.routing,'choose');assert.equal(guess.odaProductId,null);assert.equal(guess.storeName,null);
+ assert.deepEqual(guess.suggestions.map(x=>x.type),['watch','library']);
+ assert.equal(guess.suggestions[1].odaProductId,6,'the group suggestion names one concrete product');
+ assert.equal(f.shop.listRouteWork().length,0,'waiting for the family needs no agent run');
+ const placed=f.shop.list({action:'choose',id:guess.id,watchId:f.w.id});assert.equal(placed.storeName,'Oda');assert.equal(placed.odaProductId,1);assert.equal(placed.name,'Tomatketchup');
+ const second=f.shop.list({action:'add',name:'ketchup'}),library=second.suggestions.find(x=>x.type==='library');
+ const fromLibrary=f.shop.list({action:'choose',id:second.id,productKey:library.productKey});assert.equal(fromLibrary.storeName,'Oda');assert.equal(fromLibrary.odaProductId,6);assert.equal(fromLibrary.packs,1);
+ const third=f.shop.list({action:'add',name:'ketchup'});assert.equal(f.shop.list({action:'choose',id:third.id,agent:true}).routing,'pending');assert.equal(f.shop.listRouteWork().length,1);
+ assert.throws(()=>f.shop.list({action:'choose',id:third.id,watchId:f.w.id}),/venter ikke/);
+ const urgent=f.shop.list({action:'add',name:'ketchup',need:'now'});assert.ok(urgent.suggestions.filter(x=>x.type==='library').every(x=>x.odaProductId===null));
+});
+
+test('a word inside a longer watch name is offered, not placed',t=>{
+ const f=fixture(t);const w=f.shop.watch({name:'Ananasbiter i juice på boks',unit:'kg',storage:'pantry',purchaseAmount:6,targetPrice:200});
+ const seen=f.shop.catalogObserve({watchId:w.id,products:[{id:'9',store:'ODA_NO',name:'Ananas 340 g',sourceUrl:'https://oda.com/no/products/99-ananas/',currentPrice:20,lastChecked:RECEIPT}]}).entries[0];
+ f.shop.catalogReview({watchId:w.id,id:'9',store:'ODA_NO',fingerprint:seen.fingerprint,status:'approved',packAmount:.34,unit:'kg',equivalenceEvidence:'Vurdert'});
+ const entry=f.shop.list({action:'add',name:'juice'});assert.equal(entry.routing,'choose');assert.equal(entry.storeName,null);assert.equal(entry.odaProductId,null);
+});
+
+test('reviews that contradict the package in the name are refused and audited',t=>{
+ const f=fixture(t);
+ assert.equal(namedPackConflict('Helmelk Laktosefri, 1,75 l',1,'l'),1.75);assert.equal(namedPackConflict('Helmelk 1,75 l',1.75,'l'),null);assert.equal(namedPackConflict('Brus 6 x 1,5 l',9,'l'),null);assert.equal(namedPackConflict('Ost ca. 1 kg',1,'kg'),null);
+ assert.throws(()=>f.native(f.rows[0],'approved',1),/Varenavnet viser 0.5/);
+ const row=f.rows[0],seen=f.shop.catalogEntries(f.w.id)[0];
+ f.shop.catalogReview({watchId:f.w.id,id:row.p.id,store:row.p.store,fingerprint:seen.fingerprint,status:'approved',packAmount:1,unit:'kg',equivalenceEvidence:'Vurdert',packConflictEvidence:'Tolererer dokumentert avvik i test'});
+ let audit=f.shop.libraryAudit();assert.deepEqual(audit.findings.map(x=>x.kind).sort(),['library-pack-conflict','name-pack-conflict']);
+ assert.equal(f.shop.queue().filter(x=>x.do==='shopping-library-audit')[0].findings,2);
+ assert.throws(()=>f.shop.libraryAuditAck({items:[{id:audit.findings[0].id}]}),/belegg/);
+ f.shop.libraryAuditAck({items:audit.findings.map(x=>({id:x.id,evidence:'Kontrollert'}))});
+ assert.equal(f.shop.libraryAudit().findings.length,0);assert.ok(!f.shop.queue().some(x=>x.do==='shopping-library-audit'));
+});
+
+test('the audit reports products the library does not approve and watches with no group',t=>{
+ const f=fixture(t);f.native(f.rows[0]);f.d.memberships[0].status='excluded';f.write();
+ f.shop.watch({name:'Toalettpapir',unit:'stk',storage:'other'});
+ const audit=f.shop.libraryAudit();assert.equal(audit.findings[0].kind,'library-not-approved');assert.equal(audit.findings[0].libraryStatus[0].status,'excluded');
+ assert.ok(audit.noGroup.some(x=>x.name==='Toalettpapir'));
+});
+
+test('a scan adds or removes one verified package, and unknown codes change nothing',t=>{
+ const f=fixture(t);f.native(f.rows[0]);
+ assert.deepEqual(f.shop.stockScan({action:'lookup',ean:'7030000000017'}).options.map(x=>[x.watchId,x.packAmount]),[[f.w.id,.5]]);
+ const meny=f.shop.stockScan({action:'lookup',ean:'7030000000024'});assert.equal(meny.options.length,0,'no link yet means no stock line');assert.equal(meny.knownProduct,'Meny ketchup 500 g');
+ assert.throws(()=>f.shop.stockScan({action:'apply',ean:'7030000000024',watchId:f.w.id,packAmount:.5,count:1}),/passer ikke/);
+ f.link();assert.equal(f.shop.stockScan({action:'lookup',ean:'7030000000024'}).options[0].productName,'Meny ketchup 500 g');
+ assert.throws(()=>f.shop.stockScan({action:'lookup',ean:'abc'}),/strekkode/);assert.equal(f.shop.stockScan({action:'lookup',ean:'7030000000031'}).options.length,0);
+ assert.throws(()=>f.shop.stockScan({action:'apply',ean:'7030000000017',watchId:f.w.id,packAmount:.5,count:-1}),/ikke talt/);
+ const added=f.shop.stockScan({action:'apply',ean:'7030000000017',watchId:f.w.id,packAmount:.5,count:1,clientId:'a'});assert.equal(added.amount,.5);
+ assert.equal(f.shop.stockScan({action:'apply',ean:'7030000000017',watchId:f.w.id,packAmount:.5,count:1,clientId:'a'}).id,added.id,'a retried request counts once');
+ assert.equal(f.shop.familyView().items[0].stock.amount,.5);
+ assert.equal(f.shop.stockScan({action:'apply',ean:'7030000000017',watchId:f.w.id,packAmount:.5,count:-1,clientId:'b'}).amount,0);
+ const last=f.state.shopping.scanLog.at(-1);f.shop.stockScan({action:'undo',id:last.id});assert.equal(f.shop.familyView().items[0].stock.amount,.5);
+ const third=f.shop.stockScan({action:'apply',ean:'7030000000017',watchId:f.w.id,packAmount:.5,count:1,clientId:'c'});f.shop.pantry({watchId:f.w.id,amount:9});assert.throws(()=>f.shop.stockScan({action:'undo',id:third.id}),/endret/);
+});
+
+test('a cart line outside every watch gets a same-group alternative, and native order lines get label data',t=>{
+ const f=fixture(t);f.d.products[0].nutrition={basis:'g',per100:{kcal:100,protein:1,fat:0,carbs:20},sourceUrl:'https://oda.com/no/products/1-vare/',evidence:'Etikett'};f.d.products[0].metadataFingerprint=productMetadataFingerprint(f.d.products[0]);f.d.memberships[0].reviewedFingerprint=f.d.products[0].metadataFingerprint;f.write();
+ const line=f.shop.cartReview({groups:[{items:[{product:{id:1,name:'Vanlig ketchup 500 g'},quantity:2,totalGrossAmount:'60.00'}]}],validationMessages:[],totalGrossAmount:'60.00'}).lines[0];
+ assert.equal(line.watchId,null);assert.equal(line.libraryAlternative.productId,6);assert.equal(line.libraryAlternative.diffPct,73);assert.equal(line.libraryAlternative.linePackAmount,.5);
+ f.shop.importOrders({orders:[{orderNumber:'n1',deliveryDate:'2026-11-08',currency:'NOK',grossAmount:60,products:[{product:{id:1,name:'Vanlig ketchup 500 g',description:'500 g'},quantity:2,totalGrossAmount:'60.00'}]}]});
+ assert.equal(f.shop.familyView().nutrition.spendPct,100);
+ assert.deepEqual(f.shop.queue().find(x=>x.do==='shopping-order-link').libraryGroups,[f.g.id]);
+});
+
+test('purchases elsewhere keep the need up once stock has been used, without counting stock still at home',t=>{
+ const f=fixture(t);const w=f.shop.watch({name:'Havregryn',unit:'kg',storage:'pantry',targetPrice:100});
+ f.shop.settings({stores:[{id:'near',name:'Nærbutikk',url:'https://example.com/near',minSavings:0}]});
+ f.state.shopping.purchases.push({id:'p',offerId:null,watchId:w.id,name:w.name,packs:12,packAmount:1,unit:'kg',at:'2026-01-10T12:00:00Z'});
+ assert.equal(Math.round(f.shop.familyView().items.find(x=>x.id===w.id).annualAmount),12);
+ f.shop.pantry({watchId:w.id,amount:12});assert.equal(f.shop.familyView().items.find(x=>x.id===w.id).annualAmount,null,'unused stock proves no consumption');
+});
+
+test('editing an item keeps the evidence behind its counted stock',t=>{
+ const f=fixture(t);f.shop.pantry({watchId:f.w.id,amount:1});f.state.shopping.watches[f.w.id].stockEvidence={intakeId:'a',estimated:true,evidence:'Bilde',at:NOW};
+ f.shop.item({id:f.w.id,shelfLifeMonths:6});assert.equal(f.state.shopping.watches[f.w.id].stockEvidence.estimated,true);
+});
+
+test('pack amounts differing by floating point noise still match the library',t=>{
+ const f=fixture(t);f.rows[0].p.canonicalPackAmount=.1+.4000000000000001;f.rows[0].p.metadataFingerprint=productMetadataFingerprint(f.rows[0].p);f.d.memberships[0].reviewedFingerprint=f.rows[0].p.metadataFingerprint;f.d.prices[0].receiptAt='2026-11-09T12:06:00Z';f.write();
+ f.native(f.rows[0]);assert.equal(f.provider(f.shop.catalogEntries(f.w.id)).quotes.length,1);
+});
+
+test('the server reads a compact index and rebuilds it outside the request',t=>{
+ const f=fixture(t),indexFile=path.join(f.dir,'index.json');let builds=0;
+ const build=(file,output,done)=>{builds++;writeShoppingIndex(file,output);done(true);};
+ const provider=libraryPriceProvider(f.file,{now:()=>new Date(NOW),indexFile,build});
+ assert.equal(provider([]).status,'building');assert.equal(builds,1);
+ assert.equal(provider([]).status,'ready');assert.ok(provider.reader().group(f.g.id));
+ provider([]);assert.equal(builds,1,'an unchanged library is not rebuilt');
+ f.d.createdAt='2026-11-09T12:00:00Z';f.g.name='Ny tomatketchup';for(const m of f.d.memberships)m.reviewedGroupFingerprint=groupMetadataFingerprint(f.g);f.write();
+ provider([]);assert.equal(builds,2);assert.equal(provider.reader().group(f.g.id).name,'Ny tomatketchup');
+ const failing=libraryPriceProvider(f.file,{now:()=>new Date(NOW),indexFile:path.join(f.dir,'none.json'),build:(a,b,done)=>{builds++;done(false);}});
+ const before=builds;failing([]);failing([]);assert.equal(builds,before+1,'a failed build backs off');assert.equal(failing([]).status,'building');
+ assert.ok(fs.statSync(indexFile).size<fs.statSync(f.file).size*2);
+});

@@ -19,6 +19,11 @@ test('shopping stays private, kiosk actions are limited, and order state survive
   for(const path of ['/shopping-setup','/api/shopping/oda/callback','/api/shopping/orders'])assert.ok([403,405].includes((await fetch(kiosk+path)).status));
   for(const path of ['settings','orders','offer','review','nutrition','market','catalog','catalog-review','link','oda/connect','kassal/configure','kassal/search','kassal/stores','kassal/ean','kassal/product','kassal/history'])assert.equal((await post(kiosk+'/api/shopping/'+path,{})).status,405);
   assert.equal((await fetch(kiosk+'/api/shopping/catalog')).status,403);
+  for(const path of ['library-audit','library-candidates','library-search?q=mel'])assert.equal((await fetch(kiosk+'/api/shopping/'+path)).status,403);
+  for(const path of ['library-link','library-audit-ack'])assert.equal((await post(kiosk+'/api/shopping/'+path,{})).status,405);
+  assert.equal((await post(kiosk+'/api/shopping/stock-scan',{action:'lookup',ean:'5901234123457'})).status,200);
+  assert.equal((await post(mobile+'/send/api/shopping/stock-scan',{action:'lookup',ean:'5901234123457'})).status,401);
+  assert.equal((await fetch(mobile+'/send/barcode.mjs')).status,200);assert.equal((await fetch(kiosk+'/barcode.mjs')).status,200);
   assert.equal((await post(base+'/api/shopping/kassal/configure',{apiKey:'synthetic-test-kassal-token'},{Origin:'https://untrusted.example'})).status,403);
   assert.equal((await post(base+'/api/shopping/kassal/configure',{apiKey:'synthetic-test-kassal-token'})).status,200);
   assert.ok(!JSON.stringify(await(await fetch(base+'/api/shopping')).json()).includes('synthetic-test-kassal-token'));

@@ -35,13 +35,20 @@ export function shelfWithDate(months,bestBefore,at) {
 }
 
 /** Yearly amount, in the watch's unit. Null means the need is genuinely unknown. */
-export function annualNeed(watch,rows,historyDays,odaShare=1) {
+export function annualNeed(watch,rows,historyDays,odaShare=1,{elsewhere=0,at=null}={}) {
  if(watch.monthlyUsage!=null)return {amount:watch.monthlyUsage*12,basis:'household-estimate'};
  const bought=rows.reduce((sum,row)=>sum+Math.max(0,row.purchasedAmount??0),0);
  // The household can state how much of its shopping the documented store covers.
- const registered=bought>0?bought*365/Math.max(historyDays,90)/odaShare:0;
+ const yearly=365/Math.max(historyDays,90);
+ let registered=bought>0?bought*yearly/odaShare:0,moved=false;
+ // Bulk purchases elsewhere must not shrink the need once the Oda orders fall
+ // away. Only what has left the pantry counts; stock still at home proves nothing.
+ if(elsewhere>0){
+  const left=estimateStock(watch,(bought+elsewhere)*yearly/12,at).amount??0,documented=Math.max(0,bought+elsewhere-left)*yearly;
+  if(documented>registered){registered=documented;moved=true;}
+ }
  if(watch.purchaseAmount!=null&&watch.purchaseAmount>=registered)return {amount:watch.purchaseAmount,basis:'planned-amount'};
- if(registered>0)return {amount:registered,basis:odaShare<1?'oda-share-estimate':'oda-lower-bound'};
+ if(registered>0)return {amount:registered,basis:moved?'documented-purchases':odaShare<1?'oda-share-estimate':'oda-lower-bound'};
  return {amount:null,basis:'offer-pack'};
 }
 

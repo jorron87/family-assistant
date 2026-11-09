@@ -183,3 +183,10 @@ body.kiosk .main-nav button { padding-left: 13px; padding-right: 13px; }
 .shop-stock-previews figcaption { font-size: 12px; color: var(--s-muted); overflow-wrap: anywhere; }
 .shop-stock-report { padding: 14px 0; border-top: 1px solid var(--s-line); }
 .shop-stock-report p { margin: 6px 0; }
+
+.shop-suggestions{flex-basis:100%;display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.4rem}
+.shop-suggestions button{font-size:.9em}
+.shop-scan video{width:100%;max-height:45vh;border-radius:12px;background:#000;object-fit:cover}
+.shop-scan-option{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.5rem 0}
+.shop-scan-option strong{flex:1 1 60%}
+.shop-scan-open{margin:.4rem 0}

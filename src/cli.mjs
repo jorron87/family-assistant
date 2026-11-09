@@ -66,6 +66,11 @@ async function execute(command, args, flags) {
     case 'shopping-catalog-review': result=await request('/api/shopping/catalog-review','POST',json(args[0]));break;
     case 'shopping-feed': result=await request('/api/shopping/feed','POST',{storeId:args[0],ack:flags.has('--ack'),evidence:args[1]});break;
     case 'shopping-checklist': result=await request('/api/shopping/checklist');break;
+    case 'shopping-library-audit': result=await request('/api/shopping/library-audit');break;
+    case 'shopping-library-ack': result=await request('/api/shopping/library-audit-ack','POST',json(args[0]));break;
+    case 'shopping-library-candidates': result=await request('/api/shopping/library-candidates'+(args[0]?'?watchId='+encodeURIComponent(args[0]):''));break;
+    case 'shopping-library-link': result=await request('/api/shopping/library-link','POST',json(args[0]));break;
+    case 'shopping-library-search': result=await request('/api/shopping/library-search?q='+encodeURIComponent(args[0]??'')+(args[1]?'&limit='+encodeURIComponent(args[1]):''));break;
     case 'shopping-list-route': result=await request('/api/shopping/list','POST',{action:'route',...json(args[0])});break;
     case 'oda-search': result=await request('/api/shopping/oda/search','POST',{query:args[0]});break;
     case 'shopping-link': result=await request('/api/shopping/link','POST',json(args[0]));break;

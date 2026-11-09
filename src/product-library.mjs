@@ -45,6 +45,13 @@ export function groupMetadataFingerprint(group) {
  return createHash('sha256').update(JSON.stringify(canonical(Object.fromEntries(keys.map(key=>[key,group[key]??null]))))).digest('hex');
 }
 
+// Identity text a catalogue row must share with a library product before it may
+// reuse the library's evidence. A digest keeps long labels out of the read model.
+export function productTextHash(product) {
+ const norm=value=>String(value??'').normalize('NFC').replace(/\s+/g,' ').trim();
+ return createHash('sha256').update(JSON.stringify(['name','ean','brand','ingredients','description','sourceUrl'].map(key=>norm(product[key])))).digest('hex').slice(0,24);
+}
+
 export function readProductLibrary(file,options={}) {
  if(typeof file!=='string'||!file.trim())throw Error('An explicit product-library JSON file is required.');
  const info=statSync(file);
@@ -129,7 +136,7 @@ export function createProductLibrary(input,{now=new Date()}={}) {
   if(timestamp(p.receiptAt)===null){addIssue('warning','missing-or-invalid-price-receipt',{productKey:p.productKey,row});return;}
   const rows=prices.get(p.productKey)??[];rows.push(p);prices.set(p.productKey,rows);
  });
- function priceOf(productKey) {
+ function priceOf(productKey,{ageless=false}={}) {
   const rows=prices.get(productKey)??[];
   if(!rows.length)return {grossPackPrice:null,grossUnitPrice:null,unit:null,unitPriceEvidence:null,directUnitVerified:false,directUnitReasons:[],receiptAt:null,fresh:false,ageHours:null,availabilityScope:null,sourceUrl:null,reasons:['missing-price-receipt']};
   const latest=rows.reduce((max,p)=>Math.max(max,timestamp(p.receiptAt)),-Infinity),current=rows.filter(p=>timestamp(p.receiptAt)===latest),p=current.find(p=>https(p.sourceUrl))??current[0];
@@ -150,13 +157,13 @@ export function createProductLibrary(input,{now=new Date()}={}) {
   if(p.availabilityScope!=='chain')reasons.push('unknown-price-scope');
   if(p.available===false||p.delisted===true)reasons.push('unavailable-product');
   if(!https(p.sourceUrl))reasons.push('missing-price-source');
-  if(!fresh)reasons.push(age<0?'future-price-receipt':'stale-price-receipt');
+  if(!fresh&&!ageless)reasons.push(age<0?'future-price-receipt':'stale-price-receipt');
   return {grossPackPrice:positive(p.grossPackPrice)?p.grossPackPrice:null,grossUnitPrice:positive(p.grossUnitPrice)?p.grossUnitPrice:null,unit:p.unit??null,unitPriceEvidence:p.unitPriceEvidence??null,priceIncludesVat:p.priceIncludesVat??null,directUnitVerified,directUnitReasons,quotedPrice:structuredClone(p.quotedPrice??null),receiptAt:p.receiptAt,fresh,ageHours:round(age/3600000),availabilityScope:p.availabilityScope??null,sourceUrl:p.sourceUrl??null,currency:p.currency??'NOK',reasons};
  }
  for(const [productKey] of prices){const quote=priceOf(productKey);for(const code of new Set([...quote.reasons,...quote.directUnitReasons]))addIssue(code==='conflicting-latest-prices'?'error':'warning',code,{productKey});}
  const productView=p=>structuredClone({productKey:p.productKey,source:p.source,store:p.store,id:p.id,name:p.name,ean:p.ean??null,brand:p.brand??null,ingredients:p.ingredients??null,description:p.description??null,sourceUrl:p.sourceUrl??null,canonicalPackAmount:p.canonicalPackAmount??null,unit:p.unit??null,packEvidence:p.packEvidence??null,rawPack:p.rawPack??null,nutrition:p.nutrition??null,nutritionObservation:p.nutritionObservation??null,metadataFingerprint:p.metadataFingerprint,metadataCurrent:!badFingerprints.has(p.productKey)});
- function assess(m,group) {
-   const p=products.get(m.productKey),reviewReasons=membershipReasons(m),price=priceOf(m.productKey),reasons=[...reviewReasons,...price.reasons];
+ function assess(m,group,options={}) {
+   const p=products.get(m.productKey),reviewReasons=membershipReasons(m),price=priceOf(m.productKey,options),reasons=[...reviewReasons,...price.reasons];
    const packVerified=!!p&&positive(p.canonicalPackAmount)&&nonempty(p.packEvidence)&&p.unit===group.canonicalUnit&&positive(price.grossPackPrice);
    const directVerified=price.directUnitVerified&&price.unit===group.canonicalUnit;
    if(!packVerified&&!directVerified){
@@ -221,5 +228,25 @@ export function createProductLibrary(input,{now=new Date()}={}) {
   if(p.available===false||p.delisted===true)price.reasons.push('unavailable-product');
   return {product:productView(p),reviewCurrent:reviewed,price};
  }
- return {summary,search,compare,audit,productQuote};
+ /** Compact, time-independent read model for the shopping views. Price age is
+  * judged by the reader at use, so the large source never loads in the server. */
+ function shoppingIndex() {
+  const out={groups:{},members:{},products:{}};
+  for(const [id,g] of groups){
+   if(invalidGroups.has(id))continue;
+   out.groups[id]={name:g.name,category:g.category,unit:g.canonicalUnit,fingerprint:groupMetadataFingerprint(g),inclusion:g.inclusionCriteria,exclusions:g.exclusions};
+   out.members[id]=(byGroup.get(id)??[]).filter(m=>products.has(m.productKey)&&!invalidProducts.has(m.productKey)&&!badFingerprints.has(m.productKey)).map(m=>{
+    const a=assess(m,g,{ageless:true}),q=a.quality;
+    return {k:m.productKey,s:m.status,r:a.reviewCurrent,u:a.eligible?a.unitPrice:null,q:q.status==='scored'?{score:q.score,key:q.comparisonKey,label:q.label,criterion:q.criterion}:null};
+   });
+  }
+  for(const [key,p] of products){
+   if(invalidProducts.has(key)||badFingerprints.has(key))continue;
+   const q=priceOf(key,{ageless:true}),n=p.nutrition;
+   out.products[key]={store:p.store,id:p.id,name:p.name,ean:p.ean??null,brand:p.brand??null,textHash:productTextHash(p),pack:positive(p.canonicalPackAmount)?p.canonicalPackAmount:null,packKnown:nonempty(p.packEvidence),unit:p.unit??null,rawPack:p.rawPack?{weight:p.rawPack.weight??null,weightUnit:p.rawPack.weightUnit??null}:null,sourceUrl:p.sourceUrl??null,attributes:p.attributes??null,available:p.available!==false&&p.delisted!==true,nutrition:n?{basis:n.basis,per100:n.per100,sourceUrl:n.sourceUrl??null}:null,
+    quote:{grossPackPrice:q.grossPackPrice,grossUnitPrice:q.grossUnitPrice,unit:q.unit,directUnitVerified:q.directUnitVerified,receiptAt:q.receiptAt,reasons:q.reasons,sourceUrl:q.sourceUrl}};
+  }
+  return out;
+ }
+ return {summary,search,compare,audit,productQuote,shoppingIndex};
 }

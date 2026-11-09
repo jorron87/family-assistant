@@ -16,4 +16,7 @@ const rules=[
  ['Tørrvarer og baking',/mel|pasta|(?:^|\s)ris(?:\s|$)|havre|sukker|salt|gjær|kakao|sjokolade|nøtt|cashew|valnøtt|stivelse/i],
  ['Drikke og kaffe',/kaffe|(?:^|\s)te(?:\s|$)|juice|saft|brus|drikke/i]
 ];
-export const pantryGroup=item=>rules.find(([,pattern])=>pattern.test(item.name))?.[0]??'Andre varer';
+// A linked library group knows the real category. Mixed ones such as meat, fish
+// and eggs, or fruit and vegetables, still need the name to choose.
+const LIBRARY_GROUPS={'Hygiene':'Hjem og hygiene','Hus og rengjøring':'Hjem og hygiene','Baby og barn':'Hjem og hygiene','Kjæledyr':'Til dyrene','Meieri og ost':'Meieri og egg','Drikke':'Drikke og kaffe','Brød og bakervarer':'Brød og bakst','Brød og bakst':'Brød og bakst','Mel, korn og baking':'Tørrvarer og baking','Ris og pasta':'Tørrvarer og baking','Nøtter og frø':'Tørrvarer og baking','Nøtter og tørket frukt':'Tørrvarer og baking','Oljer og eddik':'Olje, sauser og hermetikk','Hermetikk og middagsbasis':'Olje, sauser og hermetikk'};
+export const pantryGroup=item=>LIBRARY_GROUPS[item.libraryCategory]??rules.find(([,pattern])=>pattern.test(item.name))?.[0]??'Andre varer';

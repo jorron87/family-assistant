@@ -161,9 +161,11 @@ test('native Oda lines are queued for a reviewed link and refill counted stock',
  assert.equal(shop.familyView().items[0].stock.amount,2);
  assert.throws(()=>shop.link({productKey:'oda:5',watchId:flour.id}),/Koblingsbelegg/);
  shop.link({productKey:'oda:5',watchId:flour.id,evidence:'Samme hvetemel, 1 kg'});
+ assert.equal(shop.familyView().items[0].stock.amount,5,'a delivery linked afterwards still reaches counted stock');
  assert.equal(shop.queue().filter(x=>x.do==='shopping-order-link').length,0);
- shop.importOrders({orders:[order('b','2026-11-08')]});assert.equal(shop.familyView().items[0].stock.amount,5);
- shop.importOrders({orders:[order('b','2026-11-08')]});assert.equal(shop.familyView().items[0].stock.amount,5);
+ shop.importOrders({orders:[order('b','2026-11-08')]});assert.equal(shop.familyView().items[0].stock.amount,8);
+ shop.importOrders({orders:[order('b','2026-11-08')]});assert.equal(shop.familyView().items[0].stock.amount,8);
+ shop.link({productKey:'oda:5',watchId:flour.id,evidence:'Samme hvetemel, 1 kg'});assert.equal(shop.familyView().items[0].stock.amount,8,'relinking never refills twice');
  shop.link({productKey:'oda:5',watchId:null,evidence:'Skal ikke følges'});
 });
 test('unverified order prices still document how much was bought',()=>{

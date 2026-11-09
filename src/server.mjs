@@ -28,7 +28,7 @@ import {createKassal} from './kassal.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 let libraryPrices;
-try{const config=readConfig('shopping-library.json');if(config.enabled===true&&typeof config.file==='string')libraryPrices=libraryPriceProvider(resolve(dirname(configPath('shopping-library.json')),config.file));}catch(error){if(error.code!=='ENOENT')throw error;}
+try{const config=readConfig('shopping-library.json');if(config.enabled===true&&typeof config.file==='string'){const file=resolve(dirname(configPath('shopping-library.json')),config.file);libraryPrices=libraryPriceProvider(file,{indexFile:join(dirname(file),'shopping-index.json')});}}catch(error){if(error.code!=='ENOENT')throw error;}
 const store = createStore(DATA_DIR,{libraryPrices});
 const resources = createResources({dataDir:DATA_DIR,store});
 const googlePublisher=createGooglePublisher({store,dataDir:DATA_DIR,config:readConfig('sources.json')});
@@ -54,7 +54,7 @@ const port = Number(process.env.FAMILIEN_PORT ?? 4318);
 const oda=createOda({dataDir:DATA_DIR,shopping:store.shopping,redirectUrl:`http://127.0.0.1:${port}/api/shopping/oda/callback`});
 const odaCart=createOdaCart({oda,shopping:store.shopping});
 const kassal=createKassal({dataDir:DATA_DIR});
-PUBLIC_FILES.set('shopping-view.mjs','text/javascript; charset=utf-8');
+PUBLIC_FILES.set('shopping-view.mjs','text/javascript; charset=utf-8');PUBLIC_FILES.set('barcode.mjs','text/javascript; charset=utf-8');
 PUBLIC_FILES.set('shopping.css','text/css; charset=utf-8');
 PUBLIC_FILES.set('pantry-groups.mjs','text/javascript; charset=utf-8');
 const sessionMaintenance = createSessionMaintenance({dataDir:DATA_DIR});
@@ -93,6 +93,9 @@ async function handle(req, res) {
     if(path==='/api/shopping/source'&&method==='GET'){const offer=store.shopping.offerSource(new URL(req.url,`http://${host}`).searchParams.get('offerId'));const loaded=await offerSources.load(offer.sourceUrl);return send(res,200,loaded.kind==='pdf'?{kind:'pdf',page:flyerPage(offer.evidence)}:{kind:'page',qr:await QRCode.toDataURL(offer.sourceUrl,{width:360,margin:2})});}
     if(path==='/api/shopping/source/file'&&method==='GET'){const offer=store.shopping.offerSource(new URL(req.url,`http://${host}`).searchParams.get('offerId'));const loaded=await offerSources.load(offer.sourceUrl);if(loaded.kind!=='pdf')return send(res,404,{error:'Kilden er ikke en PDF.'});return send(res,200,loaded.bytes,'application/pdf');}
     if(path==='/api/shopping/checklist'&&method==='GET')return send(res,200,store.shopping.checklist());
+    if(path==='/api/shopping/library-audit'&&method==='GET')return send(res,200,store.shopping.libraryAudit());
+    if(path==='/api/shopping/library-candidates'&&method==='GET')return send(res,200,store.shopping.libraryLinkCandidates(new URL(req.url,`http://${host}`).searchParams.get('watchId')??undefined));
+    if(path==='/api/shopping/library-search'&&method==='GET'){const params=new URL(req.url,`http://${host}`).searchParams;return send(res,200,store.shopping.librarySearch(params.get('q'),params.get('limit')));}
     if(path==='/api/shopping/queue'&&method==='GET')return send(res,200,store.shopping.queue());
     if(path==='/api/shopping/stock-intake'&&method==='GET')return send(res,200,store.shopping.stockIntake.list());
     const stockItem=/^\/api\/shopping\/stock-intake\/([a-f0-9-]{36})$/.exec(path);
@@ -116,6 +119,9 @@ async function handle(req, res) {
       const stockSubmit=/^\/api\/shopping\/stock-intake\/([a-f0-9-]{36})\/submit$/.exec(path);
       if(stockSubmit){const result=store.shopping.stockIntake.submit(stockSubmit[1]);send(res,200,result);queueMicrotask(dispatchTick);return;}
       if(path==='/api/shopping/stock-review')return send(res,200,store.shopping.stockIntake.review(input));
+      if(path==='/api/shopping/stock-scan')return send(res,200,store.shopping.stockScan(input));
+      if(path==='/api/shopping/library-link')return send(res,200,store.shopping.libraryLink(input));
+      if(path==='/api/shopping/library-audit-ack')return send(res,200,store.shopping.libraryAuditAck(input));
       if(path==='/api/shopping/stock-action')return send(res,200,store.shopping.stockIntake.action(input));
       if(path==='/api/shopping/kassal/configure')return send(res,200,kassal.configure(input));
       if(path==='/api/shopping/kassal/search')return send(res,200,await kassal.search(input));
@@ -441,10 +447,10 @@ servers.at(-1).listen(port, host, () => console.log(`Familien: http://${host}:${
 servers.push(createServer((req,res) => {
   const kioskStock=new URL(req.url,`http://${host}`).pathname;
   if(kioskStock.startsWith('/api/shopping/stock-')){
-    if(req.method==='POST'&&/^\/api\/shopping\/(?:stock-action|stock-intake(?:\/[a-f0-9-]{36}\/(?:submit|files\/[0-7]))?)$/.test(kioskStock))return handle(req,res);
+    if(req.method==='POST'&&/^\/api\/shopping\/(?:stock-action|stock-scan|stock-intake(?:\/[a-f0-9-]{36}\/(?:submit|files\/[0-7]))?)$/.test(kioskStock))return handle(req,res);
     return send(res,req.method==='GET'?403:405,{error:'Gjennomgang og bildeoriginaler er bare tilgjengelige på agentporten.'});
   }
-  if(/^\/(?:api\/(?:resources|collector|google)(?:[/?]|$)|google-setup|shopping-setup|api\/shopping\/oda\/(?:connect|callback|tools)|api\/shopping\/(?:orders|settings|offer|review|nutrition|catalog|link|feed))/.test(req.url))return send(res,req.method==='GET'?403:405,{error:'Kildeoriginaler og integrasjonsoppsett er bare tilgjengelige lokalt på agentporten.'});
+  if(/^\/(?:api\/(?:resources|collector|google)(?:[/?]|$)|google-setup|shopping-setup|api\/shopping\/oda\/(?:connect|callback|tools)|api\/shopping\/(?:orders|settings|offer|review|nutrition|catalog|link|feed|library-))/.test(req.url))return send(res,req.method==='GET'?403:405,{error:'Kildeoriginaler og integrasjonsoppsett er bare tilgjengelige lokalt på agentporten.'});
   if (req.method !== "GET" && !(req.method === "POST" && /^(?:\/api\/shopping\/(?:watch|pantry|item|deal|list|oda\/(?:sync|search|add|cart|probe|review|line|swap))|\/api\/home-assistant\/command|\/api\/doorbell\/frame|\/api\/profile\/edit|\/api\/events\/[a-f0-9]{24}\/(?:tasks\/[a-zA-Z0-9:_-]{1,100}|visibility)|\/api\/activities\/[a-f0-9]{24}\/reaction)$/.test(new URL(req.url,`http://${host}`).pathname))) return send(res,405,{error:"Handlingen er bare tilgjengelig lokalt på agentporten."});
   return handle(req,res);
 }));
