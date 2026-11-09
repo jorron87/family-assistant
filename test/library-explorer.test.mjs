@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import {gunzipSync} from 'node:zlib';
 import {buildExplorerData,createLibraryExplorer,familyDetail,ingredientMatches,sendExplorerBundle,shelfOf} from '../src/library-explorer.mjs';
 import {createIndexReader} from '../src/shopping-library.mjs';
-import {axisDomain,emptyFilters,explore,familySummaries,inRange,isPristine,prepareExplorer,priceView,proteinPerKrone,scatterPoints,sortItems,tokenScore} from '../public/library-explorer-core.mjs';
+import {applyCampaigns,axisDomain,emptyFilters,explore,familyGrid,familySummaries,featuredFamilies,sortFamilies,inRange,isPristine,prepareExplorer,priceView,proteinPerKrone,scatterPoints,sortItems,tokenScore} from '../public/library-explorer-core.mjs';
 
 const NOW=Date.parse('2026-11-09T12:00:00Z'),FRESH='2026-11-09T08:00:00Z',OLD='2026-10-01T08:00:00Z',PARKED='2024-01-01T08:00:00Z';
 const quote=(price,receiptAt=FRESH,reasons=[])=>({grossPackPrice:price,grossUnitPrice:null,unit:null,directUnitVerified:false,receiptAt,reasons,sourceUrl:'https://example.test/p'});
@@ -146,6 +146,61 @@ test('family summaries and map scales keep their own limits',()=>{
  assert.equal(shelfOf('Noe helt nytt').name,'Noe helt nytt');
 });
 
+test('families show their reach across brands and stores, and name where the cheapest is',()=>{
+ const {model}=compile(),result=explore(model,emptyFilters(),NOW),[row]=familySummaries(model,result);
+ assert.equal(row.brands,1);assert.equal(row.chains,2);
+ assert.equal(row.offers[0].store,storeNo(model,'MENY'));
+ const scoped={...emptyFilters(),stores:[storeNo(model,'MENY')]},[only]=familySummaries(model,explore(model,scoped,NOW));
+ assert.equal(only.chains,1,'the reach follows the chosen stores');
+});
+
+test('family order rewards real cross-brand comparison and search finds the named family first',()=>{
+ const family=(name,brands,chains,prices,shelf=0)=>({family:{name,shelf},brands,chains,count:prices.length,offers:prices.map(price=>({price})),spread:prices.length>1?prices.at(-1)/prices[0]:null});
+ const wide=family('Havregryn',4,5,[10,12,30]),narrow=family('Ketchup med chili',1,9,[20,30]),lone=family('Ketchup',8,8,[]);
+ assert.deepEqual(sortFamilies([narrow,lone,wide],'breadth').map(r=>r.family.name),['Havregryn','Ketchup med chili','Ketchup'],'no fresh comparison means no reach');
+ assert.deepEqual(sortFamilies([narrow,wide,lone],'breadth',['ketchup']).map(r=>r.family.name),['Ketchup med chili','Ketchup','Havregryn']);
+ const same=family('Annen',3,3,[1,1.5,2,9],1),small=family('Liten',2,2,[1,2,3,50],2),other=family('Hvete',3,3,[2,3,4,8],1);
+ assert.deepEqual(featuredFamilies([small,other,same]).map(r=>r.family.name),['Annen'],'one per shelf, and only broad comparisons');
+});
+
+test('the price grid has one row per product, and an old price can never be the cheapest',()=>{
+ const item={id:'e1',name:'Ketchup',pack:.5,packUnit:'kg'},other={id:'e2',name:'Billig',pack:1,packUnit:'kg'};
+ const byPost=new Map([['a',item],['b',item],['c',other],['d',other]]);
+ const m=(key,store,unitPrice,fresh,oldUnitPrice=null,quality=null)=>({key,store,brand:'B',image:null,pack:1,unit:'kg',fresh,unitPrice,oldUnitPrice,quality,receiptAt:FRESH});
+ const members=[m('a','MENY',40,true),m('b','SPAR',50,true),m('c','MENY',30,true,null,{key:'k',score:60}),m('d','Coop',null,false,5,{key:'k',score:70})];
+ const grid=familyGrid(members,byPost,{qualityKey:'k'});
+ assert.deepEqual(grid.rows.map(r=>r.id),['e2','e1']);
+ assert.equal(grid.top,30,'the old 5 kr price is shown but does not win');
+ assert.equal(grid.rows[0].cells.get('Coop').price,null);assert.equal(grid.rows[0].cells.get('Coop').old,5);
+ assert.equal(grid.columns.find(c=>c.store==='MENY').wins,1,'a win needs another fresh price to beat');
+ assert.equal(grid.columns.find(c=>c.store==='Coop').wins,0);
+ assert.equal(grid.rows[0].score,60,'a product with disagreeing labels ranks on the lower figure');
+ assert.deepEqual(familyGrid(members,byPost,{order:'SPAR'}).rows.map(r=>r.id),['e1','e2'],'sorting on a store keeps products it lacks last');
+ assert.deepEqual(familyGrid(members,byPost,{order:'quality',qualityKey:'k'}).rows.map(r=>r.id),['e2','e1']);
+});
+
+test('a flyer offer brings a parked chain back inside the families it belongs to',()=>{
+ const {model}=compile();
+ const campaign={id:'o1',name:'Ketchup på tilbud',storeName:'REMA 1000',price:10,packAmount:.5,unit:'kg',unitPrice:20,validTo:'2026-11-15',memberOnly:false,groups:['ketchup']};
+ applyCampaigns(model,[campaign,{...campaign,id:'o2',unit:'l',groups:['ketchup']},{...campaign,id:'o3',groups:['finnes-ikke']}]);
+ const rema=storeNo(model,'REMA 1000');
+ assert.ok(rema>=0,'the chain is selectable although the library has nothing fresh from it');
+ const [row]=familySummaries(model,explore(model,emptyFilters(),NOW));
+ assert.equal(row.campaigns.length,1,'an offer in another unit never joins the family');
+ assert.equal(row.offers[0].campaign.id,'o1');assert.equal(row.min,20);assert.equal(row.regularMin,40);assert.equal(row.chains,3);
+ assert.equal(isPristine({...emptyFilters(),offersOnly:true}),false);
+ const onlyRema=explore(model,{...emptyFilters(),stores:[rema]},NOW);
+ assert.equal(onlyRema.items.length,0,'single products from a parked chain stay hidden');
+ assert.deepEqual(familySummaries(model,onlyRema).map(r=>r.family.name),['Ketchup'],'but the family with the offer shows');
+ const labelled=explore(model,{...emptyFilters(),stores:[rema],labels:[2]},NOW);
+ assert.deepEqual(familySummaries(model,labelled),[],'an offer cannot vouch for a label');
+ const missed=explore(model,{...emptyFilters(),q:'havregryn'},NOW);
+ assert.deepEqual(familySummaries(model,missed),[]);
+ const grid=familyGrid([{key:'kassal:MENY_NO:1',store:'MENY',brand:'Merke',image:null,pack:.5,unit:'kg',fresh:true,unitPrice:40,oldUnitPrice:null,quality:null,receiptAt:FRESH}],model.byPost,{campaigns:[{...campaign}]});
+ assert.equal(grid.top,20);assert.equal(grid.rows[0].id,'offer:o1');
+ assert.equal(grid.columns.find(c=>c.store==='REMA 1000').wins,0);
+});
+
 test('family detail keeps reasons for held-out products and reads without changing the index',()=>{
  const source=index(),before=structuredClone(source),read=createIndexReader(source)(NOW);
  const detail=familyDetail(read,'ketchup',options);
@@ -155,7 +210,8 @@ test('family detail keeps reasons for held-out products and reads without changi
  assert.equal(excluded.unitPrice,null);
  assert.equal(detail.sharedKey,'ingredient-content-v10:ketchup:tomato-input-g-per-100g');
  const old=detail.members.find(m=>m.key==='kassal:SPAR_NO:2');
- assert.equal(old.fresh,false);assert.equal(old.unitPrice,null);assert.equal(old.packPrice,25);
+ assert.equal(old.fresh,false);assert.equal(old.unitPrice,null);assert.equal(old.packPrice,25);assert.equal(old.oldUnitPrice,50);
+ assert.equal(detail.members.find(m=>m.key==='kassal:MENY_NO:1').oldUnitPrice,null);
  assert.equal(familyDetail(read,'__proto__',options),null);
 });
 

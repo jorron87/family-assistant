@@ -17,9 +17,9 @@ const BINS=24,UNIT_ORDER=['kg','l','stk','m'];
 const low=value=>String(value??'').normalize('NFC').toLocaleLowerCase('nb-NO');
 const wordChar=ch=>ch!==undefined&&/[\p{L}\p{N}]/u.test(ch);
 export function emptyFilters() {
-  return {q:'',shelves:[],food:true,stores:[],labels:[],status:[],hideGone:true,ranges:{},include:[],exclude:[],qualityKey:null};
+  return {q:'',shelves:[],food:true,stores:[],labels:[],status:[],hideGone:true,ranges:{},include:[],exclude:[],qualityKey:null,offersOnly:false};
 }
-export const isPristine=f=>!f.q.trim()&&!f.shelves.length&&f.food&&!f.stores.length&&!f.labels.length&&!f.status.length&&f.hideGone&&!Object.keys(f.ranges).length&&!f.include.length&&!f.exclude.length&&!f.qualityKey;
+export const isPristine=f=>!f.offersOnly&&!f.q.trim()&&!f.shelves.length&&f.food&&!f.stores.length&&!f.labels.length&&!f.status.length&&f.hideGone&&!Object.keys(f.ranges).length&&!f.include.length&&!f.exclude.length&&!f.qualityKey;
 
 // A compound ends in what it is, so "ketchup" should find tomatketchup before
 // it finds a word that merely contains the letters.
@@ -46,7 +46,7 @@ function percentile(values,p) {
 
 export function prepareExplorer(data) {
   const keys=data.nutrients;
-  const model={built:data.built,freshMs:data.freshHours*3600000,horizonDays:data.horizonDays??null,shelves:data.shelves,families:data.families.map((f,i)=>({...f,index:i,items:[]})),stores:data.stores,qualityKeys:data.qualityKeys,items:[],byId:new Map(),byPost:new Map(),ingredientHits:new Map(),domains:{}};
+  const model={built:data.built,freshMs:data.freshHours*3600000,horizonDays:data.horizonDays??null,shelves:data.shelves,families:data.families.map((f,i)=>({...f,index:i,items:[]})),stores:data.stores,qualityKeys:data.qualityKeys,items:[],byId:new Map(),byPost:new Map(),ingredientHits:new Map(),domains:{},campaigns:[],campaignsByFamily:new Map()};
   data.items.forEach((row,index)=>{
     const nutrition=row.v?Object.fromEntries(keys.map((key,i)=>[key,row.v[i]])):null;
     const posts=row.p.map(p=>({key:p[0],store:p[1],packPrice:p[2],unitPrice:p[3],priceUnit:p[4],pack:p[5],unit:p[6],at:p[7]===null?null:p[7]*1000,held:!!(p[8]&1),gone:!!(p[8]&2)}));
@@ -69,11 +69,29 @@ export function prepareExplorer(data) {
   return model;
 }
 
+/** Current flyer offers, placed in families. A chain with only offers still gets a store. */
+export function applyCampaigns(model,campaigns) {
+  const families=new Map(model.families.map(f=>[f.id,f]));
+  model.campaigns=[];model.campaignsByFamily=new Map();
+  for(const campaign of campaigns){
+    let storeIndex=model.stores.findIndex(s=>s.name===campaign.storeName);
+    if(storeIndex<0){storeIndex=model.stores.length;model.stores.push({code:'offer:'+campaign.storeName,name:campaign.storeName,own:true});}
+    const entry={...campaign,storeIndex};
+    model.campaigns.push(entry);
+    for(const id of campaign.groups){
+      const family=families.get(id);
+      if(!family||family.unit!==campaign.unit)continue;
+      if(!model.campaignsByFamily.has(family.index))model.campaignsByFamily.set(family.index,[]);
+      model.campaignsByFamily.get(family.index).push(entry);
+    }
+  }
+}
+
 export const isFresh=(at,now,freshMs)=>at!==null&&now-at>=0&&now-at<=freshMs;
 
 /** The price a card may show: cheapest fresh in the chosen chains, else the newest old one. */
 export function priceView(item,storeSet,now,freshMs) {
-  let packPrice=null,unitPrice=null,unit=null,store=null,fresh=false,at=null,stale=null,chains=0,freshChains=0;
+  let packPrice=null,unitPrice=null,unit=null,store=null,unitStore=null,fresh=false,at=null,stale=null,chains=0,freshChains=0;
   for(const post of item.posts){
     if(storeSet&&!storeSet.has(post.store))continue;
     chains++;
@@ -82,11 +100,11 @@ export function priceView(item,storeSet,now,freshMs) {
     if(isFresh(post.at,now,freshMs)){
       freshChains++;fresh=true;
       if(post.packPrice!==null&&(packPrice===null||post.packPrice<packPrice)){packPrice=post.packPrice;at=post.at;store=post.store;}
-      if(post.unitPrice!==null&&(unitPrice===null||post.unitPrice<unitPrice)){unitPrice=post.unitPrice;unit=post.priceUnit;if(packPrice===null){at=post.at;store=post.store;}}
+      if(post.unitPrice!==null&&(unitPrice===null||post.unitPrice<unitPrice)){unitPrice=post.unitPrice;unit=post.priceUnit;unitStore=post.store;if(packPrice===null){at=post.at;store=post.store;}}
     }else if(!stale||(post.at??0)>(stale.at??0))stale=post;
   }
-  if(!fresh&&stale)return {packPrice:stale.packPrice,unitPrice:stale.unitPrice,unit:stale.priceUnit,store:stale.store,fresh:false,at:stale.at,chains,freshChains};
-  return {packPrice,unitPrice,unit,store,fresh,at,chains,freshChains};
+  if(!fresh&&stale)return {packPrice:stale.packPrice,unitPrice:stale.unitPrice,unit:stale.priceUnit,store:stale.store,unitStore:stale.store,fresh:false,at:stale.at,chains,freshChains};
+  return {packPrice,unitPrice,unit,store,unitStore,fresh,at,chains,freshChains};
 }
 
 export function axisValue(item,key,view) {
@@ -115,6 +133,7 @@ export function explore(model,f,now=Date.now()) {
     }
     scores[item.index]=total;return true;
   }]);
+  if(f.offersOnly)dims.push(['offers',item=>item.families.some(family=>model.campaignsByFamily.has(family))]);
   if(f.food)dims.push(['food',item=>!item.shelves.length||item.shelves.some(s=>model.shelves[s].food)]);
   if(f.hideGone)dims.push(['gone',item=>!item.gone]);
   if(shelfSet)dims.push(['shelves',item=>item.shelves.some(s=>shelfSet.has(s))]);
@@ -150,7 +169,8 @@ export function explore(model,f,now=Date.now()) {
     if(failures===0){items.push(item);countInto(item,null);}
     else countInto(item,failed);
   }
-  return {items,views,scores,facets,hist,missing,bins:BINS,hasQuery:terms.length>0};
+  for(const campaign of model.campaigns)facets.stores[campaign.storeIndex]++;
+  return {items,views,scores,facets,hist,missing,bins:BINS,hasQuery:terms.length>0,terms,storeSet,filters:f};
 }
 function statusTest(status,views) {
   if(status==='fresh')return item=>views[item.index].fresh;
@@ -192,22 +212,81 @@ export function sortItems(result,mode,qualityKey) {
 export function familySummaries(model,result) {
   const buckets=new Map();
   for(const item of result.items)for(const family of item.families){if(!buckets.has(family))buckets.set(family,[]);buckets.get(family).push(item);}
-  return [...buckets].map(([index,items])=>{
-    const family=model.families[index],stores=new Set(),prices=[];
+  const f=result.filters,inScope=c=>!result.storeSet||result.storeSet.has(c.storeIndex);
+  // Every library row of a family can be parked while a flyer still has it on offer.
+  // Filters on label facts cannot speak for an offer, so those leave it out.
+  const offerOnly=!f.labels.length&&!f.status.length&&!Object.keys(f.ranges).length&&!f.include.length&&!f.exclude.length&&f.qualityKey===null;
+  if(offerOnly)for(const [index,list] of model.campaignsByFamily){
+    const family=model.families[index],shelf=model.shelves[family.shelf],text=low(family.name+' '+list.map(c=>c.name).join(' '));
+    if(buckets.has(index)||!list.some(inScope)||f.food&&!shelf.food||f.shelves.length&&!f.shelves.includes(family.shelf)||!result.terms.every(term=>tokenScore(text,term)))continue;
+    buckets.set(index,[]);
+  }
+  return [...buckets].flatMap(([index,items])=>{
+    const family=model.families[index],stores=new Set(),brands=new Set(),offers=[],campaigns=(model.campaignsByFamily.get(index)??[]).filter(inScope);
+    if(f.offersOnly&&!campaigns.length)return [];
     for(const item of items){
       const view=result.views[item.index];
-      for(const post of item.posts)stores.add(post.store);
-      if(view.fresh&&view.unitPrice!==null&&view.unit===family.unit)prices.push(view.unitPrice);
+      for(const post of item.posts)if(!result.storeSet||result.storeSet.has(post.store))stores.add(model.stores[post.store].name);
+      if(item.brandLow)brands.add(item.brandLow);
+      if(view.fresh&&view.unitPrice!==null&&view.unit===family.unit)offers.push({item,price:view.unitPrice,store:view.unitStore});
     }
-    prices.sort((a,b)=>a-b);
-    const min=prices[0]??null,max=prices[prices.length-1]??null;
-    return {family,items,count:items.length,chains:stores.size,prices,min,max,spread:min&&max&&prices.length>1?max/min:null,images:items.filter(i=>i.image).slice(0,4).map(i=>i.image)};
+    for(const campaign of campaigns){stores.add(campaign.storeName);offers.push({item:null,campaign,price:campaign.unitPrice,store:campaign.storeIndex});}
+    const regular=offers.filter(o=>o.item).reduce((low,o)=>Math.min(low,o.price),Infinity);
+    const label=o=>o.item?.name??o.campaign.name;
+    offers.sort((a,b)=>a.price-b.price||label(a).localeCompare(label(b),'nb'));
+    const prices=offers.map(o=>o.price),min=prices[0]??null,max=prices[prices.length-1]??null;
+    return [{family,items,count:items.length,chains:stores.size,brands:brands.size,offers,campaigns,regularMin:regular===Infinity?null:regular,prices,min,max,spread:min&&max&&prices.length>1?max/min:null}];
   });
 }
-export function sortFamilies(rows,mode) {
+export const familyReach=row=>row.offers.length>=2?row.brands*row.chains:0;
+export function sortFamilies(rows,mode,terms=[]) {
   const name=(a,b)=>a.family.name.localeCompare(b.family.name,'nb');
-  const compare={count:(a,b)=>b.count-a.count||name(a,b),chains:(a,b)=>b.chains-a.chains||b.count-a.count||name(a,b),spread:(a,b)=>(b.spread??0)-(a.spread??0)||name(a,b),name}[mode]??name;
-  return [...rows].sort(compare);
+  const compare={breadth:(a,b)=>familyReach(b)-familyReach(a)||b.count-a.count||name(a,b),count:(a,b)=>b.count-a.count||name(a,b),chains:(a,b)=>b.chains-a.chains||b.count-a.count||name(a,b),spread:(a,b)=>(b.spread??0)-(a.spread??0)||name(a,b),name}[mode]??name;
+  const relevance=row=>terms.reduce((sum,term)=>sum+tokenScore(low(row.family.name),term),0);
+  return [...rows].sort((a,b)=>(terms.length?relevance(b)-relevance(a):0)||compare(a,b));
+}
+/** The widest real price gaps, at most one per shelf, among families compared across brands and chains. */
+export function featuredFamilies(rows,count=4) {
+  const shelves=new Set(),picked=[];
+  for(const row of [...rows].filter(r=>r.spread&&r.brands>=3&&r.chains>=3&&r.offers.length>=4).sort((a,b)=>b.spread-a.spread)){
+    if(shelves.has(row.family.shelf))continue;
+    shelves.add(row.family.shelf);picked.push(row);
+    if(picked.length===count)break;
+  }
+  return picked;
+}
+/** One row per physical product and one column per store. Only fresh prices can win. */
+export function familyGrid(members,byPost,{order='best',qualityKey=null,campaigns=[]}={}) {
+  const rows=new Map(),columns=new Map();
+  for(const campaign of campaigns){
+    rows.set('offer:'+campaign.id,{id:'offer:'+campaign.id,item:null,campaign,name:campaign.name,brand:null,image:null,pack:campaign.packAmount,unit:campaign.unit,mixed:false,cells:new Map([[campaign.storeName,{price:campaign.unitPrice,old:null,key:null,at:null,campaign}]]),score:null,best:null});
+    if(!columns.has(campaign.storeName))columns.set(campaign.storeName,{store:campaign.storeName,count:0,wins:0});
+    columns.get(campaign.storeName).count++;
+  }
+  for(const m of members){
+    const item=byPost.get(m.key),id=item?.id??m.key;
+    if(!rows.has(id))rows.set(id,{id,item:item??null,name:item?.name??m.name,brand:m.brand,image:m.image,pack:item?.pack??m.pack,unit:item?.packUnit??m.unit,mixed:!!item?.packMixed,cells:new Map(),score:null,best:null});
+    const row=rows.get(id),price=m.fresh&&m.unitPrice!==null?m.unitPrice:null,old=price===null?m.oldUnitPrice??null:null;
+    if(m.quality?.key===qualityKey&&qualityKey!==null&&(row.score===null||m.quality.score<row.score))row.score=m.quality.score;
+    if(price===null&&old===null)continue;
+    if(!columns.has(m.store))columns.set(m.store,{store:m.store,count:0,wins:0});
+    const prior=row.cells.get(m.store);
+    if(!prior)columns.get(m.store).count++;
+    if(!prior||price!==null&&(prior.price===null||price<prior.price)||price===null&&prior.price===null&&old<prior.old)row.cells.set(m.store,{price,old,key:m.key,at:m.receiptAt});
+  }
+  let top=null;
+  for(const row of rows.values()){
+    const fresh=[...row.cells.values()].filter(c=>c.price!==null).map(c=>c.price);
+    if(!fresh.length)continue;
+    row.best=Math.min(...fresh);
+    if(top===null||row.best<top)top=row.best;
+    if(fresh.length>1)for(const [store,cell] of row.cells)if(cell.price===row.best)columns.get(store).wins++; // A product sold in one chain cannot be cheapest "there".
+  }
+  const name=(a,b)=>a.name.localeCompare(b.name,'nb');
+  const last=(x,y,dir=1)=>x===null&&y===null?0:x===null?1:y===null?-1:dir*(x-y);
+  const cellPrice=(row,store)=>{const c=row.cells.get(store);return c?c.price??c.old:null;};
+  const compare=order==='quality'?(a,b)=>last(a.score,b.score,-1)||last(a.best,b.best)||name(a,b):order==='best'?(a,b)=>last(a.best,b.best)||name(a,b):(a,b)=>last(cellPrice(a,order),cellPrice(b,order))||last(a.best,b.best)||name(a,b);
+  return {rows:[...rows.values()].sort(compare),columns:[...columns.values()].sort((a,b)=>b.count-a.count||a.store.localeCompare(b.store,'nb')),top};
 }
 
 export function scatterPoints(result,xKey,yKey) {

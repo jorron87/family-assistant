@@ -1,6 +1,6 @@
 // The product explorer: browse, filter and compare the reviewed product library.
 // Read-only by design: nothing on this page changes a list, a cart or a review.
-import {NUTRIENTS,PRICE_AXIS,LABELS,STATUSES,SORTS,emptyFilters,isPristine,prepareExplorer,explore,sortItems,familySummaries,sortFamilies,scatterPoints,axisDomain,ticks,axisValue,proteinPerKrone,isFresh} from './library-explorer-core.mjs';
+import {NUTRIENTS,PRICE_AXIS,LABELS,STATUSES,SORTS,emptyFilters,isPristine,prepareExplorer,explore,sortItems,familySummaries,sortFamilies,featuredFamilies,familyGrid,applyCampaigns,scatterPoints,axisDomain,ticks,proteinPerKrone,isFresh} from './library-explorer-core.mjs';
 
 const nf=digits=>new Intl.NumberFormat('nb-NO',{maximumFractionDigits:digits});
 const money=value=>nf(2).format(value)+' kr';
@@ -35,6 +35,7 @@ const axisTitle=axis=>axis.key==='price'?'Pris, kr per kg (fersk)':`${axis.label
 const LEVEL=['Næring: svakere','Næring: middels','Næring: god'];
 const QUALITY_NOTE='Tallet gjelder bare varer målt på nøyaktig samme måte. Det er ingen helsevurdering.';
 const DISCOVER=[
+  ['Tilbud nå','Gjeldende tilbud fra kundeavisene, i varefamilier dere følger',{offers:true}],
   ['Mye protein','Minst 20 g protein per 100 g/ml',{range:['protein',20,null]}],
   ['Lite sukker','Høyst 5 g sukkerarter per 100 g/ml',{range:['sugars',null,5]}],
   ['Mye fiber','Minst 6 g kostfiber per 100 g/ml',{range:['fiber',6,null]}],
@@ -43,12 +44,14 @@ const DISCOVER=[
   ['Fersk pris','Priskvittering fra de siste 48 timene',{status:'fresh'}]
 ];
 const PRESETS=[['Protein mot sukker','sugars','protein'],['Fett mot energi','fat','kcal'],['Fiber mot sukker','sugars','fiber'],['Pris mot protein','price','protein']];
-const STORAGE='familien-varer-v1';
+const STORAGE='familien-varer-v2';
+const times=value=>nf(value<10?1:0).format(value)+' ×';
+const untilDay=day=>new Intl.DateTimeFormat('nb-NO',{timeZone:'Europe/Oslo',day:'numeric',month:'short'}).format(new Date(day+'T12:00:00Z')).replace(/\.$/,'');
 
 export function installLibraryExplorer({panel,base='/api/shopping',compact=false,onBack=null}) {
   const saved=(()=>{try{return JSON.parse(sessionStorage.getItem(STORAGE))??{};}catch{return {};}})();
   let filters={...emptyFilters(),...(saved.filters??{}),ranges:saved.filters?.ranges??{}};
-  let view=saved.view??'items',sort=saved.sort??'auto',familySort=saved.familySort??'count';
+  let view=saved.view??'families',sort=saved.sort??'auto',familySort=saved.familySort??'breadth';
   let model=null,result=null,sorted=[],shown=0,scheduled=false,loading=false,built=false;
   const compare=new Map(),refs={},stack=[];
   const isKiosk=()=>document.body.classList.contains('kiosk');
@@ -86,12 +89,12 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
         if(!model)panel.replaceChildren(stateCard(data.status==='building'?'Varebiblioteket bygges nå. Prøv igjen om et halvt minutt.':'Produktbiblioteket er ikke tilgjengelig her.'));
         return;
       }
-      if(!model||model.built!==data.built){
-        model=prepareExplorer(data);
-        await loadIngredientHits();
-        if(!built)build();
-        schedule();
-      }else schedule();
+      const fresh=!model||model.built!==data.built;
+      if(fresh)model=prepareExplorer(data);
+      applyCampaigns(model,(await api('/explore-offers').catch(()=>({offers:[]}))).offers??[]);
+      if(fresh)await loadIngredientHits();
+      if(!built)build();
+      schedule();
     }catch(error){if(!model)panel.replaceChildren(stateCard(error.message));}
     finally{loading=false;}
   }
@@ -115,7 +118,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     root.append(buildHero());
     const shell=el('div',undefined,'lx-shell');
     shell.append(buildRail(),buildMain());
-    root.append(shell,buildTray(),el('p',`Viser kjedepriser og gjennomgåtte varefamilier, ikke lokal lagerstatus eller butikkens tilbud. Varer med samme strekkode er slått sammen for visning, og hver kjedes egne tall vises på varen. Tomme tall betyr at opplysningen mangler, ikke null.${model.horizonDays?` Kjedeposter uten pris fra de siste ${Math.round(model.horizonDays/30.4)} månedene vises ikke.`:''}`,'lx-foot'));
+    root.append(shell,buildTray(),el('p',`Viser kjedepriser og gjennomgåtte varefamilier, ikke lokal lagerstatus eller butikkens tilbud. Varer med samme strekkode er slått sammen for visning, og hver kjedes egne tall vises på varen. Tomme tall betyr at opplysningen mangler, ikke null.${model.horizonDays?` Kjedeposter uten pris fra de siste ${Math.round(model.horizonDays/30.4)} månedene vises ikke, men gjeldende tilbud fra kundeavisene vises i varefamiliene dere følger.`:''}`,'lx-foot'));
     panel.replaceChildren(root);
   }
 
@@ -124,10 +127,10 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     const hero=el('header',undefined,'lx-hero');
     if(onBack)hero.append(button('← Tilbake til Handel',onBack,'lx-back'));
     const title=el('div',undefined,'lx-hero-title');
-    title.append(el('span','Produktbiblioteket','lx-eyebrow'),el('h2','Utforsk varene'));
-    const stats=el('div',undefined,'lx-stats'),now=Date.now();
-    const freshCount=model.items.filter(i=>i.posts.some(p=>p.packPrice!==null&&isFresh(p.at,now,model.freshMs))).length;
-    for(const [value,label] of [[model.items.length,'varer'],[model.families.filter(f=>f.items.length).length,'varefamilier'],[model.stores.length,'kjeder'],[freshCount,'med fersk pris']]){
+    title.append(el('span','Produktbiblioteket','lx-eyebrow'),el('h2','Samme vare. Alle merker. Alle butikker.'));
+    const stats=el('div',undefined,'lx-stats');
+    const brandCount=new Set(model.items.map(i=>i.brandLow).filter(Boolean)).size;
+    for(const [value,label] of [[model.families.filter(f=>f.items.length).length,'varefamilier'],[brandCount,'merker'],[model.stores.length,'kjeder'],[model.items.length,'varer']]){
       const stat=el('div',undefined,'lx-stat');stat.append(el('strong',whole(value)),el('span',label));stats.append(stat);
     }
     title.append(stats);
@@ -145,12 +148,14 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
   }
   function discoverOn(effect) {
     if(effect.range){const [key,min,max]=effect.range,r=filters.ranges[key];return !!r&&r.min===min&&r.max===max;}
+    if(effect.offers)return filters.offersOnly;
     if(effect.label)return filters.labels.includes(effect.label);
     return filters.status.includes(effect.status);
   }
   function toggleDiscover(effect) {
     const on=discoverOn(effect);
     if(effect.range){const [key,min,max]=effect.range;if(on)delete filters.ranges[key];else filters.ranges[key]={min,max};}
+    else if(effect.offers)filters.offersOnly=!filters.offersOnly;
     else if(effect.label)toggleIn(filters.labels,effect.label);
     else toggleIn(filters.status,effect.status);
     changed(true);
@@ -310,7 +315,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
   function buildMain() {
     const main=el('div',undefined,'lx-main');
     const bar=el('div',undefined,'lx-toolbar'),views=el('div',undefined,'lx-views');views.setAttribute('role','tablist');
-    refs.views=[['items','Varer'],['families','Varefamilier'],['map','Næringskart']].map(([key,label])=>{
+    refs.views=[['families','Varefamilier'],['items','Enkeltvarer'],['map','Næringskart']].map(([key,label])=>{
       const b=button(label,()=>{view=key;remember();shown=0;schedule();},'');b.setAttribute('role','tab');b.dataset.view=key;views.append(b);return b;
     });
     refs.count=el('span','','lx-count');refs.count.setAttribute('role','status');
@@ -326,7 +331,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     return main;
   }
   function updateSortControl() {
-    const options=view==='families'?[['count','Flest varer'],['chains','Flest kjeder'],['spread','Størst prisforskjell'],['name','A–Å']]:SORTS.filter(([key])=>key!=='quality'||filters.qualityKey!==null).map(([key,label])=>[key,key==='auto'&&!result.hasQuery?'Flest kjeder først':label]);
+    const options=view==='families'?[['breadth','Flest merker og butikker'],['spread','Størst prisforskjell'],['count','Flest varer'],['chains','Flest kjeder'],['name','A–Å']]:SORTS.filter(([key])=>key!=='quality'||filters.qualityKey!==null).map(([key,label])=>[key,key==='auto'&&!result.hasQuery?'Flest kjeder først':label]);
     const current=view==='families'?familySort:sort;
     const signature=options.map(o=>o.join()).join('|');
     if(refs.sort.dataset.signature!==signature){refs.sort.replaceChildren(...options.map(([key,label])=>new Option(label,key)));refs.sort.dataset.signature=signature;}
@@ -335,6 +340,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
   function updatePills() {
     const pills=[];
     const add=(label,remove)=>pills.push(button(label+' ×',()=>{remove();changed(true);},'lx-pill'));
+    if(filters.offersOnly)add('Tilbud nå',()=>{filters.offersOnly=false;});
     if(filters.q.trim())add('«'+filters.q.trim()+'»',()=>{filters.q='';refs.search.value='';});
     for(const s of filters.shelves)add(model.shelves[s].name,()=>toggleIn(filters.shelves,s));
     for(const s of filters.stores)add(model.stores[s].name,()=>toggleIn(filters.stores,s));
@@ -354,8 +360,11 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     for(const b of refs.views){const on=b.dataset.view===view;b.classList.toggle('on',on);b.setAttribute('aria-selected',String(on));}
     refs.content.dataset.view=view;
     if(view==='map'){refs.count.textContent=whole(result.items.length)+' varer i utvalget';renderMap();return;}
+    let featured=[];
     if(view==='families'){
-      sorted=sortFamilies(familySummaries(model,result),familySort);
+      const rows=familySummaries(model,result);
+      sorted=sortFamilies(rows,familySort,result.terms);
+      if(isPristine(filters))featured=featuredFamilies(rows);
       refs.count.textContent=whole(sorted.length)+' varefamilier';
     }else{
       sorted=sortItems(result,sort,filters.qualityKey);
@@ -364,6 +373,8 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     scatter=null;
     refs.content.replaceChildren();shown=0;
     if(!sorted.length){refs.content.append(emptyState());return;}
+    if(view==='families'&&isPristine(filters)){const live=sorted.filter(row=>row.campaigns.length);if(live.length)refs.content.append(campaignBlock(live));}
+    if(featured.length)refs.content.append(featureBlock(featured));
     if(view==='items'&&isPristine(filters))refs.content.append(atlas());
     refs.grid=el('div',undefined,view==='families'?'lx-family-grid':'lx-grid');
     refs.content.append(refs.grid);
@@ -431,30 +442,77 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     main.append(picture,body);
     const footer=el('div',undefined,'lx-card-foot');
     footer.append(priceBlock(v),macroBar(item),badges(item));
+    const family=item.families.map(f=>model.families[f]).sort((a,b)=>b.items.length-a.items.length)[0];
+    if(family&&family.items.length>1){const link=button(`Sammenlign med ${family.items.length-1} ${family.items.length===2?'annen':'andre'} →`,()=>{stack.length=0;showFamily(family.index);},'lx-card-family');link.title=family.name;footer.append(link);}
     const pick=button(compare.has(item.id)?'✓':'+',()=>{toggleCompare(item);pick.textContent=compare.has(item.id)?'✓':'+';pick.classList.toggle('on',compare.has(item.id));},'lx-pick'+(compare.has(item.id)?' on':''));
     pick.title='Legg til i sammenligning';pick.setAttribute('aria-label','Sammenlign '+item.name);
     card.append(main,footer,pick);
     return card;
   }
+  const reachText=row=>[row.brands?`${row.brands} ${row.brands===1?'merke':'merker'}`:null,`${row.chains} ${row.chains===1?'butikk':'butikker'}`,row.count?`${whole(row.count)} ${row.count===1?'vare':'varer'}`:null,row.campaigns.length?`${row.campaigns.length} ${row.campaigns.length===1?'tilbud':'tilbud'}`:null].filter(Boolean).join(' · ');
+  const storeName=index=>index===null||index===undefined?'':model.stores[index].name;
+  const offerName=offer=>offer.item?.name??offer.campaign.name;
+  function campaignBlock(rows) {
+    const box=el('section',undefined,'lx-featured');
+    const head=el('div',undefined,'lx-featured-head');
+    head.append(el('h3','På tilbud i kundeavisene nå'),el('p','Gjeldende tilbud som agenten har funnet, holdt opp mot de faste kjedeprisene i samme varefamilie.','lx-muted'));
+    const grid=el('div',undefined,'lx-feature-grid');
+    for(const row of rows.slice(0,6)){
+      const best=row.campaigns.reduce((a,b)=>a.unitPrice<=b.unitPrice?a:b),card=button('',()=>{stack.length=0;showFamily(row.family.index);},'lx-feature lx-campaign');
+      card.append(el('span',row.family.name,'lx-family-name'),el('span',best.name,'lx-card-sub'));
+      const price=el('span',undefined,'lx-campaign-price');
+      price.append(el('strong',short(best.unitPrice)+' kr/'+best.unit),el('span',`${best.storeName} · til ${untilDay(best.validTo)}${best.memberOnly?' · medlemspris':''}`,'lx-podium-store'));
+      card.append(price);
+      if(row.regularMin!==null)card.append(el('span',`Billigste faste kjedepris: ${short(row.regularMin)} kr/${best.unit}`,'lx-podium-store'));
+      grid.append(card);
+    }
+    box.append(head,grid);
+    if(rows.length>6)box.append(button(`Se alle ${rows.length} familier med tilbud`,()=>{filters.offersOnly=true;changed(true);},'lx-ghost small'));
+    return box;
+  }
   function familyCard(row) {
     const card=button('',()=>{stack.length=0;showFamily(row.family.index);},'lx-family');
-    const mosaic=el('span',undefined,'lx-mosaic n'+Math.min(4,row.images.length));
-    for(const id of row.images)mosaic.append(photo(id,row.family.name,'lx-mosaic-photo'));
-    if(!row.images.length)mosaic.append(photo(null,row.family.name,'lx-mosaic-photo'));
-    const body=el('span',undefined,'lx-family-body');
-    body.append(el('span',model.shelves[row.family.shelf].name,'lx-eyebrow small'),el('span',row.family.name,'lx-family-name'),el('span',`${whole(row.count)} ${row.count===1?'vare':'varer'} · ${row.chains} ${row.chains===1?'kjede':'kjeder'}`,'lx-card-sub'));
-    body.append(priceTrack(row));
-    card.append(mosaic,body);
+    const head=el('span',undefined,'lx-family-head');
+    head.append(el('span',model.shelves[row.family.shelf].name,'lx-eyebrow small'),el('span',row.family.name,'lx-family-name'),el('span',reachText(row),'lx-card-sub'));
+    const top=el('span',undefined,'lx-podium');
+    const unit='/'+row.family.unit;
+    if(row.offers.length)row.offers.slice(0,3).forEach((offer,i)=>{
+      const line=el('span',undefined,'lx-podium-row'+(i===0?' first':'')),text=el('span',undefined,'lx-podium-text');
+      text.append(el('span',offerName(offer),'lx-podium-name'),el('span',storeName(offer.store)+(offer.campaign?` · tilbud til ${untilDay(offer.campaign.validTo)}`:''),offer.campaign?'lx-podium-store offer':'lx-podium-store'));
+      line.append(photo(offer.item?.image??null,offerName(offer),'lx-podium-photo'),text,el('span',short(offer.price)+' kr'+unit,'lx-podium-price'));
+      top.append(line);
+    });
+    else{
+      for(const item of row.items.slice(0,3)){const line=el('span',undefined,'lx-podium-row'),text=el('span',undefined,'lx-podium-text');text.append(el('span',item.name,'lx-podium-name'));line.append(photo(item.image,item.name,'lx-podium-photo'),text);top.append(line);}
+    }
+    card.append(head,top,priceTrack(row));
     return card;
   }
   function priceTrack(row) {
     const box=el('span',undefined,'lx-track');
-    if(row.min===null){box.append(el('span','Ingen ferske priser','lx-muted'));return box;}
-    const unit=' kr/'+row.family.unit,line=el('span',undefined,'lx-track-line');
+    if(row.min===null){box.append(el('span','Ingen ferske priser å sammenligne','lx-muted'));return box;}
+    const line=el('span',undefined,'lx-track-line');
     if(row.max>row.min)for(const p of row.prices){const dot=el('i');dot.style.left=((p-row.min)/(row.max-row.min)*100)+'%';line.append(dot);}
     const labels=el('span',undefined,'lx-track-labels');
-    labels.append(el('b',short(row.min)+unit),row.max>row.min?el('span',short(row.max)+unit):el('span',''));
+    labels.append(el('span',row.offers.length>1?`${row.offers.length} ferske priser`:'Én fersk pris'),row.spread&&row.spread>=1.05?el('b',`Dyreste koster ${times(row.spread)} billigste`):el('span',''));
     box.append(line,labels);
+    return box;
+  }
+  function featureBlock(rows) {
+    const box=el('section',undefined,'lx-featured');
+    const head=el('div',undefined,'lx-featured-head');
+    head.append(el('h3','Størst forskjell på omtrent samme vare'),el('p','Kilopriser på tvers av merker og butikker, fra ferske kjedepriser. Trykk for å se hele familien.','lx-muted'));
+    const grid=el('div',undefined,'lx-feature-grid');
+    for(const row of rows){
+      const card=button('',()=>{stack.length=0;showFamily(row.family.index);},'lx-feature');
+      const low=row.offers[0],high=row.offers[row.offers.length-1],unit='/'+row.family.unit;
+      const side=(offer,label,cls)=>{const node=el('span',undefined,'lx-duel-side '+cls);node.append(el('small',label),photo(offer.item?.image??null,offerName(offer),'lx-duel-photo'),el('span',offerName(offer),'lx-duel-name'),el('span',storeName(offer.store)+(offer.campaign?' · tilbud':''),'lx-podium-store'),el('strong',short(offer.price)+' kr'+unit));return node;};
+      const duel=el('span',undefined,'lx-duel');
+      duel.append(side(low,'Billigst','low'),el('span',times(row.spread),'lx-duel-ratio'),side(high,'Dyrest','high'));
+      card.append(el('span',row.family.name,'lx-family-name'),el('span',reachText(row),'lx-card-sub'),duel);
+      grid.append(card);
+    }
+    box.append(head,grid);
     return box;
   }
 
@@ -625,6 +683,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
   }
   function paintEntry() {
     const entry=stack[stack.length-1];
+    drawer.classList.toggle('wide',entry.type==='family');
     holder.replaceChildren();holder.scrollTop=0;
     const bar=el('div',undefined,'lx-drawer-bar');
     bar.append(stack.length>1?button('← Tilbake',()=>{stack.pop();paintEntry();},'lx-ghost small'):el('span'),button('Lukk',closeDrawer,'lx-ghost small'));
@@ -734,22 +793,44 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     if(stack[stack.length-1]!==entry||!body.isConnected)return;
     body.replaceChildren();body.className='';
     if(!found)return;
-    entry.tab??='approved';entry.byQuality??=false;
+    entry.tab??='approved';entry.byQuality??=false;entry.mode??='grid';entry.order??='best';
     const groups={approved:found.members.filter(m=>m.status==='approved'&&m.reviewCurrent),unknown:found.members.filter(m=>m.status==='unknown'||m.status==='approved'&&!m.reviewCurrent),excluded:found.members.filter(m=>m.status==='excluded')};
-    const summary=el('section',undefined,'lx-block');
-    summary.append(el('p',Array.isArray(found.inclusion)?found.inclusion.join(' '):found.inclusion));
-    if(found.exclusions?.length)summary.append(el('p','Holdes utenfor: '+found.exclusions.join(' '),'lx-muted'));
-    body.append(summary);
+    const campaigns=found.offers??[];
+    const live=[...groups.approved.filter(m=>m.fresh&&m.unitPrice!==null).map(m=>m.unitPrice),...campaigns.map(c=>c.unitPrice)],brands=new Set(groups.approved.map(m=>m.brand?.toLocaleLowerCase('nb-NO')).filter(Boolean)),chains=new Set([...groups.approved.map(m=>m.store),...campaigns.map(c=>c.storeName)]);
+    const strip=el('div',undefined,'lx-family-stats');
+    const lowest=live.length?Math.min(...live):null,highest=live.length?Math.max(...live):null;
+    for(const [value,label] of [[String(brands.size),brands.size===1?'merke':'merker'],[String(chains.size),chains.size===1?'butikk':'butikker'],lowest!==null?[`${short(lowest)} kr`,`billigst per ${found.unit}`]:null,lowest!==null&&highest>lowest?[times(highest/lowest),'fra billigst til dyrest']:null].filter(Boolean)){
+      const stat=el('div',undefined,'lx-stat');stat.append(el('strong',value),el('span',label));strip.append(stat);
+    }
+    body.append(strip);
+    if(campaigns.length){
+      const offers=el('section',undefined,'lx-block lx-offers');
+      offers.append(el('h3','På tilbud nå'));
+      for(const c of [...campaigns].sort((a,b)=>a.unitPrice-b.unitPrice)){
+        const row=el('div',undefined,'lx-offer'),text=el('div');
+        text.append(el('strong',c.name),el('p',[`${c.storeName}, til ${untilDay(c.validTo)}`,c.memberOnly?'medlemspris':null,c.bundlePacks>1?`${c.bundlePacks} må kjøpes sammen`:null,c.maxPacks?`maks ${c.maxPacks} per kunde`:null].filter(Boolean).join(' · '),'lx-muted'));
+        if(c.conditions)text.append(el('p',c.conditions,'lx-note'));
+        if(c.comparisonNote)text.append(el('p',c.comparisonNote,'lx-note'));
+        if(c.sourceUrl&&!isKiosk()){const a=el('a','Se kundeavisen ↗','lx-link');a.href=c.sourceUrl;a.target='_blank';a.rel='noopener noreferrer';text.append(a);}
+        const value=el('div',undefined,'lx-offer-price');value.append(el('strong',money(c.unitPrice)+'/'+c.unit),el('span',`${money(c.price)} pakken · ${packText(c.packAmount,c.unit)??''}`,'lx-podium-store'));
+        row.append(text,value);offers.append(row);
+      }
+      body.append(offers);
+    }
     const tabs=el('div',undefined,'lx-tabs');
     for(const [key,label] of [['approved','Godkjent'],['unknown','Uavklart'],['excluded','Holdt utenfor']]){
       if(!groups[key].length)continue;
       tabs.append(button(`${label} (${groups[key].length})`,()=>{entry.tab=key;draw();},''));
     }
+    const modes=el('div',undefined,'lx-row');
+    const modeButtons=[['grid','Prisrutenett'],['list','Rangering']].map(([key,label])=>{const b=button(label,()=>{entry.mode=key;draw();},'lx-chip small');b.dataset.mode=key;modes.append(b);return b;});
     const sortRow=el('div',undefined,'lx-row');
     if(found.sharedKey)sortRow.append(button('Pris',()=>{entry.byQuality=false;draw();},'lx-chip small'),button('Råvarescore',()=>{entry.byQuality=true;draw();},'lx-chip small'));
     const list=el('div',undefined,'lx-member-list');
-    body.append(tabs,sortRow,list);
+    body.append(tabs,modes,sortRow,list);
     const notes=el('section',undefined,'lx-block');
+    notes.append(el('h3','Dette er med'),el('p',Array.isArray(found.inclusion)?found.inclusion.join(' '):found.inclusion));
+    if(found.exclusions?.length)notes.append(el('p','Holdes utenfor: '+found.exclusions.join(' '),'lx-muted'));
     if(found.comparisonBasis)notes.append(el('h3','Slik sammenlignes de'),el('p',found.comparisonBasis,'lx-muted'));
     if(found.qualityBasis)notes.append(el('p',found.qualityBasis,'lx-muted'));
     if(found.qualityNote?.length)notes.append(el('p',found.qualityNote.join(' '),'lx-note'));
@@ -757,16 +838,58 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     function draw() {
       [...tabs.children].forEach((b,i)=>{const key=['approved','unknown','excluded'].filter(k=>groups[k].length)[i];b.classList.toggle('on',key===entry.tab);});
       [...sortRow.children].forEach((b,i)=>b.classList.toggle('on',i===(entry.byQuality?1:0)));
-      sortRow.hidden=entry.tab!=='approved'||!found.sharedKey;
+      for(const b of modeButtons)b.classList.toggle('on',b.dataset.mode===entry.mode);
+      const showGrid=entry.tab==='approved'&&entry.mode==='grid';
+      modes.hidden=entry.tab!=='approved';
+      sortRow.hidden=entry.tab!=='approved'||!found.sharedKey||showGrid;
+      if(showGrid){list.replaceChildren(priceGrid(groups.approved,found,entry,draw,now));return;}
       const scored=m=>m.quality?.key===found.sharedKey?m.quality.score:null;
       const rows=[...groups[entry.tab]].sort((a,b)=>{
         if(entry.byQuality){const x=scored(a),y=scored(b);if(x!==y)return x===null?1:y===null?-1:y-x;}
         return Number(b.fresh&&b.unitPrice!==null)-Number(a.fresh&&a.unitPrice!==null)||(a.unitPrice??Infinity)-(b.unitPrice??Infinity)||a.name.localeCompare(b.name,'nb');
       });
-      const live=rows.filter(m=>m.fresh&&m.unitPrice!==null).map(m=>m.unitPrice),lo=Math.min(...live),hi=Math.max(...live);
+      const fresh=rows.filter(m=>m.fresh&&m.unitPrice!==null).map(m=>m.unitPrice),lo=Math.min(...fresh),hi=Math.max(...fresh);
       list.replaceChildren(...rows.map((m,i)=>memberRow(m,i,lo,hi,found,now)));
     }
     draw();
+  }
+  function priceGrid(members,found,entry,draw,now) {
+    const grid=familyGrid(members,model.byPost,{order:entry.order,qualityKey:found.sharedKey,campaigns:found.offers??[]});
+    const box=el('div',undefined,'lx-grid-wrap'),scroll=el('div',undefined,'lx-grid-scroll'),table=el('table',undefined,'lx-price-grid');
+    const sortHead=(label,order,small)=>{
+      const th=el('th'),b=button('',()=>{entry.order=order;draw();},'lx-grid-sort'+(entry.order===order?' on':''));
+      b.append(el('span',label));if(small)b.append(el('small',small));
+      th.setAttribute('aria-sort',entry.order===order?'ascending':'none');th.scope='col';th.append(b);return th;
+    };
+    const headRow=el('tr');
+    headRow.append(sortHead('Vare','best'));
+    if(found.sharedKey)headRow.append(sortHead('Råvare','quality'));
+    for(const column of grid.columns)headRow.append(sortHead(column.store,column.store,column.wins?`billigst på ${column.wins}`:''));
+    const thead=el('thead');thead.append(headRow);table.append(thead);
+    const tbody=el('tbody');
+    for(const row of grid.rows){
+      const tr=el('tr'),name=el('th');name.scope='row';
+      const open=button('',()=>{if(row.item)showItem(row.item,[...row.cells.values()][0]?.key??null);},'lx-grid-name');open.disabled=!row.item;
+      const text=el('span',undefined,'lx-grid-text');
+      text.append(el('span',row.name,'lx-podium-name'),el('span',[row.campaign?`Tilbud til ${untilDay(row.campaign.validTo)}`:row.brand,row.mixed?'ulike pakninger':packText(row.pack,row.unit)].filter(Boolean).join(' · '),row.campaign?'lx-podium-store offer':'lx-podium-store'));
+      open.append(photo(row.image,row.name,'lx-podium-photo'),text);name.append(open);tr.append(name);
+      if(found.sharedKey)tr.append(el('td',row.score===null?'ukjent':whole(row.score),'lx-grid-score'));
+      for(const column of grid.columns){
+        const cell=row.cells.get(column.store),td=el('td');
+        if(cell){
+          const value=cell.price??cell.old,fresh=cell.price!==null;
+          const b=button(short(value),()=>{if(row.item)showItem(row.item,cell.key);},'lx-cell'+(!fresh?' old':fresh&&value===grid.top?' top':fresh&&value===row.best&&row.cells.size>1?' best':'')+(cell.campaign?' offer':''));
+          b.title=cell.campaign?`Tilbud hos ${column.store} til ${untilDay(cell.campaign.validTo)}: ${money(value)}/${found.unit}`:fresh?`${column.store}: ${money(value)}/${found.unit}`:`Eldre pris, ${ago(cell.at?Date.parse(cell.at):null,now)}`;
+          td.append(b);
+        }
+        tr.append(td);
+      }
+      tbody.append(tr);
+    }
+    table.append(tbody);scroll.append(table);
+    const legend=el('p',`Kroner per ${found.unit}. Grønt er billigst i familien, og fet skrift er billigst for den varen. Innrammet er tilbud fra kundeavis. Gult er en eldre pris som aldri regnes som billigst. Trykk på en kolonne for å sortere.`,'lx-note');
+    box.append(scroll,legend);
+    return box;
   }
   function memberRow(m,index,lo,hi,found,now) {
     const item=model.byPost.get(m.key);

@@ -103,7 +103,7 @@ export function familyDetail(read,id,{imageRef,chainName}) {
  const members=read.members(id).map(row=>{
   const p=row.product,price=row.price,held=price.reasons.some(code=>code!=='stale-price-receipt');
   const note=read.groupsOf(row.productKey).find(m=>m.groupId===id);
-  return {key:row.productKey,status:row.status,reviewCurrent:row.reviewCurrent,name:p.name,brand:p.brand,store:chainName(p.store),image:imageRef(p.image),pack:p.pack,unit:p.unit,packPrice:held?null:price.grossPackPrice,unitPrice:row.eligible?row.unitPrice:null,fresh:price.fresh,receiptAt:price.receiptAt,quality:row.status==='approved'&&row.reviewCurrent?row.quality:null,nutritionLevel:row.nutrition?.level??null,value:read.valueDetail(row.productKey,id),note:row.status==='approved'?null:readable(note?.e)};
+  return {key:row.productKey,status:row.status,reviewCurrent:row.reviewCurrent,name:p.name,brand:p.brand,store:chainName(p.store),image:imageRef(p.image),pack:p.pack,unit:p.unit,packPrice:held?null:price.grossPackPrice,unitPrice:row.eligible?row.unitPrice:null,oldUnitPrice:row.eligible||price.fresh||held&&!price.reasons.includes('stale-price-receipt')?null:row.unitPrice,fresh:price.fresh,receiptAt:price.receiptAt,quality:row.status==='approved'&&row.reviewCurrent?row.quality:null,nutritionLevel:row.nutrition?.level??null,value:read.valueDetail(row.productKey,id),note:row.status==='approved'?null:readable(note?.e)};
  });
  const counts=new Map();
  for(const m of members)if(m.quality)counts.set(m.quality.key,(counts.get(m.quality.key)??0)+1);
@@ -111,7 +111,7 @@ export function familyDetail(read,id,{imageRef,chainName}) {
  return {id,name:group.name,category:group.category,unit:group.unit,inclusion:group.inclusion,exclusions:group.exclusions,qualityBasis:group.qualityBasis,comparisonBasis:group.comparisonBasis,sharedKey,qualityNote:sharedKey?read.qualityNote(sharedKey):[],members};
 }
 
-export function createLibraryExplorer({reader,imageRef,chainName,ownStores=()=>[],status=()=>'disabled'}) {
+export function createLibraryExplorer({reader,imageRef,chainName,ownStores=()=>[],status=()=>'disabled',activeOffers=()=>[]}) {
  let cached=null,pending=null;
  async function compile(read,key) {
   const {data,texts}=buildExplorerData(read.index(),{imageRef,chainName,ownStores:ownStores(),active:read.active,horizonDays:read.horizonDays});
@@ -139,8 +139,10 @@ export function createLibraryExplorer({reader,imageRef,chainName,ownStores=()=>[
    const read=reader();if(!read)return {status:status()};
    const family=familyDetail(read,String(id??''),{imageRef,chainName});
    if(!family)throw Error('Fant ikke varefamilien.');
-   return {status:'ready',family};
-  }
+   return {status:'ready',family:{...family,offers:activeOffers().filter(o=>o.groups.includes(family.id))}};
+  },
+  // Offers change whenever a flyer is reviewed, so they stay out of the cached bundle.
+  offers:()=>({status:reader()?'ready':status(),offers:reader()?activeOffers():[]})
  };
 }
 

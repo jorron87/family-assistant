@@ -95,6 +95,7 @@ async function handle(req, res) {
     if(path==='/api/shopping/summary'&&method==='GET')return send(res,200,store.shopping.familySummary());
     if(path==='/api/shopping/product-info'&&method==='GET'){const params=new URL(req.url,`http://${host}`).searchParams;return send(res,200,store.shopping.productInfo({key:params.get('key'),watchId:params.get('watchId')}));}
     if(path==='/api/shopping/explore'&&method==='GET'){const bundle=await store.shopping.explorer.bundle();if(bundle.status!=='ready')return send(res,200,{status:bundle.status});return sendExplorerBundle(req,res,bundle);}
+    if(path==='/api/shopping/explore-offers'&&method==='GET')return send(res,200,store.shopping.explorer.offers());
     if(path==='/api/shopping/explore-ingredients'&&method==='GET')return send(res,200,await store.shopping.explorer.ingredients(new URL(req.url,`http://${host}`).searchParams.get('q')));
     if(path==='/api/shopping/explore-family'&&method==='GET')return send(res,200,store.shopping.explorer.family(new URL(req.url,`http://${host}`).searchParams.get('id')));
     if(path==='/api/shopping/feed'&&method==='POST')return send(res,200,store.shopping.feed(await json(req)));

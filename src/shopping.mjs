@@ -1031,7 +1031,18 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const groups=reader.groupsOf(key).map(m=>{const g=reader.group(m.groupId);return {name:g.name,category:g.category,status:m.s,inclusion:g.inclusion,comparisonBasis:g.comparisonBasis,qualityBasis:g.qualityBasis,equivalenceEvidence:readable(m.e),qualityEvidence:m.qe,quality:m.q?{score:m.q.score,label:m.q.label,criterion:m.q.criterion,value:m.q.value,unit:m.q.unit,evidence:m.q.evidence,limitations:reader.qualityNote(m.q.key),...peersOf(m)}:null,nutrition:m.n??null,value:reader.valueDetail(key,m.groupId),qualityStatus:m.qs,qualityReason:m.qr};}).sort((a,b)=>Number(b.status==='approved')-Number(a.status==='approved')||Number(!!b.quality)-Number(!!a.quality));
     return {available:true,watchName:w?.name??null,product:{key,name:p.name,brand:p.brand,ean:p.ean,storeName:p.store==='ODA_NO'?'Oda':store?cleanStore(store.name):chainName(p.store),packAmount:p.pack,unit:p.unit,packEvidence:p.packEvidence,ingredients:p.ingredients,description:p.description,labels:Object.entries(p.attributes??{}).filter(([,value])=>value===true).map(([name])=>name),nutrition:p.nutrition,sourceUrl:/^https:\/\//.test(p.sourceUrl??'')?p.sourceUrl:null,image:imageRef(p.image),pills:reader.pills(key),price:{grossPackPrice:price.grossPackPrice,fresh:price.fresh,receiptAt:price.receiptAt}},groups};
   }
-  const explorer=createLibraryExplorer({reader:libReader,imageRef,chainName,ownStores:()=>['ODA_NO',...s.settings.stores.map(x=>x.chainCode).filter(Boolean)],status:()=>libraryPrices?.status?.()??'disabled'});
+  // A flyer offer is fresh evidence by itself, so it shows even when every library
+  // row for that chain is parked. Only a watch's reviewed links place it in a family.
+  function explorerOffers() {
+    const today=shoppingDay(now()),reader=libReader();
+    return Object.values(s.offers).flatMap(o=>{
+      const w=s.watches[o.watchId],store=s.settings.stores.find(x=>x.id===o.storeId);
+      if(o.validFrom>today||o.validTo<today||!o.comparable||!w||w.enabled===false||!store)return [];
+      const groups=linkStates(w,reader).filter(l=>l.state==='ok').map(l=>l.groupId);
+      return groups.length?[{id:o.id,name:o.name,storeName:store.chainCode?chainName(store.chainCode):cleanStore(store.name),price:o.price,packAmount:o.packAmount,unit:o.unit,unitPrice:round(o.price/o.packAmount),validTo:o.validTo,memberOnly:o.memberOnly,conditions:o.conditions??null,maxPacks:o.maxPacks,bundlePacks:o.bundlePacks,comparisonNote:o.comparisonNote,sourceUrl:o.sourceUrl,groups}]:[];
+    });
+  }
+  const explorer=createLibraryExplorer({reader:libReader,imageRef,chainName,ownStores:()=>['ODA_NO',...s.settings.stores.map(x=>x.chainCode).filter(Boolean)],status:()=>libraryPrices?.status?.()??'disabled',activeOffers:explorerOffers});
   function librarySearch(query,limit=30) {
     const reader=libReader();if(!reader)throw Error('Produktbiblioteket er ikke tilgjengelig.');
     return reader.search(String(query??'').slice(0,200),Math.min(200,Number(limit)||30)).map(({key,product,groups,price})=>({productKey:key,name:product.name,brand:product.brand,store:product.store,ean:product.ean,canonicalPackAmount:product.pack,unit:product.unit,packDocumented:product.packKnown,groups,grossPackPrice:price.grossPackPrice,receiptAt:price.receiptAt,priceFresh:price.fresh}));

@@ -53,6 +53,24 @@ test('a price older than the horizon parks work for the agent but never a scan i
  assert.equal(f.shop.stockScan({ean:'7038010000001'}).options.length,1,'scanning still recognises the product');
 });
 
+test('a current flyer offer stays in the system for a chain whose library prices are parked',t=>{
+ const f=fixture(t),old='2025-01-01T08:00:00Z';
+ f.approve();
+ f.shop.settings({monitoringEnabled:true,stores:[{id:'rema',name:'REMA 1000',url:'https://example.test/flyer',chainCode:'REMA_1000',minSavings:0}]});
+ const g=f.provider.reader().group(f.g.id);
+ f.shop.libraryLink({watchId:f.w.id,evidence:'Samme bruk',links:[{groupId:f.g.id,groupFingerprint:g.fingerprint,evidence:'Gruppen passer'}]});
+ f.d.prices[0].receiptAt=old;f.write();
+ assert.equal(f.provider.reader().members(f.g.id).length,0,'the library row is parked');
+ assert.ok(f.shop.queue().some(x=>x.do==='shopping-review'&&x.storeId==='rema'),'the flyer is still on the agent queue');
+ const base={storeId:'rema',watchId:f.w.id,name:'Bønner 500 g',price:40,packAmount:.5,unit:'kg',validTo:'2026-11-15',observedAt:RECEIPT,sourceUrl:'https://example.test/flyer',evidence:'Side 2',comparable:true,comparisonNote:'Samme vare'};
+ f.shop.offer({...base,externalId:'now',validFrom:'2026-11-09'});
+ f.shop.offer({...base,externalId:'later',validFrom:'2026-11-20',validTo:'2026-11-25'});
+ f.shop.offer({...base,externalId:'other',validFrom:'2026-11-09',comparable:false});
+ assert.deepEqual(f.shop.explorer.offers().offers.map(o=>[o.storeName,o.unitPrice,o.groups]),[['REMA 1000',80,[f.g.id]]],'only a current comparable offer, under the chain name');
+ const detail=f.shop.explorer.family(f.g.id).family;
+ assert.equal(detail.members.length,0);assert.equal(detail.offers.length,1);
+});
+
 test('changed composition, package, review or group rules cannot lend a library price to a watch',t=>{
  const f=fixture(t);f.approve();
  f.p.ingredients='Ground beans';f.p.metadataFingerprint=productMetadataFingerprint(f.p);f.d.memberships[0].reviewedFingerprint=f.p.metadataFingerprint;f.write();assert.equal(f.shop.familyView().items[0].prices.current,60);
