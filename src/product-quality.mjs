@@ -1,6 +1,6 @@
 // A transparent category-specific ingredient-content score, not a health rating.
 // It never approves equivalence, changes a price, or supplies missing label facts.
-export const QUALITY_MODEL_VERSION='ingredient-content-v9';
+export const QUALITY_MODEL_VERSION='ingredient-content-v11';
 const clean=v=>String(v??'').normalize('NFC').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
 const number=v=>Number(v.replace(',','.'));
 const decimal='(?<![\\d.,])(\\d{1,4}(?:[.,]\\d{1,3})?)';
@@ -10,16 +10,31 @@ function uniqueFact(found,max){if(!found.length)return{fact:null,reason:'missing
 function percent(ingredients,token,{allowSpeciesList=false}={}){
  const qualifiers='(?:(?:øko(?:logisk(?:e)?)?|ristede?|malte?|organic|roasted|ground|og)\\s+)*';
  const patterns=[
-  new RegExp('^'+qualifiers+'(?:'+token+')\\s*\\*?\\s*(?:\\(\\s*)?'+decimal+'\\s*%(?!\\s*av\\b)','i'),
+  new RegExp('^'+qualifiers+'(?:'+token+')\\s*\\*?\\s*(?:\\(\\s*)?'+decimal+'\\s*%(?!\\s*\\)?\\s*av\\b)','i'),
   new RegExp('^'+decimal+'\\s*%\\s*'+qualifiers+'(?:'+token+')(?![\\p{L}\\p{N}_]|\\s+av\\b)','iu')
  ];
- if(allowSpeciesList)patterns.push(new RegExp('^(?:'+token+')\\s*\\[[^\\[\\]]+\\]\\s*'+decimal+'\\s*%(?!\\s*av\\b)','i'));
+ if(allowSpeciesList)patterns.push(new RegExp('^(?:'+token+')\\s*\\[[^\\[\\]]+\\]\\s*'+decimal+'\\s*%(?!\\s*\\)?\\s*av\\b)','i'));
  const found=[];for(const part of components(ingredients))for(const re of patterns){const m=part.match(re);if(m)found.push({value:number(m[1]),text:m[0],field:'ingredients'});}return uniqueFact(found,100);
 }
 function fishsticksPercent(ingredients){
  const parts=components(ingredients),fish='(?:hakket\\s+fisk|fiskekjøtt\\s+av\\s+stillehavslysing|fisk\\s*-\\s*alaska\\s*pollock|alaska\\s*pollock(?:\\s+filet)?|fileter\\s+av\\s+alaska\\s*pollock|seifilet|fisk(?:ekjøtt)?)';
- const re=new RegExp('^'+fish+'\\s*\\*?\\s*(?:\\([^()]*\\)\\s*)*(?:\\(\\s*)?'+decimal+'\\s*%(?!\\s*av\\b)','i');
+ const re=new RegExp('^'+fish+'\\s*\\*?\\s*(?:\\([^()]*\\)\\s*)*(?:\\(\\s*)?'+decimal+'\\s*%(?!\\s*\\)?\\s*av\\b)','i');
  const found=[];for(const part of parts){const m=part.match(re);if(m)found.push({value:number(m[1]),text:m[0],field:'ingredients'});else if(/^(?:fisk|torsk|sei(?:filet)?|hyse|laks|pollock|alaska\s*pollock|stillehavslysing|surimi|lange|brosme|kolmule|makrell|ørret|kveite|hvitlaks|kvitlaks|hvitfisk|krabbe|reker|sjømat)\b/i.test(part))return{fact:null,reason:'ambiguous-fish-components'};}
+ return uniqueFact(found,100);
+}
+// A gratin may also contain fish stock. Measure the declared main fish
+// ingredient, not an inferred total including the stock's unknown quantity.
+function fishGratinPercent(ingredients){
+ const fish='(?:seifilet|torskefilet|hysefilet|sei|torsk|hyse|fiskefilet|fisk)';
+ const re=new RegExp('^'+fish+'\\s*\\*?\\s*(?:\\([^()]*\\)\\s*)*\\*?\\s*(?:\\(\\s*)?'+decimal+'\\s*%(?!\\s*\\)?\\s*av\\b)','i');
+ const found=[];
+ for(const part of components(ingredients)){
+  if(/^fiske(?:fond|font)\b/i.test(part))continue;
+  if(!/^(?:(?:hakket|finhakket|røkt|renskåret)\s+)?(?:sei|torsk|hyse|fisk|laks|ørret|pollock|alaska\s+pollock|stillehavslysing|makrell|sild|lange|brosme|kolmule|kveite|hvitlaks|kvitlaks|hvitfisk|reker|krabbe|sjømat|surimi)/i.test(part))continue;
+  const m=part.match(re);if(!m)return{fact:null,reason:'ambiguous-main-fish-component'};
+  found.push({value:number(m[1]),text:m[0],field:'ingredients'});
+ }
+ if(found.length>1)return{fact:null,reason:'multiple-main-fish-components'};
  return uniqueFact(found,100);
 }
 // Only add individually declared tomato ingredients when every tomato component
@@ -28,7 +43,7 @@ function fishsticksPercent(ingredients){
 function pastaTomatoPercent(ingredients){
  const parts=components(ingredients),found=[],seen=new Set();for(const part of parts){
   if(!/tomat/i.test(part))continue;
-  const re=new RegExp('^(?:hakkede?\\s+)?(?:tomat(?:er)?|daddeltomat(?:er)?)\\s*\\*?\\s*(?:\\(\\s*)?'+decimal+'\\s*%(?!\\s*av\\b)','i'),m=part.match(re);
+  const re=new RegExp('^(?:hakkede?\\s+)?(?:tomat(?:er)?|daddeltomat(?:er)?)\\s*\\*?\\s*(?:\\(\\s*)?'+decimal+'\\s*%(?!\\s*\\)?\\s*av\\b)','i'),m=part.match(re);
   if(!m)return{fact:null,reason:'incomplete-or-concentrated-tomato-components'};
   const kind=/daddeltomat/i.test(m[0])?'daddeltomat':'tomat';if(seen.has(kind))return{fact:null,reason:'ambiguous-repeated-tomato-component'};seen.add(kind);
   const value=number(m[1]);if(!Number.isFinite(value)||value<0||value>100)return{fact:null,reason:'invalid-declared-amount'};
@@ -49,14 +64,15 @@ function tomatoInput(ingredients,description,crossDescription='',primaryDescript
 function profile(groupId){
  const id=String(groupId??'').split('--')[0];
  if(/^ketchup-(?:standard|no-sugar)$/.test(id))return{id:'ketchup',label:'Tomater brukt per 100 g ketchup',basis:'tomato-input-g-per-100g',unit:'g/100 g',target:200};
- if(/^peanut-butter-(?:100|near-pure|standard)$/.test(id))return{id:'peanut-butter',label:'Deklarert peanøttandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'peanøtter|peanøttkjerner|peanuts',single:/^(?:økologiske?\s+|ristede\s+)?(?:peanøtter|peanuts)\*?(?:\s*\(100\s*%\))?\.?$/i};
+ if(/^peanut-butter-(?:100|near-pure|standard|crunchy-sweet)$/.test(id))return{id:'peanut-butter',label:'Deklarert peanøttandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'(?:peanuts\\s*\\/\\s*)?(?:tørristede?\\s+)?peanøtter|peanøttkjerner|peanuts',single:/^(?:økologiske?\s+|ristede\s+)?(?:peanøtter|peanuts)\*?(?:\s*\(100\s*%\))?\.?$/i};
  if(id==='hazelnut-chocolate-spread')return{id:'hazelnut-spread',label:'Deklarert hasselnøttandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'(?:hasselnøtt(?:er|kjerner|masse)?|hasselnötter)(?:\\s*/\\s*hasselnøddekerner)?'};
  if(['fishcakes-ordinary','fishcakes-high','fishcakes-very-high'].includes(id))return{id:'fishcakes',label:'Deklarert total fiskeandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'fisk'};
  if(id==='fishsticks-breaded')return{id:'fishsticks',label:'Deklarert fiskeandel',basis:'declared-fish-percent',unit:'%',target:100};
+ if(/^fish-gratin-macaroni-(?:practical-frozen|frozen-(?:20|30)pct)$/.test(id))return{id:'fish-gratin',label:'Deklarert andel av hovedfiskingrediensen',basis:'declared-main-fish-ingredient-percent',unit:'%',target:100};
  if(id==='pasta-sauce-tomato-mild-herbs')return{id:'pasta-tomato',label:'Deklarert tomatandel i saus',basis:'declared-unconcentrated-tomato-percent',unit:'%',target:100};
  if(id==='beans-white-in-tomato-sauce')return{id:'beans-in-tomato',label:'Deklarert bønneandel i tomatbønner',basis:'declared-bean-percent',unit:'%',target:100,token:'(?:utbløtte\\s+)?(?:hvite\\s+)?bønner'};
  if(/^crispbread-/.test(id))return{id:'crispbread',label:'Deklarert kostfiber per 100 g',basis:'dietary-fiber-g-per-100g',unit:'g/100 g',target:30};
- if(id==='muesli-fruit-raisin-pineapple-banana')return{id:'fruit-muesli',label:'Deklarert kostfiber per 100 g fruktmüsli',basis:'dietary-fiber-g-per-100g',unit:'g/100 g',target:15};
+ if(['muesli-fruit-raisin-pineapple-banana','muesli-fruit-practical'].includes(id))return{id:'fruit-muesli',label:'Deklarert kostfiber per 100 g fruktmüsli',basis:'dietary-fiber-g-per-100g',unit:'g/100 g',target:15};
  if(/^(?:fruit-spread-|jam-)/.test(id)){
   const fruit=[['blueberry','(?:vill)?blåbær'],['blackcurrant','solbær'],['apricot','aprikos(?:er)?'],['orange','appelsin(?:er)?'],['raspberry','bringebær'],['strawberry','jordbær']].find(([word])=>id.includes(word));
   if(fruit)return{id:'fruit-spread',subtype:fruit[0],label:'Deklarert frukt-/bærandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:fruit[1]+'|frukt|bær',fruit:fruit[1]};
@@ -75,6 +91,7 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
  if(p.id==='fruit-muesli'){base.label='Kostfiber';base.limitations=['Måler kun deklarert kostfiber per 100 g spiseklar fruktmüsli.','15 g per 100 g er modellens skaleringsmål, ikke en anbefalt inntaksmengde eller grenseverdi.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering, og viser ikke direkte fullkornsandel.'];}
  if(p.id==='pasta-tomato')base.limitations=['Måler bare uttrykkelig deklarerte tomatandeler i mild ferdig pastasaus.','Tomatpuré, konsentrert juice og uoppgitte tomatandeler gjør totalen uavklart og gir ingen score.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering; sukker og salt vises separat.'];
  if(p.id==='beans-in-tomato')base.limitations=['Måler kun deklarert bønneandel i det spiseklare helproduktet med saus.','Bønnenes vanninnhold og øvrig oppskrift kan variere; sukker og salt vises separat.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering.'];
+ if(p.id==='fish-gratin')base.limitations=['Måler bare den uttrykkelig deklarerte andelen av hovedfiskingrediensen i fiskegratengen.','Eventuell fiskefond er ikke inkludert; fiskeslag, makaroni og øvrig oppskrift kan variere.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering; sukker og salt vises separat.'];
  const cross=product?.nutritionObservation?.crossSourceLabel,primary=product?.nutritionObservation?.primaryLabel,ingredients=clean(product?.ingredients||cross?.ingredients),description=clean(product?.description),m=product?.nutrition?.basis==='g'?product.nutrition.per100:null;
  base.nutrition=m?{basis:'per 100 g',fiber:Number.isFinite(m.fiber)?m.fiber:null,sugars:Number.isFinite(m.sugars)?m.sugars:null,salt:Number.isFinite(m.salt)?m.salt:null}:null;
  let result;
@@ -83,6 +100,8 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
   result=product?.nutritionObservation?.fiberConflict?{fact:null,reason:'conflicting-fiber-labels'}:Number.isFinite(fiber)&&fiber>=0&&fiber<=100&&/^https:\/\/\S+$/i.test(sourceUrl??'')?{fact:{value:fiber,evidence:[{text:`Kostfiber ${fiber} g per 100 g`,field:'nutrition.per100.fiber'}]},reason:null}:{fact:null,reason:'missing-or-invalid-fiber-per-100g'};
  }else if(p.id==='fishsticks'){
   result=fishsticksPercent(ingredients);
+ }else if(p.id==='fish-gratin'){
+  result=fishGratinPercent(ingredients);
  }else if(p.id==='pasta-tomato'){
   result=pastaTomatoPercent(ingredients);
  }else if(p.id==='beans-in-tomato'&&components(ingredients).filter(part=>/bønn|bean/i.test(part)).length>1){

@@ -27,6 +27,14 @@ test('percentage decimals, multilingual names and single-ingredient declarations
  assert.equal(score('Sukker, hasselnøttkjerner / hasselnøddekerner* 9 %, kakao.','hazelnut-chocolate-spread').score,9);
  assert.equal(score('Socker, hasselnötter (13%), kakao.','hazelnut-chocolate-spread').score,13);
 });
+test('crunchy peanut butter uses explicit whole-product share for bilingual and dry-roasted labels',()=>{
+ const id='peanut-butter-crunchy-sweet';
+ const a=score('Peanuts/peanøtter 87 %, sukker, salt.',id),b=score('Tørristede peanøtter (92 %), sukker, salt.',id);
+ assert.equal(a.score,87);assert.equal(b.score,92);assert.equal(a.comparisonKey,b.comparisonKey);
+ assert.equal(a.comparisonKey,score('Peanøtter 87 %, salt.','peanut-butter-standard').comparisonKey);
+ for(const s of ['Peanuts/peanøtter, sukker 87 %.','Tørristede peanøtter 87 % av nøttene, sukker.','Peanuts/peanøtter (87 %) av nøttene er ristede, sukker.','Nøtteblanding (peanuts/peanøtter 87 %), sukker.','Peanuts/peanøtter 87 %, peanøtter 90 %, salt.','Peanøtter 101 %, salt.'])assert.equal(score(s,id).score,null,s);
+ assert.equal(scoreProductQuality({ingredients:'Peanuts/peanøtter 87 %, salt.'},{groupId:id}).status,'review-required');
+});
 test('fish quantity is total fish, not an arbitrary nested species percentage',()=>{
  assert.equal(score('Fisk (60 %), melk, potetmel.','fishcakes-high').score,60);
  assert.equal(score('Fisk (hyse 40 %, sei 20 %), melk.','fishcakes-high').score,null);
@@ -45,6 +53,7 @@ test('fishcake content uses one explicit total-share basis across researched fis
  assert.equal(score('Fisk [torsk 60 %, hyse 40 %] 80 %, vann.','fishcakes-very-high').score,80);
  assert.equal(score('Fisk [torsk 60 %, hyse 40 %], vann.','fishcakes-very-high').score,null);
  assert.equal(score('Fisk [torsk, hyse] 80 % av råvarene er norske.','fishcakes-very-high').score,null);
+ assert.equal(score('Fisk [torsk, hyse] 80 %) av fisken er norsk.','fishcakes-very-high').score,null);
  assert.equal(score('Fisk 52 %, fisk 80 %, vann.','fishcakes-ordinary').score,null);
  assert.equal(score('Fisk 50 % (hvitlaks, surimi), melk.','fishcakes-surimi-ordinary').status,'not-applicable');
  assert.equal(score('Fisk 65 %, hvetemel.','fishsticks-breaded').score,65);
@@ -117,6 +126,8 @@ test('fruit muesli fiber compares sourced labels within its own group and suppre
  const p={ingredients:'Havre, frukt.',nutrition:{basis:'g',per100:{fiber:8.6,sugars:13,salt:.31},sourceUrl:'https://producer.example/label'}};
  const opts={groupId:'muesli-fruit-raisin-pineapple-banana',reviewCurrent:true},a=scoreProductQuality(p,opts),b=scoreProductQuality({...p,nutrition:{...p.nutrition,per100:{fiber:9.8,sugars:15,salt:.05}}},opts);
  assert.equal(a.score,57.3);assert.equal(b.score,65.3);assert.equal(a.measurement.value,8.6);assert.equal(a.nutrition.sugars,13);assert.equal(a.normalization.target,15);
+ const practical=scoreProductQuality({...p,nutrition:{...p.nutrition,per100:{fiber:10.2,sugars:18,salt:.01}}},{groupId:'muesli-fruit-practical',reviewCurrent:true});
+ assert.equal(practical.score,68);assert.equal(practical.comparisonKey,a.comparisonKey);assert.equal(practical.nutrition.sugars,18);
  assert.notEqual(a.comparisonKey,scoreProductQuality(p,{groupId:'crispbread-rye',reviewCurrent:true}).comparisonKey);
  assert.equal(scoreProductQuality({...p,nutritionObservation:{fiberConflict:{evidence:'Etiketter avviker'}}},opts).score,null);
  assert.equal(scoreProductQuality({...p,nutrition:{...p.nutrition,sourceUrl:null}},opts).score,null);assert.equal(scoreProductQuality({...p,nutrition:{...p.nutrition,basis:'ml'}},opts).score,null);
@@ -126,7 +137,7 @@ test('fruit muesli fiber compares sourced labels within its own group and suppre
 test('mild pasta sauce sums only complete declared tomato components and never treats purée as fresh tomato',()=>{
  const id='pasta-sauce-tomato-mild-herbs',a=score('Tomater 84% (Italia), vann, løk.',id),b=score('Tomat 71,5 %, daddeltomat 24 %, løk.',id);
  assert.equal(a.score,84);assert.equal(b.score,95.5);assert.equal(b.measurement.evidence.length,2);assert.equal(a.comparisonKey,b.comparisonKey);assert.notEqual(a.comparisonKey,score('Tomater (148 g per 100 g ketchup)').comparisonKey);
- for(const s of ['Hakkede tomater 45 %, vann, tomatpuré.','Tomater (73%), tomatpuré (17%), løk.','Tomat 80 %, tomatjuice 10 %.','Tomat 80 %, daddeltomat, salt.','Tomat 80 %, tomat 30 %.','Tomat 40 %, hakkede tomater 30 %.','Tomat 40 % av tomatene er norske, vann.'])assert.equal(score(s,id).score,null,s);
+ for(const s of ['Hakkede tomater 45 %, vann, tomatpuré.','Tomater (73%), tomatpuré (17%), løk.','Tomat 80 %, tomatjuice 10 %.','Tomat 80 %, daddeltomat, salt.','Tomat 80 %, tomat 30 %.','Tomat 40 %, hakkede tomater 30 %.','Tomat 40 % av tomatene er norske, vann.','Tomat (40 %) av tomatene er norske, vann.'])assert.equal(score(s,id).score,null,s);
  assert.equal(scoreProductQuality({ingredients:'Tomat 90 %, salt.'},{groupId:id}).status,'review-required');
 });
 
@@ -142,6 +153,16 @@ test('fishsticks only score an explicitly stated share of fish in the product',(
  assert.equal(check('Fisk - alaska pollock* (theragra chalcogramma) 61 %, hvetemel.').score,61);
  assert.equal(check('Seifilet (pollachius virens) (50%), panering, olje.').score,50);
  assert.equal(check('Hakket fisk * 60%, hvetemel.').score,60);
- for(const s of ['Alaska pollock 65 % av fisken er norsk, panering.','Alaska pollock 40 %, torsk 20 %, panering.','Panering (alaska pollock 65 %), mel.','Fisk (alaska pollock 65 %), mel.','Seifilet 110%, mel.'])assert.equal(check(s).score,null,s);
+ for(const s of ['Alaska pollock 65 % av fisken er norsk, panering.','Seifilet (65 %) av fisken er norsk, panering.','Alaska pollock 40 %, torsk 20 %, panering.','Panering (alaska pollock 65 %), mel.','Fisk (alaska pollock 65 %), mel.','Seifilet 110%, mel.'])assert.equal(check(s).score,null,s);
  assert.notEqual(check('Alaska pollock 65 %, hvetemel.').comparisonKey,score('Fisk 65 %, melk.','fishcakes-high').comparisonKey);
+});
+
+test('fish gratin scores only its declared main fish ingredient and excludes stock',()=>{
+ const id='fish-gratin-macaroni-practical-frozen',a=score('Vann, seifilet (Pollachius virens)* (20 %), makaroni, fiskefont (fiskekjøtt, salt).',id),b=score('Torskefilet * (gadus morhua) 30 %, melk, makaroni.',id),c=score('Skummetmelk, sei (pollachius virens)* 30 %, makaroni, fiskefond [fisk, salt].',id);
+ assert.equal(a.score,20);assert.equal(b.score,30);assert.equal(c.score,30);assert.equal(a.comparisonKey,b.comparisonKey);
+ assert.equal(a.measurement.basis,'declared-main-fish-ingredient-percent');
+ assert.notEqual(a.comparisonKey,score('Fisk 20 %, melk.','fishcakes-ordinary').comparisonKey);
+ assert.equal(score('Torskefilet 30 %, makaroni.','fish-gratin-macaroni-frozen-30pct').comparisonKey,b.comparisonKey);
+ for(const s of ['Seifilet, makaroni 30 %.','Fisk (torsk 30 %), makaroni.','Torsk 20 %, sei 10 %, makaroni.','Torsk 20 %, røkt laks 10 %, makaroni.','Torsk 30 % av fisken, makaroni.','Torsk (30 %) av fisken, makaroni.','Torsk 120 %, makaroni.','Fiskefond (fisk 30 %), makaroni.'])assert.equal(score(s,id).score,null,s);
+ assert.equal(scoreProductQuality({ingredients:'Sei 30 %, makaroni.'},{groupId:id}).status,'review-required');
 });
