@@ -11,7 +11,7 @@
   const ORIGIN = 'https://www.sesum.no';
   const WORK = '/api/shopping/sesum/work', RECEIVE = '/api/shopping/sesum/receive';
   const VERSION = 'sesum-collector-1.7.0';
-  const BUILD = 'sesum-collector-build-1.7.0-3';
+  const BUILD = 'sesum-collector-build-1.7.0-4';
   // The background alarm repairs the bridge every minute. Page ticks advance
   // the bounded durable queue more often; the server still controls spacing
   // and each batch has at most eight reads. Running/Locks prevent overlaps.
@@ -116,7 +116,7 @@
     if (root.__familienSesumCollector === VERSION && root.__familienSesumCollectorBuild === BUILD) return;
     root.__familienSesumStop?.();
     const state = {}, pending = new Map(), fetchPage = root.fetch.bind(root);
-    let running = false, stopped = false;
+    let running = false, stopped = false, owner = false, ownershipPending = false, releaseOwner = null;
     const reply = event => {
       if (event.source !== root || !event.data?.familienCollectorReply) return;
       const finish = pending.get(event.data.id);
@@ -128,8 +128,22 @@
       pending.set(id, value => {root.clearTimeout(timer);value.ok ? resolve(value.data) : reject(new Error('local_receipt_failed'));});
       root.postMessage({familienCollector:true,id,path,method,...(body ? {body} : {})},ORIGIN);
     });
+    const claimOwnership = () => {
+      if (stopped || owner || ownershipPending) return;
+      if (!root.navigator?.locks) { owner = true; void tick(); return; }
+      ownershipPending = true;
+      // Hold the existing origin lock for this worker's lifetime. Older workers
+      // take it per cycle, so they also yield to this owner without remote reads.
+      void root.navigator.locks.request('familien-sesum-collector',{ifAvailable:true},async lock => {
+        if (!lock || stopped) return;
+        owner = true;
+        try { await new Promise(resolve => {releaseOwner=resolve;if(stopped)resolve();else void tick();}); }
+        finally {owner=false;releaseOwner=null;}
+      }).catch(() => {}).finally(() => {ownershipPending=false;});
+    };
     const tick = async () => {
       if (running || stopped || root.navigator?.onLine === false) return;
+      if (!owner) {claimOwnership();return;}
       running = true;
       try {
         const run = async () => {
@@ -137,8 +151,7 @@
           const outcome = await runCycle({core:root.FamilienSesumCore,server,fetchPage,state});
           root.__familienSesumLast = {at:new Date().toISOString(),implementation:VERSION,build:BUILD,...outcome};
         };
-        if (root.navigator?.locks) await root.navigator.locks.request('familien-sesum-collector',{ifAvailable:true},lock => lock ? run() : undefined);
-        else await run();
+        await run();
       } catch { root.__familienSesumLast = {at:new Date().toISOString(),implementation:VERSION,build:BUILD,reason:'local_unavailable'}; }
       finally { running = false; }
     };
@@ -147,7 +160,7 @@
     const timer = root.setInterval(tick,TICK_MS);
     root.__familienSesumCollector = VERSION;
     root.__familienSesumCollectorBuild = BUILD;
-    root.__familienSesumStop = () => {stopped=true;root.clearInterval(timer);root.removeEventListener('message',reply);root.removeEventListener('message',wake);delete root.__familienSesumCollector;delete root.__familienSesumCollectorBuild;};
+    root.__familienSesumStop = () => {stopped=true;releaseOwner?.();root.clearInterval(timer);root.removeEventListener('message',reply);root.removeEventListener('message',wake);delete root.__familienSesumCollector;delete root.__familienSesumCollectorBuild;};
     root.setTimeout(tick,3000);
   }
   return {VERSION,BUILD,TICK_MS,ORIGIN,WORK,RECEIVE,allowedUrl,retryDelay,readHtml,runCycle,install};

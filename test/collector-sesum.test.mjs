@@ -30,7 +30,7 @@ test('all followed families resume across bounded ticks without a pilot or produ
   for(const {options} of h.calls){assert.equal(options.method,'GET');assert.equal(options.credentials,'same-origin');assert.equal(options.redirect,'error');assert.deepEqual(Object.keys(options.headers),['Accept']);}
   assert.ok(h.receipts.every(r=>r.status==='ok'&&r.result.endReached===true));
   assert.ok(h.receipts.every(r=>r.collectorVersion==='sesum-collector-1.7.0'),'successful browser work identifies its actual installed collector');
-  assert.ok(h.receipts.every(r=>r.collectorBuild==='sesum-collector-build-1.7.0-3'));
+  assert.ok(h.receipts.every(r=>r.collectorBuild==='sesum-collector-build-1.7.0-4'));
   assert.equal(JSON.stringify(h.receipts).includes('synthetic source only'),false,'raw HTML is never relayed');
 });
 test('only exact Sesum product and ordinary search routes are fetched',async()=>{
@@ -40,7 +40,7 @@ test('only exact Sesum product and ordinary search routes are fetched',async()=>
   const h=harness({jobs:[{...product,url:'https://evil.example/produkt/123-secret'}]});await h.run();
   assert.equal(h.calls.length,0);assert.equal(h.receipts[0].error.code,'invalid_job');
   assert.equal(h.receipts[0].collectorVersion,'sesum-collector-1.7.0');
-  assert.equal(h.receipts[0].collectorBuild,'sesum-collector-build-1.7.0-3');
+  assert.equal(h.receipts[0].collectorBuild,'sesum-collector-build-1.7.0-4');
 });
 test('authentication rejection stops the cycle and pauses ordinary reads',async()=>{
   const h=harness({jobs:[product,search(2)],fetchPage:async()=>htmlResponse({ok:false,status:403})});
@@ -80,4 +80,22 @@ test('ordinary-page reinjection replaces the earlier same-version build once wit
   assert.equal(collector.TICK_MS,20000);assert.deepEqual(cadences,[20000],'the page advances bounded batches every twenty seconds');
   collector.install(root);assert.equal(oldStops,1);assert.equal(intervals,1,'the identical build never duplicates its timer or listeners');
   root.__familienSesumStop();assert.equal(listeners.size,0);assert.equal(root.__familienSesumCollectorBuild,undefined);assert.equal(root.location.origin,ORIGIN);
+});
+
+test('one page owns the source across cycles and older or secondary tabs make no reads',async()=>{
+  let held=false;
+  const locks={async request(_key,_options,callback){const granted=!held;if(granted)held=true;try{return await callback(granted?{}:null);}finally{if(granted)held=false;}}};
+  const make=()=>{
+    const listeners=new Set(),timers=[],intervals=[];let requests=0;
+    const root={location:{origin:ORIGIN},FamilienSesumCore:{},navigator:{onLine:true,locks},fetch:async()=>{throw Error('disabled work must never fetch');},addEventListener:(_type,fn)=>listeners.add(fn),removeEventListener:(_type,fn)=>listeners.delete(fn),setTimeout:fn=>{timers.push(fn);return timers.length;},clearTimeout(){},setInterval:fn=>{intervals.push(fn);return intervals.length;},clearInterval(){},postMessage(message){requests++;for(const fn of listeners)fn({source:root,data:{familienCollectorReply:true,id:message.id,ok:true,data:{enabled:false}}});}};
+    collector.install(root);return {root,start:()=>timers[0](),tick:()=>intervals[0](),requests:()=>requests};
+  };
+  const first=make(),second=make(),flush=()=>new Promise(resolve=>setImmediate(resolve));
+  await first.start();await flush();assert.equal(first.requests(),1);assert.equal(held,true);
+  await second.start();await flush();assert.equal(second.requests(),0,'another installed page cannot claim or fetch a job');
+  let oldWorkerRead=false;await locks.request('familien-sesum-collector',{ifAvailable:true},lock=>{if(lock)oldWorkerRead=true;});assert.equal(oldWorkerRead,false,'an older per-cycle worker also yields');
+  await first.tick();await flush();assert.equal(first.requests(),2,'the owner still advances bounded cycles');
+  first.root.__familienSesumStop();await flush();assert.equal(held,false);
+  await second.tick();await flush();assert.equal(second.requests(),1,'another page can take over after the owner stops');
+  second.root.__familienSesumStop();await flush();assert.equal(held,false);
 });
