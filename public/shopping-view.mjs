@@ -37,6 +37,19 @@ const TIER_LABEL={excellent:'Svært bra pris',good:'Bra pris',small:'Liten rabat
 const BASIS_TEXT={'household-estimate':'etter det dere har oppgitt','planned-amount':'etter planlagt årsmengde','oda-lower-bound':'minst dette, ut fra kjøpene hos Oda','oda-share-estimate':'anslått ut fra Oda-kjøpene og hvor stor del av handelen de er'};
 const HELD_TEXT={member:'krever medlemskap vi ikke har registrert','needs-review':'venter på at en vare sjekkes','stale-prices':'venter på ferske priser'};
 
+export function refreshDraftChoices(edits,previous=[],next=[]) {
+  const before=new Map(previous.map(x=>[x.watchId,x])),after=new Map(next.map(x=>[x.watchId,x]));
+  for(const [id,state] of edits){
+    const old=before.get(id),item=after.get(id);
+    if(!old||!item){edits.delete(id);continue;}
+    const same=old.productId===item.productId&&old.packAmount===item.packAmount&&old.unit===item.unit;
+    const userPacks=state.userPacks??state.packs!==old.packs,userOn=state.userOn??state.on!==!old.elsewhere;
+    state.packs=same&&userPacks?Math.min(item.maxAtOda??100,Math.max(1,state.packs)):item.packs;
+    state.on=userOn?state.on:!item.elsewhere;
+    state.userPacks=!!(same&&userPacks);state.userOn=!!userOn;
+  }
+}
+
 export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/shopping',compact=false}) {
   const draftEdits=new Map(),cartState=new Map(),cartIds=new Map();let cartBusy=false;
   const check={itemId:null,query:'',price:'',size:null,custom:'',customUnit:null};
@@ -72,7 +85,9 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     banner.append(button(`${lead} · spar ${kr(summary.potential)} · se Handel`,onOpen));
   }
   async function load() {
-    data=await api('/family');
+    const next=await api('/family');
+    refreshDraftChoices(draftEdits,data?.odaDraft.items??[],next.odaDraft.items);
+    data=next;
     stale=false;
     updateBanner({...data.summary});
   }
@@ -503,11 +518,11 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
       for(const item of draft.items){
         const row=el('div',undefined,'shop-draft-row'),state=edit(item);
         const on=el('input');on.type='checkbox';on.checked=state.on;on.setAttribute('aria-label',`Ta med ${item.name}`);
-        on.onchange=()=>{state.on=on.checked;armed=false;refresh();};
+        on.onchange=()=>{state.on=on.checked;state.userOn=true;armed=false;refresh();};
         const text=el('div',undefined,'shop-list-text'),note={excellent:'Svært bra pris nå',good:'Bra pris nå',dear:'Dyrere enn vanlig, derfor lite'}[item.tier];
         text.append(el('strong',item.name),el('span',[item.productName,`${price(item.packPrice)} per pakke · ${price(item.unitPrice)}/${item.unit}`,note,draft.items.some(x=>x.stockKnown)&&!item.stockKnown?'Lager ikke talt':null].filter(Boolean).join(' · '),'shop-sub'));
         const value=el('span',String(state.packs),'shop-step-value'),step=el('div',undefined,'shop-step');
-        const change=delta=>{state.packs=Math.min(item.maxAtOda??100,Math.max(1,state.packs+delta));value.textContent=String(state.packs);armed=false;refresh();};
+        const change=delta=>{state.packs=Math.min(item.maxAtOda??100,Math.max(1,state.packs+delta));state.userPacks=true;value.textContent=String(state.packs);armed=false;refresh();};
         step.append(button('−',()=>change(-1)),value,button('+',()=>change(1)));
         const status=el('span',cartState.get(item.watchId)?.text??'','shop-draft-status');
         row.append(on,thumb(item.image),text,step,status);
