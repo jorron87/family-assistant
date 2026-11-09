@@ -532,6 +532,21 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
       }
     },'shop-variants');
   }
+  const receiptText=value=>{if(!value)return 'ukjent prisdato';const days=Math.floor((Date.now()-Date.parse(value))/86400000);return days<1?'i dag':days===1?'i går':days<60?days+' dager siden':new Intl.DateTimeFormat('nb-NO',{month:'short',year:'numeric',timeZone:'Europe/Oslo'}).format(new Date(value));};
+  // What "cheapest" was measured against. A reviewed family beats what one run saw.
+  function comparisonBlock(entry) {
+    if(entry.checkedAt)return null;
+    if(entry.family?.rows.length)return details('family:'+entry.id,`Sammenlign i varefamilien: ${entry.family.name} (${entry.family.total})`,node=>{
+      for(const row of entry.family.rows){const line=el('div',undefined,'shop-variant'),text=el('div',undefined,'shop-list-text');text.append(productName(row.name,{key:row.productKey}),el('span',row.storeName+' · '+price(row.unitPrice)+'/'+entry.family.unit,'shop-sub'));line.append(text);node.append(line);}
+      if(onExplore)node.append(button('Se hele varefamilien →',()=>onExplore(entry.family.groupId),'shop-explore'));
+    },'shop-variants');
+    if(entry.comparison)return details('compare:'+entry.id,`Sammenlignet med ${entry.comparison.candidates.length} ${entry.comparison.candidates.length===1?'vare':'varer'}`,node=>{
+      node.append(el('p',entry.comparison.basis,'shop-sub'));
+      for(const row of entry.comparison.candidates){const line=el('div',undefined,'shop-variant'),text=el('div',undefined,'shop-list-text');text.append(el('strong',row.name),el('span',[row.storeName,price(row.unitPrice)+'/'+row.unit,row.packPrice!=null?price(row.packPrice):null,receiptText(row.receiptAt),row.note].filter(Boolean).join(' · '),'shop-sub'));line.append(text);if(row.chosen)line.append(el('span','Valgt','shop-onlist'));else if(row.sourceUrl&&!isKiosk()){const source=link('Kilde ↗',row.sourceUrl);source.className='shop-list-source';line.append(source);}node.append(line);}
+    },'shop-variants');
+    if(entry.reason&&!entry.watchId&&entry.unitPrice)return el('p','Sammenligningsgrunnlaget er ikke lagret for denne varen. Agenten bygger en varefamilie, og da vises alternativene her.','shop-sub shop-compare-missing');
+    return null;
+  }
   function listRow(entry) {
     const row=el('div',undefined,'shop-list-row'+(entry.checkedAt?' done':''));
     const tick=el('input');tick.type='checkbox';tick.checked=!!entry.checkedAt;tick.setAttribute('aria-label',`Kjøpt: ${entry.name}`);
@@ -541,10 +556,12 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     const facts=[entry.cartError,entry.reason,entry.detail,entry.unitPrice?`${price(entry.unitPrice)}/${entry.unit}`:null,entry.saving?`Spar ${kr(entry.saving)}`:null,entry.cheaper&&!entry.places?.length?`Billigere nå: ${price(entry.cheaper.unitPrice)}/${entry.unit} hos ${entry.cheaper.storeName}`:null,entry.expired?'Tilbudet er over':entry.validTo?`Til ${dayLabel(entry.validTo)}`:null].filter(Boolean);
     if(facts.length)text.append(el('span',facts.join(' · '),'shop-sub'+(entry.expired?' shop-expired':'')));
     appendPills(text,entry);
+    const basis=comparisonBlock(entry);
     row.append(tick,thumb(entry.image),text);
-    if(entry.sourceUrl&&!isKiosk()){const source=link('Kilde ↗',entry.sourceUrl);source.className='shop-list-source';row.append(source);}
+    if(entry.sourceUrl&&!isKiosk()){const source=link(entry.offerId?'Kilde ↗':'Se varen ↗',entry.sourceUrl);source.className='shop-list-source';row.append(source);}
     const remove=button('×',()=>act(()=>api('/list',{action:'remove',id:entry.id})),'shop-list-remove');remove.setAttribute('aria-label',`Fjern ${entry.name}`);
     row.append(remove);
+    if(basis)row.append(basis);
     if(entry.routing==='choose'&&entry.suggestions?.length&&!entry.checkedAt){
       const picks=el('div',undefined,'shop-suggestions');
       picks.append(el('span','Hva mente du?','shop-sub'));
@@ -912,7 +929,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
       node.setAttribute('role','tab');node.setAttribute('aria-selected',String(key===tab));tabs.append(node);
     }
     head.append(tabs);
-    if(onExplore)head.append(button('Utforsk alle varene →',onExplore,'shop-explore'));
+    if(onExplore)head.append(button('Utforsk alle varene →',()=>onExplore(),'shop-explore'));
     const body=el('div',undefined,'shop-body');
     panel.append(head,refresh,body,toastNode);
     if(tab==='buy')renderBuy(body);else if(tab==='list')renderList(body);else if(tab==='pantry')renderPantry(body);else renderInsight(body);

@@ -71,6 +71,46 @@ test('a current flyer offer stays in the system for a chain whose library prices
  assert.equal(detail.members.length,0);assert.equal(detail.offers.length,1);
 });
 
+test('a free-text list line stays on the agent queue until it belongs to a reviewed family',t=>{
+ const f=fixture(t);
+ f.shop.settings({monitoringEnabled:true,stores:[]});
+ const work=()=>f.shop.queue().filter(x=>x.do==='shopping-list-family');
+ const line=f.shop.list({action:'add',name:'Panko mel',need:'later'});
+ assert.equal(work().length,0,'the first placement comes first');
+ const comparison={basis:'Tørket panko til panering',candidates:[{name:'Lotus 230 g',storeName:'Fudi',unitPrice:99,unit:'kg',receiptAt:RECEIPT,chosen:true,sourceUrl:'https://fudi.example.test/lotus'},{name:'Blue Dragon 200 g',storeName:'Oda',unitPrice:150,unit:'kg',receiptAt:RECEIPT}]};
+ assert.throws(()=>f.shop.list({action:'route',id:line.id,storeName:'Fudi',reason:'Billigst',unitPrice:99,unit:'kg'}),/comparison/,'a price claim needs its basis');
+ assert.throws(()=>f.shop.list({action:'route',id:line.id,storeName:'Fudi',reason:'Billigst',unitPrice:50,unit:'kg',comparison}),/stemmer ikke/);
+ assert.throws(()=>f.shop.list({action:'route',id:line.id,storeName:'Fudi',reason:'Billigst',unitPrice:99,unit:'kg',comparison:{...comparison,candidates:comparison.candidates.map(c=>({...c,chosen:true}))}}),/nøyaktig én/);
+ f.shop.list({action:'route',id:line.id,storeName:'Fudi',reason:'Billigst',unitPrice:99,unit:'kg',matchedName:'Lotus 230 g',comparison});
+ const open=()=>f.shop.familyView().list.open.find(x=>x.id===line.id);
+ assert.deepEqual(open().comparison.candidates.map(c=>[c.name,c.chosen]),[['Lotus 230 g',true],['Blue Dragon 200 g',false]]);
+ assert.equal(open().family,null);
+ assert.equal(open().sourceUrl,'https://fudi.example.test/lotus','the chosen product is one click away');
+ assert.deepEqual(work().map(x=>[x.key,x.lineIds]),[['panko mel',[line.id]]]);
+ f.shop.list({action:'check',id:line.id});
+ assert.equal(work().length,1,'buying the item does not end the review');
+ f.shop.list({action:'uncheck',id:line.id});
+ const g=f.provider.reader().group(f.g.id),decision={key:'Panko mel',status:'linked',groupId:f.g.id,groupFingerprint:g.fingerprint,evidence:'Alle kandidater lest',candidatesReviewed:4,queries:['panko','panko strøbrød']};
+ assert.throws(()=>f.shop.listFamily({...decision,evidence:' '}),/Vurderingsbelegg/);
+ assert.throws(()=>f.shop.listFamily({...decision,queries:[]}),/søkene/);
+ assert.throws(()=>f.shop.listFamily({...decision,groupFingerprint:'x'}),/endret/);
+ assert.throws(()=>f.shop.listFamily({...decision,groupId:'finnes-ikke'}),/Ukjent/);
+ assert.throws(()=>f.shop.listFamily({...decision,candidatesReviewed:0}),/lavere/);
+ assert.throws(()=>f.shop.listFamily({...decision,productKey:'kassal:X:1'}),/ikke godkjent/);
+ f.shop.listFamily({...decision,productKey:f.p.productKey});
+ assert.equal(work().length,0);
+ assert.equal(open().family.name,f.g.name);assert.equal(open().family.rows[0].unitPrice,40);assert.equal(open().productKey,f.p.productKey);
+ assert.throws(()=>f.shop.listFamily(decision),/venter ikke/);
+ const other=f.shop.list({action:'add',name:'Engangsgrill',need:'later'});
+ f.shop.list({action:'route',id:other.id,storeName:'Nærmeste butikk',reason:'Ingen pris funnet'});
+ assert.equal(work().length,1,'a line without any price still needs a decision');
+ const linkedLater=f.shop.list({action:'add',name:'Panko grov',need:'later'});
+ f.shop.list({action:'route',id:linkedLater.id,storeName:'Nærmeste butikk',reason:'Ukjent',productKey:f.p.productKey});
+ assert.equal(f.shop.familyView().list.open.find(x=>x.id===linkedLater.id).sourceUrl,f.p.sourceUrl,'a known library product brings its own link');
+ f.shop.listFamily({key:'Engangsgrill',status:'none',evidence:'Sesongvare uten sammenlignbare alternativer',candidatesReviewed:0,queries:['engangsgrill']});
+ assert.equal(work().length,0);
+});
+
 test('changed composition, package, review or group rules cannot lend a library price to a watch',t=>{
  const f=fixture(t);f.approve();
  f.p.ingredients='Ground beans';f.p.metadataFingerprint=productMetadataFingerprint(f.p);f.d.memberships[0].reviewedFingerprint=f.p.metadataFingerprint;f.write();assert.equal(f.shop.familyView().items[0].prices.current,60);

@@ -130,6 +130,7 @@ async function handle(req, res) {
       if(path==='/api/shopping/stock-review')return send(res,200,store.shopping.stockIntake.review(input));
       if(path==='/api/shopping/stock-scan')return send(res,200,store.shopping.stockScan(input));
       if(path==='/api/shopping/library-link')return send(res,200,store.shopping.libraryLink(input));
+      if(path==='/api/shopping/library-list-family')return send(res,200,store.shopping.listFamily(input));
       if(path==='/api/shopping/library-audit-ack')return send(res,200,store.shopping.libraryAuditAck(input));
       if(path==='/api/shopping/stock-action')return send(res,200,store.shopping.stockIntake.action(input));
       if(path==='/api/shopping/kassal/configure')return send(res,200,kassal.configure(input));

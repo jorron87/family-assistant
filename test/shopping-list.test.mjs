@@ -68,7 +68,7 @@ test('unknown items wait for agent routing, and known items are placed at once',
  const e=shop.list({action:'add',name:'Oppvasktabletter'});assert.equal(e.routing,'pending');
  assert.equal(shop.queue().filter(x=>x.do==='shopping-list-route').length,1);
  assert.throws(()=>shop.list({action:'route',id:e.id,storeName:'Oda'}),/Begrunnelse/);
- shop.list({action:'route',id:e.id,storeName:'Oda',reason:'Oda er billigst',odaProductId:77,unitPrice:50,unit:'stk',packAmount:1,packs:2,matchedName:'Tabletter'});
+ shop.list({action:'route',id:e.id,storeName:'Oda',reason:'Oda er billigst',odaProductId:77,unitPrice:50,unit:'stk',packAmount:1,packs:2,matchedName:'Tabletter',comparison:{basis:'Samme tabletter',candidates:[{name:'Tabletter',storeName:'Oda',unitPrice:50,unit:'stk',chosen:true}]}});
  assert.equal(shop.listRouteWork().length,0);assert.equal(shop.familyView().odaDraft.items.find(x=>x.productId===77).packs,2);
  const w=flour(shop);odaItem(shop,w.id);
  const placed=shop.list({action:'add',name:'mel'});assert.equal(placed.storeName,'Oda');assert.equal(placed.odaProductId,555);assert.equal(placed.reason,'Oda er omtrent like billig');

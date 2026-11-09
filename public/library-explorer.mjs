@@ -96,6 +96,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
       if(fresh)await loadIngredientHits();
       if(!built)build();
       schedule();
+      openWanted();
     }catch(error){if(!model)panel.replaceChildren(stateCard(error.message));}
     finally{loading=false;}
   }
@@ -963,5 +964,13 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     document.body.append(box);box.showModal();
   }
 
-  return {open};
+  let wantedFamily=null;
+  function openWanted() {
+    const family=wantedFamily&&model?.families.find(f=>f.id===wantedFamily);
+    if(!family)return;
+    wantedFamily=null;stack.length=0;showFamily(family.index);
+  }
+  function openFamily(id) {wantedFamily=id;if(model&&built)openWanted();else open();}
+
+  return {open,openFamily};
 }

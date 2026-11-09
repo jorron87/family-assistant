@@ -26,6 +26,8 @@ A watch can be linked to reviewed product-library groups with `shopping-library-
 
 Products whose newest actual price receipt is older than the library's price horizon (183 days by default) are parked: they are hidden from family views and create no review, link or audit work, so do not review or research them. Nothing is deleted, and a newer receipt brings a product back. Flyers are still read for every selected store, and a registered offer needs no fresh library price. See the runbook.
 
+Everything on a shopping list should end up in a reviewed product family. Handle `shopping-list-family` by searching widely across brands and stores, reviewing the actual contents and pack of every candidate and registering the family; finding the cheapest product is not enough. A priced `shopping-list-route` must store what it compared. See the runbook.
+
 Product-library quality scores are versioned, category-specific ingredient-content evidence, not overall health ratings or new equivalence approvals. Compare scores only with the same comparisonKey. Missing facts remain null; tomato-purée percentage is not fresh-tomato input without an evidenced conversion. Preserve separate sugar/salt facts, sources and material differences. Quality never refreshes a price or overrides household variant requirements. See docs/runbook.md.
 
 Wholesale quotes may exclude VAT. Preserve the quoted amount and apply the evidenced VAT rate before comparison with household prices. Configure `pricesIncludeVat:false` for such stores; an offer then requires `vatRate` and is normalized to a gross pack price. Do not confuse chicken thighs with breast, ground coffee with whole beans, or a wholesale case price with a price per kilogram.

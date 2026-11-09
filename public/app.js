@@ -28,8 +28,9 @@ let houseLoading=false;
 let profileEditor;
 let profileLoading=false;
 let state;
-const shoppingView=installShoppingView({panel:document.querySelector('#shopping'),banner:document.querySelector('#shopping-banner'),onOpen:()=>setTab('shopping'),onExplore:()=>setTab('explore')});
-let explorerView=null;
+const shoppingView=installShoppingView({panel:document.querySelector('#shopping'),banner:document.querySelector('#shopping-banner'),onOpen:()=>setTab('shopping'),onExplore:id=>{setTab('explore');if(id)explorerInstance().then(view=>view.openFamily(id));}});
+let explorerReady=null;
+const explorerInstance=()=>explorerReady??=import("./library-explorer.mjs?v="+Date.now()).then(({installLibraryExplorer})=>installLibraryExplorer({panel:document.querySelector("#explore")}));
 const kiosk = new URLSearchParams(location.search).has("kiosk");
 let doorbellView={isOpen:()=>false};
 // ?celebrate=tick eller ?celebrate=done viser feiringen med prøvedata (uten å krysse av noe).
@@ -844,8 +845,7 @@ function render() {
   for (const element of document.querySelectorAll("[data-scroll-key]")) element.scrollTop=scrolls.get(element.dataset.scrollKey) || 0;
 }
 async function loadExplorer() {
- if(!explorerView){const {installLibraryExplorer}=await import("./library-explorer.mjs?v="+Date.now());explorerView=installLibraryExplorer({panel:document.querySelector("#explore")});}
- explorerView.open();
+ (await explorerInstance()).open();
 }
 async function loadHouseView() {
  if(houseView||houseLoading)return;houseLoading=true;try{const {installHomeView}=await import("./home-view.mjs?v="+Date.now());houseView=installHomeView({panel:document.querySelector("#house"),rail:document.querySelector("#house-rail"),onOpen:()=>setTab("house"),onData:kiosk?kioskHome.setHome:undefined});}catch{document.querySelector("#house").textContent="Husvisningen aktiveres når den pågående kjøringen er ferdig.";}finally{houseLoading=false;}

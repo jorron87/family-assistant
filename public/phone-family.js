@@ -8,9 +8,10 @@ const node=(tag,text,cls)=>{const el=document.createElement(tag);if(text!==undef
 const dayText=(day,opts={weekday:'long',day:'numeric',month:'long'})=>new Intl.DateTimeFormat('nb-NO',{timeZone:'Europe/Oslo',...opts}).format(new Date(day+'T12:00:00Z'));
 export function installFamily({api,post,status}) {
  let editor,shopping;
- async function openShopping(){try{if(!shopping){const {installShoppingView}=await import('./shopping-view.mjs?v='+Date.now());shopping=installShoppingView({panel:$('#family-shopping'),base:'/send/api/shopping',compact:true,onExplore:()=>setView('explore')});}shopping.open();}catch{$('#family-shopping').textContent='Handel blir tilgjengelig når den pågående kjøringen er ferdig.';}}
- let explorer;
- async function openExplorer(){try{if(!explorer){const {installLibraryExplorer}=await import('./library-explorer.mjs?v='+Date.now());explorer=installLibraryExplorer({panel:$('#family-explore'),base:'/send/api/shopping',compact:true,onBack:()=>setView('shopping')});}explorer.open();}catch{$('#family-explore').textContent='Varene blir tilgjengelige når den pågående kjøringen er ferdig.';}}
+ async function openShopping(){try{if(!shopping){const {installShoppingView}=await import('./shopping-view.mjs?v='+Date.now());shopping=installShoppingView({panel:$('#family-shopping'),base:'/send/api/shopping',compact:true,onExplore:id=>{setView('explore');if(id)explorerInstance().then(view=>view.openFamily(id));}});}shopping.open();}catch{$('#family-shopping').textContent='Handel blir tilgjengelig når den pågående kjøringen er ferdig.';}}
+ let explorerReady;
+ const explorerInstance=()=>explorerReady??=import('./library-explorer.mjs?v='+Date.now()).then(({installLibraryExplorer})=>installLibraryExplorer({panel:$('#family-explore'),base:'/send/api/shopping',compact:true,onBack:()=>setView('shopping')}));
+ async function openExplorer(){try{(await explorerInstance()).open();}catch{explorerReady=null;$('#family-explore').textContent='Varene blir tilgjengelige når den pågående kjøringen er ferdig.';}}
  async function refreshProfile(){try{if(!editor){const {installProfileEditor}=await import('./profile-editor.mjs?v='+Date.now());editor=installProfileEditor($('#mobile-profile-cards'),{read:()=>api('/profile'),save:data=>post('/profile/edit',data),onSaved:()=>refresh()});}await editor.refresh();}catch{$('#mobile-profile-cards').textContent='Profilredigeringen blir tilgjengelig når den pågående kjøringen er ferdig.';}}
  let data={members:[],events:[]},person='all',view='home',mode='agenda',day=osloDay(),showLater=false,signature='',openedId=null;
  const colors=new Proxy({}, {get:(_,id)=>memberColor(data.members,id)});
