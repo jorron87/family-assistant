@@ -22,6 +22,7 @@ test('a later cheaper SKU immediately caps campaigns, draft tiers, inventory and
  assert.equal(family.deals.length,0);assert.equal(all[0].tier,'small');assert.ok(all[0].discountPct<1);assert.equal(all[0].referencePrice,172.89);
  assert.equal(row.unitPrice,172.89);assert.equal(row.packPrice,38.9);assert.equal(row.tier,'small');assert.ok(row.wanted<=5,'under8% must not recommend twelve months');
  assert.equal(family.items[0].prices.current,171.6);assert.equal(shop.checklist()[0].cheapestNow,171.6);
+ assert.equal(family.items[0].prices.good,157.87);assert.equal(family.items[0].prices.excellent,157.87,'displayed guide thresholds include the same minimum saving as recommendations');
  assert.ok(family.list.open[0].saving<2,'the displayed list saving is recomputed too');
  clock.at='2026-11-09T12:02:00Z';observe(30);
  const updated=shop.familyView();assert.equal(updated.deals.length,0);assert.equal(updated.items[0].prices.current,133.33);assert.equal(updated.items[0].prices.currentChain,'Oda');
