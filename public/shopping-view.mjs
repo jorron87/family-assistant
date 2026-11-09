@@ -416,7 +416,13 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
 
   // ---- Handleliste ----
   // Puts a product from another chain on that chain's part of the shopping list.
+  const placeAction=place=>place.odaProductId?'Legg i Oda-kurven':'Legg på listen';
+  function moveToOda(entryId,productId) {
+    let note=null;
+    act(async()=>{const moved=await api('/list',{action:'toOda',id:entryId,productId});note=moved.inCart?'Lagt i Oda-kurven.':moved.cartError?'Sjekk Oda-kurven.':'Flyttet til Oda.';if(moved.inCart)await loadCart(true);},()=>note);
+  }
   function addElsewhere(place,context) {
+    if(place.odaProductId)return moveToOda(context.replaceEntry,place.odaProductId);
     const wanted=context.amount(),packs=place.packAmount&&wanted?Math.max(1,Math.ceil(wanted/place.packAmount-.001)):1,cost=place.unitPrice*(place.packAmount?packs*place.packAmount:0);
     const saving=wanted&&place.packAmount?Math.max(0,context.currentUnit*wanted-cost):null;
     const body=place.offerId?{action:'add',offerId:place.offerId,packs:place.maxPacks?Math.min(place.maxPacks,packs):packs}:{action:'add',alternative:true,...(context.watchId?{watchId:context.watchId}:{}),name:context.name,detail:place.name,storeName:place.storeName,packs,packAmount:place.packAmount,unit:context.unit,unitPrice:place.unitPrice,saving:saving===null?null:Math.round(saving*100)/100,imageId:place.image};
@@ -428,7 +434,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     for(const place of item.places){
       const row=el('div',undefined,'shop-elsewhere-row'),text=el('div',undefined,'shop-list-text');
       text.append(el('strong',place.storeName+(place.online?' (+ frakt)':'')+': '+price(place.unitPrice)+'/'+context.unit),el('span',[place.name,place.offer?'tilbud':null,place.own?null:'utenfor butikkene deres'].filter(Boolean).join(' · '),'shop-sub'));
-      row.append(thumb(place.image),text,button('Legg på listen',()=>addElsewhere(place,context)));
+      row.append(thumb(place.image),text,button(placeAction(place),()=>addElsewhere(place,context)));
       box.append(row);
     }
     const note=el('p','','shop-sub shop-elsewhere-note');
@@ -452,7 +458,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
       for(const other of others){
         const row=el('div',undefined,'shop-variant'),text=el('div',undefined,'shop-list-text');
         text.append(el('strong',other.name),el('span',[other.storeName+(other.online?' (+ frakt)':''),other.packPrice!=null?price(other.packPrice):null,price(other.unitPrice)+'/'+unit,other===others[0]?'billigst':null,other.offer?'tilbud':null,other.quality?`${other.quality.label} ${nf(0).format(other.quality.score)} av 100`:null,other.own?null:'utenfor butikkene deres'].filter(Boolean).join(' · '),'shop-sub'));
-        row.append(thumb(other.image),text);if(context)row.append(button('Legg på listen',()=>addElsewhere(other,context)));node.append(row);
+        row.append(thumb(other.image),text);if(context&&other.storeName!==context.currentStore)row.append(button(placeAction(other),()=>addElsewhere(other,context)));node.append(row);
       }
     },'shop-variants');
   }
@@ -475,8 +481,9 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
       picks.append(button('Ingen av disse',()=>act(()=>api('/list',{action:'choose',id:entry.id,agent:true}),'Vi finner beste sted.'),'shop-quiet'));
       row.append(picks);
     }
+    if(entry.odaReturn&&!entry.checkedAt){const back=el('div',undefined,'shop-return');back.append(button('Flytt til Oda · '+price(entry.odaReturn.unitPrice)+'/'+entry.unit,()=>moveToOda(entry.id,entry.odaReturn.productId)));row.append(back);}
     if(!entry.checkedAt&&(entry.places?.length||entry.variants?.length>1||entry.others?.length)){
-      const context={watchId:entry.watchId,name:entry.name,unit:entry.unit,currentUnit:entry.unitPrice,amount:()=>(entry.packs??0)*(entry.packAmount??0),label:()=>entry.packs+' pk på listen',replaceEntry:entry.id};
+      const context={watchId:entry.watchId,name:entry.name,unit:entry.unit,currentUnit:entry.unitPrice,amount:()=>(entry.packs??0)*(entry.packAmount??0),label:()=>entry.packs+' pk på listen',replaceEntry:entry.id,currentStore:entry.storeName};
       if(entry.places?.length)row.append(cheaperBlock(entry,context));
       if(entry.variants?.length>1||entry.others?.length)row.append(variantChooser(entry.watchId,entry.variants,entry.odaProductId,entry.unit,undefined,entry.others,context));
     }

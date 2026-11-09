@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {libraryPriceProvider,writeShoppingIndex} from '../src/shopping-library.mjs';
 import {shoppingStore,namedPackConflict} from '../src/shopping.mjs';
+import {createOdaCart} from '../src/shopping-oda-cart.mjs';
 import {productMetadataFingerprint,groupMetadataFingerprint} from '../src/product-library.mjs';
 
 const NOW='2026-11-09T12:10:00Z',RECEIPT='2026-11-09T12:05:00Z';
@@ -212,7 +213,7 @@ test('every list line that costs more elsewhere is marked, also lines at another
  const f=fixture(t);f.native(f.rows[0]);
  const entry=f.shop.list({action:'add',alternative:true,watchId:f.w.id,name:'Tomatketchup',storeName:'MENY',packs:1,packAmount:.5,unit:'kg',unitPrice:60});
  const row=f.shop.familyView().list.open.find(x=>x.id===entry.id);
- assert.deepEqual(row.places.map(x=>x.storeName),['Rest']);assert.equal(row.savings.annual,300);
+ assert.deepEqual(row.places.map(x=>x.storeName),['Rest','Oda']);assert.equal(row.savings.storeName,'Oda','a web shop without freight is not the saving basis');assert.equal(row.savings.annual,264);
  f.shop.list({action:'check',id:entry.id});assert.deepEqual(f.shop.familyView().list.done.find(x=>x.id===entry.id).places,[]);
 });
 
@@ -229,4 +230,23 @@ test('photos from other chains come from a sidecar and are served only from know
  assert.equal(row.variants.find(x=>x.productId===2).image,null,'only https addresses are accepted');
  const entry=f.shop.list({action:'add',alternative:true,watchId:f.w.id,name:'Tomatketchup',storeName:'MENY',packs:1,packAmount:.5,unit:'kg',unitPrice:24,imageId:meny.image});
  assert.equal(f.shop.familyView().list.open.find(x=>x.id===entry.id).image,meny.image);
+});
+
+test('a line moved to another store can go back to Oda, as Oda variants and in one tap',async t=>{
+ const f=fixture(t);f.native(f.rows[0]);
+ const entry=f.shop.list({action:'add',alternative:true,watchId:f.w.id,name:'Tomatketchup',detail:'Meny ketchup 500 g',storeName:'MENY',packs:3,packAmount:.5,unit:'kg',unitPrice:24});
+ const row=f.shop.familyView().list.open.find(x=>x.id===entry.id);
+ assert.equal(row.odaReturn.productId,1,'the usual Oda product, not the cheapest other brand');
+ assert.ok(row.others.filter(x=>x.storeName==='Oda').some(x=>x.odaProductId===1));
+ assert.throws(()=>f.shop.list({action:'toOda',id:entry.id,productId:999}),/Varianten/);
+ const moved=f.shop.list({action:'toOda',id:entry.id,productId:1});
+ assert.equal(moved.storeName,'Oda');assert.equal(moved.odaProductId,1);assert.equal(moved.packs,3);assert.equal(moved.unitPrice,60);assert.equal(moved.offerId,null);assert.equal(moved.saving,null);
+ assert.equal(f.shop.familyView().list.open.find(x=>x.id===entry.id).odaReturn,null);
+ const urgent=f.shop.list({action:'add',alternative:true,watchId:f.w.id,name:'Tomatketchup',storeName:'SPAR',packs:1,packAmount:.5,unit:'kg',unitPrice:24,need:'now'});
+ urgent.need='now';f.state.shopping.shoppingList.find(x=>x.id===urgent.id).need='now';
+ assert.equal(f.shop.familyView().list.open.find(x=>x.id===urgent.id).odaReturn,null);assert.throws(()=>f.shop.list({action:'toOda',id:urgent.id,productId:1}),/nærbutikk/);
+ const calls=[],oda={status:()=>({connected:true}),addToCart:async x=>{calls.push(x);},cart:async()=>({groups:[],validationMessages:[]})},cart=createOdaCart({oda,shopping:f.shop});
+ const again=f.shop.list({action:'add',alternative:true,watchId:f.w.id,name:'Tomatketchup',storeName:'Rema',packs:1,packAmount:.5,unit:'kg',unitPrice:24});
+ const result=await cart.list({action:'toOda',id:again.id,productId:1});
+ assert.equal(result.inCart,true);assert.deepEqual(calls.map(x=>[x.productId,x.quantity]),[[1,1]]);assert.equal(f.shop.familyView().list.open.some(x=>x.id===again.id),false);
 });
