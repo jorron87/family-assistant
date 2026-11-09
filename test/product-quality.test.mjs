@@ -85,3 +85,12 @@ test('reviewed cross-source label facts retain their own source and detect contr
  const q=scoreProductQuality(p,{groupId:'ketchup-standard',reviewCurrent:true});assert.equal(q.score,100);assert.equal(q.measurement.evidence[0].field,'crossSourceLabel.description');assert.equal(q.measurement.evidence[0].sourceUrl,'https://producer.example/label');
  p.description='1 kg tomater til 1 kg ketchup';assert.equal(scoreProductQuality(p,{groupId:'ketchup-standard',reviewCurrent:true}).score,null);
 });
+test('a reviewed primary supplier statement carries its own source and preserves contradictions',()=>{
+ const p={ingredients:'Tomatkonsentrat 68%, sukker, salt.',sourceUrl:'https://store.example/sku',nutritionObservation:{primaryLabel:{primaryUrl:'https://supplier.example/sku',description:'Det brukes 750 gram friske solmodne tomater for å lage 300 gram ketchup.'}}};
+ const q=scoreProductQuality(p,{groupId:'ketchup-standard',reviewCurrent:true});assert.equal(q.score,100);assert.equal(q.measurement.value,250);assert.equal(q.measurement.evidence[0].field,'primaryLabel.description');assert.equal(q.measurement.evidence[0].sourceUrl,'https://supplier.example/sku');
+ const noSource=structuredClone(p);delete noSource.nutritionObservation.primaryLabel.primaryUrl;assert.equal(scoreProductQuality(noSource,{groupId:'ketchup-standard',reviewCurrent:true}).score,null);
+ p.description='2 kg tomater til 1 kg ketchup';assert.equal(scoreProductQuality(p,{groupId:'ketchup-standard',reviewCurrent:true}).score,null);
+ assert.equal(scoreProductQuality(p,{groupId:'ketchup-standard'}).score,null);
+ assert.equal(score('Peanøtter*','peanut-butter-100').score,100);
+ assert.equal(score('Peanøtter*, havsalt.','peanut-butter-100').score,null);
+});

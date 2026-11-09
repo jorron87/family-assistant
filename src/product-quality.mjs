@@ -1,6 +1,6 @@
 // A transparent category-specific ingredient-content score, not a health rating.
 // It never approves equivalence, changes a price, or supplies missing label facts.
-export const QUALITY_MODEL_VERSION='ingredient-content-v2';
+export const QUALITY_MODEL_VERSION='ingredient-content-v3';
 const clean=v=>String(v??'').normalize('NFC').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
 const number=v=>Number(v.replace(',','.'));
 const decimal='(?<![\\d.,])(\\d{1,4}(?:[.,]\\d{1,3})?)';
@@ -16,17 +16,18 @@ function percent(ingredients,token,{allowSpeciesList=false}={}){
  if(allowSpeciesList)patterns.push(new RegExp('^(?:'+token+')\\s*\\[[^\\[\\]]+\\]\\s*'+decimal+'\\s*%(?!\\s*av\\b)','i'));
  const found=[];for(const part of components(ingredients))for(const re of patterns){const m=part.match(re);if(m)found.push({value:number(m[1]),text:m[0],field:'ingredients'});}return uniqueFact(found,100);
 }
-function tomatoInput(ingredients,description,crossDescription=''){const found=[];for(const [field,text]of [['ingredients',ingredients],['description',description],['crossSourceLabel.description',crossDescription]]){
+function tomatoInput(ingredients,description,crossDescription='',primaryDescription=''){const found=[];for(const [field,text]of [['ingredients',ingredients],['description',description],['crossSourceLabel.description',crossDescription],['primaryLabel.description',primaryDescription]]){
  const patterns=[
   {re:new RegExp('tomater?\\s*\\(\\s*'+decimal+'\\s*g\\s*(?:per|pr\\.?|i|til)\\s*100\\s*g\\s*(?:tomat)?ketchup','gi'),convert:m=>number(m[1])},
   {re:new RegExp('(?:til|per|pr\\.?)\\s*100\\s*g\\s*(?:tomat)?ketchup.{0,35}?'+decimal+'\\s*g\\s*(?:friske\\s+|ferske\\s+)?tomater','gi'),convert:m=>number(m[1])},
-  {re:new RegExp(decimal+'\\s*(?:kg|kilo)\\s+tomater\\s+(?:til|per|pr\\.?)\\s*'+decimal+'\\s*(?:kg|kilo)\\s+(?:tomat)?ketchup','gi'),convert:m=>number(m[1])/number(m[2])*100}
+  {re:new RegExp(decimal+'\\s*(?:kg|kilo)\\s+tomater\\s+(?:til|per|pr\\.?)\\s*'+decimal+'\\s*(?:kg|kilo)\\s+(?:tomat)?ketchup','gi'),convert:m=>number(m[1])/number(m[2])*100},
+  {re:new RegExp(decimal+'\\s*(?:g|gram)\\s+(?:friske\\s+|ferske\\s+)?(?:solmodne\\s+)?tomater\\s+(?:for å lage|til)\\s*'+decimal+'\\s*(?:g|gram)\\s+(?:tomat)?ketchup','gi'),convert:m=>number(m[1])/number(m[2])*100}
  ];for(const {re,convert}of patterns)for(const m of text.matchAll(re))found.push({value:convert(m),text:m[0],field});
  }return uniqueFact(found,1000);}
 function profile(groupId){
  const id=String(groupId??'').split('--')[0];
  if(/^ketchup-(?:standard|no-sugar)$/.test(id))return{id:'ketchup',label:'Tomater brukt per 100 g ketchup',basis:'tomato-input-g-per-100g',unit:'g/100 g',target:200};
- if(/^peanut-butter-(?:100|near-pure|standard)$/.test(id))return{id:'peanut-butter',label:'Deklarert peanøttandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'peanøtter|peanøttkjerner|peanuts',single:/^(?:økologiske?\s+|ristede\s+)?(?:peanøtter|peanuts)(?:\s*\(100\s*%\))?\.?$/i};
+ if(/^peanut-butter-(?:100|near-pure|standard)$/.test(id))return{id:'peanut-butter',label:'Deklarert peanøttandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'peanøtter|peanøttkjerner|peanuts',single:/^(?:økologiske?\s+|ristede\s+)?(?:peanøtter|peanuts)\*?(?:\s*\(100\s*%\))?\.?$/i};
  if(id==='hazelnut-chocolate-spread')return{id:'hazelnut-spread',label:'Deklarert hasselnøttandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'(?:hasselnøtt(?:er|kjerner|masse)?|hasselnötter)(?:\\s*/\\s*hasselnøddekerner)?'};
  if(['fishcakes-ordinary','fishcakes-high','fishcakes-very-high'].includes(id))return{id:'fishcakes',label:'Deklarert total fiskeandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'fisk'};
  if(/^(?:fruit-spread-|jam-)/.test(id)){
@@ -43,11 +44,11 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
  const p=profile(groupId),base={modelVersion:QUALITY_MODEL_VERSION,label:'Råvarekvalitet',score:null,status:p?'unknown':'not-applicable',comparisonKey:null,criterion:p?.label??null,measurement:null,context:[],nutrition:null,reasons:[],limitations:[...limitations]};
  if(!reviewCurrent)return{...base,status:'review-required',reasons:['current-product-review-required']};
  if(!p)return{...base,reasons:['no-category-model']};
- const cross=product?.nutritionObservation?.crossSourceLabel,ingredients=clean(product?.ingredients||cross?.ingredients),description=clean(product?.description),m=product?.nutrition?.basis==='g'?product.nutrition.per100:null;
+ const cross=product?.nutritionObservation?.crossSourceLabel,primary=product?.nutritionObservation?.primaryLabel,ingredients=clean(product?.ingredients||cross?.ingredients),description=clean(product?.description),m=product?.nutrition?.basis==='g'?product.nutrition.per100:null;
  base.nutrition=m?{basis:'per 100 g',sugars:Number.isFinite(m.sugars)?m.sugars:null,salt:Number.isFinite(m.salt)?m.salt:null}:null;
  let result;
  if(p.id==='ketchup'){
-  result=tomatoInput(ingredients,description,clean(cross?.description));
+  result=tomatoInput(ingredients,description,clean(cross?.description),/^https:\/\/\S+$/i.test(primary?.primaryUrl??'')?clean(primary?.description):'');
   const puree=percent(ingredients,'tomatpur[eéè]|tomatpasta|tomatkonsentrat');
   if(puree.fact)base.context.push({name:'Deklarert tomatpuré/-konsentrat',value:puree.fact.value,unit:'%',evidence:puree.fact.evidence,note:'Konsentrasjon/tørrstoff er ukjent. Prosenten omregnes ikke til ferske tomater.'});
  }else{
@@ -67,6 +68,6 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
  }
  if(!result.fact)return{...base,reasons:[result.reason,...(p.id==='ketchup'?['puree-percent-is-not-fresh-tomato-input']:[])]};
  const measurement={...result.fact,name:p.label,unit:p.unit,basis:p.basis,sourceUrl:product?.sourceUrl??null};
- measurement.evidence=measurement.evidence.map(e=>({...e,field:e.field==='ingredients'&&!product?.ingredients?'crossSourceLabel.ingredients':e.field,sourceUrl:e.field.startsWith('crossSourceLabel')||e.field==='ingredients'&&!product?.ingredients?cross?.sourceUrl??product?.sourceUrl??null:product?.sourceUrl??null}));
+ measurement.evidence=measurement.evidence.map(e=>({...e,field:e.field==='ingredients'&&!product?.ingredients?'crossSourceLabel.ingredients':e.field,sourceUrl:e.field.startsWith('primaryLabel')?primary?.primaryUrl??null:e.field.startsWith('crossSourceLabel')||e.field==='ingredients'&&!product?.ingredients?cross?.sourceUrl??product?.sourceUrl??null:product?.sourceUrl??null}));
  return{...base,status:'scored',score:Math.round(Math.min(100,result.fact.value/p.target*100)*10)/10,comparisonKey:QUALITY_MODEL_VERSION+':'+p.id+(p.subtype?':'+p.subtype:'')+':'+p.basis,criterion:p.label,measurement,normalization:{target:p.target,unit:p.unit,formula:'min(100, deklarert mengde / målverdi × 100)'},reasons:[]};
 }
