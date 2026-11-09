@@ -19,6 +19,13 @@ function fixture() {
  return {schemaVersion:1,createdAt:OLD,updatedAt:NOW,coverage:{note:'Discovery plan is not assortment coverage'},groups:[group()],products:[a,b],memberships:[membership(a),membership(b)],prices:[price(a,30),price(b,25)]};
 }
 
+test('quality annotations follow reviewed metadata without changing price or equivalence decisions',()=>{
+ const data=fixture(),g={...group(),id:'ketchup-standard',inclusionCriteria:'Vanlig tomatketchup'};data.groups=[g];data.products=data.products.map((p,i)=>{const out={...p,name:'Tomatketchup',ingredients:i?'Tomater (200g per100g ketchup), sukker.':'Tomater (148g per100g ketchup), sukker.'};out.metadataFingerprint=productMetadataFingerprint(out);return out;});data.memberships=data.products.map(p=>({...membership(p),groupId:g.id,reviewedGroupFingerprint:groupMetadataFingerprint(g)}));
+ const before=createProductLibrary(data,{now:NOW}).compare(g.id);assert.equal(before.rows.find(r=>r.productKey===data.products[0].productKey).quality.score,74);assert.equal(before.rows.find(r=>r.productKey===data.products[1].productKey).quality.score,100);assert.equal(before.cheapest.unitPrice,50);
+ data.products[1].ingredients='Tomater (250g per100g ketchup), sukker.';const changed=createProductLibrary(data,{now:NOW}).compare(g.id);assert.equal(changed.rows.find(r=>r.productKey===data.products[1].productKey).quality.score,null);assert.equal(changed.counts.reviewed,1);assert.equal(changed.cheapest.unitPrice,60);
+ data.products[1].metadataFingerprint=productMetadataFingerprint(data.products[1]);assert.equal(createProductLibrary(data,{now:NOW}).compare(g.id).rows.find(r=>r.productKey===data.products[1].productKey).quality.score,null);
+});
+
 test('explicit reviewed groups compare gross package prices across canonical pack sizes',()=>{
  const data=fixture();data.products[1]=product(2,'CHAIN_B',{canonicalPackAmount:.25,packEvidence:'Etiketten dokumenterer 250 g'});data.memberships[1]=membership(data.products[1]);data.prices[1]=price(data.products[1],20);
  const reader=createProductLibrary(data,{now:NOW}),view=reader.compare('cashew');

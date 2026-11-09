@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {readFileSync,statSync} from 'node:fs';
 import {isUtf8} from 'node:buffer';
+import {scoreProductQuality} from './product-quality.mjs';
 
 const UNITS=new Set(['kg','l','stk']);
 const FRESH_MS=48*3600000;
@@ -173,7 +174,8 @@ export function createProductLibrary(input,{now=new Date()}={}) {
    const unitPriceBasis=packVerified?'package':directVerified?'direct-unit':null;
    const rawUnitPrice=!reasons.length?(packVerified?packUnitPrice:directVerified?price.grossUnitPrice:null):null;
    if(rawUnitPrice!==null&&!Number.isFinite(rawUnitPrice))reasons.push('invalid-normalized-price');
-   return {productKey:m.productKey,reviewCurrent:m.status==='approved'&&!reviewReasons.length,price,eligible:!reasons.length&&rawUnitPrice!==null,unitPrice:!reasons.length?rawUnitPrice:null,unitPriceBasis,reasons:[...new Set(reasons)]};
+   const reviewCurrent=m.status==='approved'&&!reviewReasons.length;
+   return {productKey:m.productKey,reviewCurrent,quality:scoreProductQuality(p?{...p,sourceUrl:p.sourceUrl??m.sourceReceipts?.[0]?.url}:p,{groupId:group.id,reviewCurrent}),price,eligible:!reasons.length&&rawUnitPrice!==null,unitPrice:!reasons.length?rawUnitPrice:null,unitPriceBasis,reasons:[...new Set(reasons)]};
  }
  for(const m of memberships.values()){const g=groups.get(m.groupId);if(g&&assess(m,g).reasons.includes('conflicting-price-bases'))addIssue('error','conflicting-price-bases',{groupId:m.groupId,productKey:m.productKey});}
  function rowsFor(groupId) {
