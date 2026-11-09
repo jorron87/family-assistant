@@ -204,7 +204,12 @@ test('wholegrain bread fiber uses sourced per-100g facts and holds zeros and con
  assert.equal(a.score,40);assert.equal(b.score,54.7);assert.equal(a.comparisonKey,b.comparisonKey);assert.equal(a.measurement.sourceUrl,'https://producer.example/bread');assert.equal(a.nutrition.fat,2);
  assert.notEqual(a.comparisonKey,scoreProductQuality(product,{groupId:'crispbread-wheat',reviewCurrent:true}).comparisonKey);assert.notEqual(a.comparisonKey,scoreProductQuality(product,{groupId:'muesli-fruit-practical',reviewCurrent:true}).comparisonKey);
  for(const fiber of [undefined,0,-1,101,NaN])assert.equal(scoreProductQuality({...product,nutrition:{...product.nutrition,per100:{fiber}}},opts).score,null,String(fiber));
- assert.equal(scoreProductQuality({...product,nutritionObservation:{fiberConflict:{evidence:'Etiketter er uenige'}}},opts).score,null);
+ const zero=scoreProductQuality({...product,nutrition:{...product.nutrition,per100:{fiber:0,fat:2}}},opts);
+ assert.equal(zero.nutrition.fiber,null);assert.equal(zero.nutrition.fat,2);
+ const conflict=scoreProductQuality({...product,nutritionObservation:{fiberConflict:{evidence:'Etiketter er uenige'}}},opts);
+ assert.equal(conflict.score,null);assert.equal(conflict.nutrition.fiber,null);
+ const crispZero=scoreProductQuality({...product,nutrition:{...product.nutrition,per100:{fiber:0}}},{groupId:'crispbread-wheat',reviewCurrent:true});
+ assert.equal(crispZero.nutrition.fiber,0);assert.equal(crispZero.score,0);
  assert.equal(scoreProductQuality({...product,nutrition:{...product.nutrition,sourceUrl:null}},opts).score,null);
  assert.equal(scoreProductQuality({...product,nutrition:{...product.nutrition,basis:'ml'}},opts).score,null);
  assert.equal(scoreProductQuality(product,{groupId:opts.groupId}).status,'review-required');

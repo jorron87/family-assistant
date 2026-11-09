@@ -153,7 +153,8 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
  if(p.id==='potato-salad')base.limitations=['Måler kun uttrykkelig deklarert potetandel i den ferdige potetsalaten.','Fett, salt, sukker, crème fraîche og øvrige ingredienser beskriver andre egenskaper og vises separat.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering.'];
  if(p.id==='fish-gratin')base.limitations=['Måler bare den uttrykkelig deklarerte andelen av hovedfiskingrediensen i fiskegratengen.','Eventuell fiskefond er ikke inkludert; fiskeslag, makaroni og øvrig oppskrift kan variere.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering; sukker og salt vises separat.'];
  const cross=product?.nutritionObservation?.crossSourceLabel,primary=product?.nutritionObservation?.primaryLabel,ingredients=clean(product?.ingredients||cross?.ingredients),description=clean(product?.description),m=product?.nutrition?.basis==='g'?product.nutrition.per100:null;
- base.nutrition=m?{basis:'per 100 g',fat:Number.isFinite(m.fat)?m.fat:null,fiber:Number.isFinite(m.fiber)?m.fiber:null,sugars:Number.isFinite(m.sugars)?m.sugars:null,salt:Number.isFinite(m.salt)?m.salt:null}:null;
+ const withheldFiber=!!product?.nutritionObservation?.fiberConflict||p.id==='wholegrain-bread'&&m?.fiber===0;
+ base.nutrition=m?{basis:'per 100 g',fat:Number.isFinite(m.fat)?m.fat:null,fiber:!withheldFiber&&Number.isFinite(m.fiber)?m.fiber:null,sugars:Number.isFinite(m.sugars)?m.sugars:null,salt:Number.isFinite(m.salt)?m.salt:null}:null;
  let result;
  if(p.id==='crispbread'||p.id==='fruit-muesli'||p.id==='wholegrain-bread'){
   const fiber=m?.fiber,sourceUrl=product?.nutrition?.sourceUrl;

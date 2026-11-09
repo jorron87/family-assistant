@@ -26,6 +26,16 @@ test('quality annotations follow reviewed metadata without changing price or equ
  data.products[1].metadataFingerprint=productMetadataFingerprint(data.products[1]);assert.equal(createProductLibrary(data,{now:NOW}).compare(g.id).rows.find(r=>r.productKey===data.products[1].productKey).quality.score,null);
 });
 
+test('shopping index withholds a conflicting fiber value but keeps other nutrition and the source data',()=>{
+ const data=fixture(),p=data.products[0];
+ p.nutrition={basis:'g',per100:{kcal:220,fat:2,fiber:6.5},sourceUrl:p.sourceUrl,evidence:'Næring per 100 g fra etikett'};
+ p.nutritionObservation={fiberConflict:{evidence:'To ulike deklarasjoner',observations:[{value:6.5},{value:0}]}};
+ p.metadataFingerprint=productMetadataFingerprint(p);data.memberships[0].reviewedFingerprint=p.metadataFingerprint;
+ const library=createProductLibrary(data,{now:NOW}),out=library.shoppingIndex().products[p.productKey].nutrition;
+ assert.equal(out.per100.fiber,null);assert.equal(out.per100.fat,2);assert.equal(out.fiberConflict,true);
+ assert.equal(p.nutrition.per100.fiber,6.5);assert.equal(p.nutritionObservation.fiberConflict.observations[0].value,6.5);
+});
+
 test('explicit reviewed groups compare gross package prices across canonical pack sizes',()=>{
  const data=fixture();data.products[1]=product(2,'CHAIN_B',{canonicalPackAmount:.25,packEvidence:'Etiketten dokumenterer 250 g'});data.memberships[1]=membership(data.products[1]);data.prices[1]=price(data.products[1],20);
  const reader=createProductLibrary(data,{now:NOW}),view=reader.compare('cashew');
