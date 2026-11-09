@@ -1,6 +1,6 @@
 // A transparent category-specific ingredient-content score, not a health rating.
 // It never approves equivalence, changes a price, or supplies missing label facts.
-export const QUALITY_MODEL_VERSION='ingredient-content-v5';
+export const QUALITY_MODEL_VERSION='ingredient-content-v6';
 const clean=v=>String(v??'').normalize('NFC').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
 const number=v=>Number(v.replace(',','.'));
 const decimal='(?<![\\d.,])(\\d{1,4}(?:[.,]\\d{1,3})?)';
@@ -51,7 +51,7 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
  let result;
  if(p.id==='crispbread'){
   const fiber=m?.fiber,sourceUrl=product?.nutrition?.sourceUrl;
-  result=Number.isFinite(fiber)&&fiber>=0&&fiber<=100&&/^https:\/\/\S+$/i.test(sourceUrl??'')?{fact:{value:fiber,evidence:[{text:`Kostfiber ${fiber} g per 100 g`,field:'nutrition.per100.fiber'}]},reason:null}:{fact:null,reason:'missing-or-invalid-fiber-per-100g'};
+  result=product?.nutritionObservation?.fiberConflict?{fact:null,reason:'conflicting-fiber-labels'}:Number.isFinite(fiber)&&fiber>=0&&fiber<=100&&/^https:\/\/\S+$/i.test(sourceUrl??'')?{fact:{value:fiber,evidence:[{text:`Kostfiber ${fiber} g per 100 g`,field:'nutrition.per100.fiber'}]},reason:null}:{fact:null,reason:'missing-or-invalid-fiber-per-100g'};
  }else if(p.id==='ketchup'){
   result=tomatoInput(ingredients,description,clean(cross?.description),/^https:\/\/\S+$/i.test(primary?.primaryUrl??'')?clean(primary?.description):'');
   const puree=percent(ingredients,'tomatpur[eéè]|tomatpasta|tomatkonsentrat');

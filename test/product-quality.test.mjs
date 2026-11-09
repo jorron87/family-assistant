@@ -108,6 +108,7 @@ test('crispbread fiber score uses only a sourced per-100g nutrition fact',()=>{
  for(const fiber of [undefined,-1,101,NaN])assert.equal(scoreProductQuality({...product,nutrition:{...product.nutrition,per100:{fiber}}},options).score,null);
  assert.equal(scoreProductQuality({...product,nutrition:{...product.nutrition,basis:'ml'}},options).score,null);
  assert.equal(scoreProductQuality({...product,nutrition:{...product.nutrition,sourceUrl:null}},options).score,null);
+ const conflict=scoreProductQuality({...product,nutritionObservation:{fiberConflict:{evidence:'Conflicting supplier values.'}}},options);assert.equal(conflict.score,null);assert.equal(conflict.reasons[0],'conflicting-fiber-labels');
  assert.equal(scoreProductQuality(product,{groupId:'crispbread-rye'}).status,'review-required');
  assert.equal(scoreProductQuality(product,{groupId:'bread-white',reviewCurrent:true}).status,'not-applicable');
 });
