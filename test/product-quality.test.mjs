@@ -47,7 +47,7 @@ test('fishcake content uses one explicit total-share basis across researched fis
  assert.equal(score('Fisk [torsk, hyse] 80 % av råvarene er norske.','fishcakes-very-high').score,null);
  assert.equal(score('Fisk 52 %, fisk 80 %, vann.','fishcakes-ordinary').score,null);
  assert.equal(score('Fisk 50 % (hvitlaks, surimi), melk.','fishcakes-surimi-ordinary').status,'not-applicable');
- assert.equal(score('Fisk 65 %, hvetemel.','fishsticks-breaded').status,'not-applicable');
+ assert.equal(score('Fisk 65 %, hvetemel.','fishsticks-breaded').score,65);
 });
 
 test('fish fillet and trimmed fish are separate documented quality dimensions',()=>{
@@ -111,4 +111,13 @@ test('crispbread fiber score uses only a sourced per-100g nutrition fact',()=>{
  const conflict=scoreProductQuality({...product,nutritionObservation:{fiberConflict:{evidence:'Conflicting supplier values.'}}},options);assert.equal(conflict.score,null);assert.equal(conflict.reasons[0],'conflicting-fiber-labels');
  assert.equal(scoreProductQuality(product,{groupId:'crispbread-rye'}).status,'review-required');
  assert.equal(scoreProductQuality(product,{groupId:'bread-white',reviewCurrent:true}).status,'not-applicable');
+});
+test('fishsticks only score an explicitly stated share of fish in the product',()=>{
+ const check=s=>score(s,'fishsticks-breaded');
+ assert.equal(check('Alaska pollock 65 % (fisk), kavring, olje.').score,65);
+ assert.equal(check('Fisk - alaska pollock* (theragra chalcogramma) 61 %, hvetemel.').score,61);
+ assert.equal(check('Seifilet (pollachius virens) (50%), panering, olje.').score,50);
+ assert.equal(check('Hakket fisk * 60%, hvetemel.').score,60);
+ for(const s of ['Alaska pollock 65 % av fisken er norsk, panering.','Alaska pollock 40 %, torsk 20 %, panering.','Panering (alaska pollock 65 %), mel.','Fisk (alaska pollock 65 %), mel.','Seifilet 110%, mel.'])assert.equal(check(s).score,null,s);
+ assert.notEqual(check('Alaska pollock 65 %, hvetemel.').comparisonKey,score('Fisk 65 %, melk.','fishcakes-high').comparisonKey);
 });

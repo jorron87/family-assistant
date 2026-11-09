@@ -1,6 +1,6 @@
 // A transparent category-specific ingredient-content score, not a health rating.
 // It never approves equivalence, changes a price, or supplies missing label facts.
-export const QUALITY_MODEL_VERSION='ingredient-content-v6';
+export const QUALITY_MODEL_VERSION='ingredient-content-v7';
 const clean=v=>String(v??'').normalize('NFC').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
 const number=v=>Number(v.replace(',','.'));
 const decimal='(?<![\\d.,])(\\d{1,4}(?:[.,]\\d{1,3})?)';
@@ -16,6 +16,12 @@ function percent(ingredients,token,{allowSpeciesList=false}={}){
  if(allowSpeciesList)patterns.push(new RegExp('^(?:'+token+')\\s*\\[[^\\[\\]]+\\]\\s*'+decimal+'\\s*%(?!\\s*av\\b)','i'));
  const found=[];for(const part of components(ingredients))for(const re of patterns){const m=part.match(re);if(m)found.push({value:number(m[1]),text:m[0],field:'ingredients'});}return uniqueFact(found,100);
 }
+function fishsticksPercent(ingredients){
+ const parts=components(ingredients),fish='(?:hakket\\s+fisk|fiskekjøtt\\s+av\\s+stillehavslysing|fisk\\s*-\\s*alaska\\s*pollock|alaska\\s*pollock(?:\\s+filet)?|fileter\\s+av\\s+alaska\\s*pollock|seifilet|fisk(?:ekjøtt)?)';
+ const re=new RegExp('^'+fish+'\\s*\\*?\\s*(?:\\([^()]*\\)\\s*)*(?:\\(\\s*)?'+decimal+'\\s*%(?!\\s*av\\b)','i');
+ const found=[];for(const part of parts){const m=part.match(re);if(m)found.push({value:number(m[1]),text:m[0],field:'ingredients'});else if(/^(?:fisk|torsk|sei(?:filet)?|hyse|laks|pollock|alaska\s*pollock|stillehavslysing|surimi|lange|brosme|kolmule|makrell|ørret|kveite|hvitlaks|kvitlaks|hvitfisk|krabbe|reker|sjømat)\b/i.test(part))return{fact:null,reason:'ambiguous-fish-components'};}
+ return uniqueFact(found,100);
+}
 function tomatoInput(ingredients,description,crossDescription='',primaryDescription=''){const found=[];for(const [field,text]of [['ingredients',ingredients],['description',description],['crossSourceLabel.description',crossDescription],['primaryLabel.description',primaryDescription]]){
  const patterns=[
   {re:new RegExp('tomater?\\s*\\(\\s*'+decimal+'\\s*g\\s*(?:per|pr\\.?|i|til)\\s*100\\s*g\\s*(?:tomat)?ketchup','gi'),convert:m=>number(m[1])},
@@ -30,6 +36,7 @@ function profile(groupId){
  if(/^peanut-butter-(?:100|near-pure|standard)$/.test(id))return{id:'peanut-butter',label:'Deklarert peanøttandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'peanøtter|peanøttkjerner|peanuts',single:/^(?:økologiske?\s+|ristede\s+)?(?:peanøtter|peanuts)\*?(?:\s*\(100\s*%\))?\.?$/i};
  if(id==='hazelnut-chocolate-spread')return{id:'hazelnut-spread',label:'Deklarert hasselnøttandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'(?:hasselnøtt(?:er|kjerner|masse)?|hasselnötter)(?:\\s*/\\s*hasselnøddekerner)?'};
  if(['fishcakes-ordinary','fishcakes-high','fishcakes-very-high'].includes(id))return{id:'fishcakes',label:'Deklarert total fiskeandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'fisk'};
+ if(id==='fishsticks-breaded')return{id:'fishsticks',label:'Deklarert fiskeandel',basis:'declared-fish-percent',unit:'%',target:100};
  if(/^crispbread-/.test(id))return{id:'crispbread',label:'Deklarert kostfiber per 100 g',basis:'dietary-fiber-g-per-100g',unit:'g/100 g',target:30};
  if(/^(?:fruit-spread-|jam-)/.test(id)){
   const fruit=[['blueberry','(?:vill)?blåbær'],['blackcurrant','solbær'],['apricot','aprikos(?:er)?'],['orange','appelsin(?:er)?'],['raspberry','bringebær'],['strawberry','jordbær']].find(([word])=>id.includes(word));
@@ -52,6 +59,8 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
  if(p.id==='crispbread'){
   const fiber=m?.fiber,sourceUrl=product?.nutrition?.sourceUrl;
   result=product?.nutritionObservation?.fiberConflict?{fact:null,reason:'conflicting-fiber-labels'}:Number.isFinite(fiber)&&fiber>=0&&fiber<=100&&/^https:\/\/\S+$/i.test(sourceUrl??'')?{fact:{value:fiber,evidence:[{text:`Kostfiber ${fiber} g per 100 g`,field:'nutrition.per100.fiber'}]},reason:null}:{fact:null,reason:'missing-or-invalid-fiber-per-100g'};
+ }else if(p.id==='fishsticks'){
+  result=fishsticksPercent(ingredients);
  }else if(p.id==='ketchup'){
   result=tomatoInput(ingredients,description,clean(cross?.description),/^https:\/\/\S+$/i.test(primary?.primaryUrl??'')?clean(primary?.description):'');
   const puree=percent(ingredients,'tomatpur[eéè]|tomatpasta|tomatkonsentrat');
