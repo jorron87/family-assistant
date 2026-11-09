@@ -7,7 +7,14 @@ const decimal='(?<![\\d.,])(\\d{1,4}(?:[.,]\\d{1,3})?)';
 const limitations=['Måler dokumentert råvareinnhold innen samme varetype og målegrunnlag.','Ingen samlet helse-, smak-, dyrevelferds- eller produksjonskvalitet er beregnet.','Sukkerarter og salt vises separat; de er ikke skjulte vekter i råvarescoren.'];
 function components(text){let depth=0,start=0;const out=[];for(let at=0;at<text.length;at++){if(text[at]==='('||text[at]==='[')depth++;if(text[at]===')'||text[at]===']')depth=Math.max(0,depth-1);const decimalComma=/\d/.test(text[at-1]??'')&&/\d/.test(text[at+1]??'');if(!depth&&(text[at]===';'||text[at]===','&&!decimalComma)){out.push(text.slice(start,at).trim());start=at+1;}}out.push(text.slice(start).trim());return out;}
 function uniqueFact(found,max){if(!found.length)return{fact:null,reason:'missing-declared-amount'};const values=[...new Set(found.map(f=>f.value))];if(values.some(v=>!Number.isFinite(v)||v<0||v>max))return{fact:null,reason:'invalid-declared-amount'};if(values.length!==1)return{fact:null,reason:'conflicting-declared-amounts'};return{fact:{value:values[0],evidence:found.map(({text,field})=>({text,field}))},reason:null};}
-function percent(ingredients,token){const re=new RegExp('^(?:(?:økologisk(?:e)?|ristede?|organic|roasted)\\s+)*(?:'+token+')\\s*\\*?\\s*(?:\\(\\s*)?'+decimal+'\\s*%','i'),found=[];for(const part of components(ingredients)){const m=part.match(re);if(m)found.push({value:number(m[1]),text:m[0],field:'ingredients'});}return uniqueFact(found,100);}
+function percent(ingredients,token){
+ const qualifiers='(?:(?:øko(?:logisk(?:e)?)?|ristede?|malte?|organic|roasted|ground|og)\\s+)*';
+ const patterns=[
+  new RegExp('^'+qualifiers+'(?:'+token+')\\s*\\*?\\s*(?:\\(\\s*)?'+decimal+'\\s*%','i'),
+  new RegExp('^'+decimal+'\\s*%\\s*'+qualifiers+'(?:'+token+')(?![\\p{L}\\p{N}_])','iu')
+ ];
+ const found=[];for(const part of components(ingredients))for(const re of patterns){const m=part.match(re);if(m)found.push({value:number(m[1]),text:m[0],field:'ingredients'});}return uniqueFact(found,100);
+}
 function tomatoInput(ingredients,description,crossDescription=''){const found=[];for(const [field,text]of [['ingredients',ingredients],['description',description],['crossSourceLabel.description',crossDescription]]){
  const patterns=[
   {re:new RegExp('tomater?\\s*\\(\\s*'+decimal+'\\s*g\\s*(?:per|pr\\.?|i|til)\\s*100\\s*g\\s*(?:tomat)?ketchup','gi'),convert:m=>number(m[1])},
@@ -22,7 +29,7 @@ function profile(groupId){
  if(id==='hazelnut-chocolate-spread')return{id:'hazelnut-spread',label:'Deklarert hasselnøttandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'(?:hasselnøtt(?:er|kjerner|masse)?|hasselnötter)(?:\\s*/\\s*hasselnøddekerner)?'};
  if(id==='fishcakes-high')return{id:'fishcakes',label:'Deklarert total fiskeandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'fisk'};
  if(/^(?:fruit-spread-|jam-)/.test(id)){
-  const fruit=[['blueberry','blåbær'],['blackcurrant','solbær'],['apricot','aprikos(?:er)?'],['orange','appelsin(?:er)?'],['raspberry','bringebær'],['strawberry','jordbær']].find(([word])=>id.includes(word));
+  const fruit=[['blueberry','(?:vill)?blåbær'],['blackcurrant','solbær'],['apricot','aprikos(?:er)?'],['orange','appelsin(?:er)?'],['raspberry','bringebær'],['strawberry','jordbær']].find(([word])=>id.includes(word));
   if(fruit)return{id:'fruit-spread',subtype:fruit[0],label:'Deklarert frukt-/bærandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:fruit[1]+'|frukt|bær',fruit:fruit[1]};
  }
  return null;

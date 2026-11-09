@@ -32,6 +32,18 @@ test('fish quantity is total fish, not an arbitrary nested species percentage',(
  assert.equal(score('Fisk (hyse 40 %, sei 20 %), melk.','fishcakes-high').score,null);
  assert.equal(score('Fisk 60 %, fisk 80 %, melk.','fishcakes-high').score,null);
 });
+
+test('explicit label syntax preserves quantity without borrowing nested or relative percentages',()=>{
+ assert.equal(score('100% Peanøtter','peanut-butter-100').score,100);
+ assert.equal(score('Ristede og malte økologiske peanøtter 99,4% (Norge), havsalt.','peanut-butter-near-pure').score,99.4);
+ assert.equal(score('Øko appelsin (50%), sukker.','fruit-spread-orange').score,50);
+ assert.equal(score('Villblåbær* 55%, konsentrert eplejuice, pektin.','fruit-spread-blueberry').score,55);
+ assert.equal(score('100 % av peanøttene er ristede, havsalt.','peanut-butter-near-pure').score,null);
+ assert.equal(score('50% peanøttsmørblanding, sukker.','peanut-butter-standard').score,null);
+ assert.equal(score('Peanøttblanding (100% peanøtter), salt.','peanut-butter-near-pure').score,null);
+ assert.equal(score('100% peanøtter, peanøtter 90%.','peanut-butter-100').reasons[0],'conflicting-declared-amounts');
+ assert.equal(score('100% tomatpuré, vann.').score,null);
+});
 test('category scope, review gate and nutrition facts never imply health or freshness',()=>{
  const p={ingredients:'Tomater (148g per100g ketchup)',nutrition:{basis:'g',per100:{sugars:18,salt:1.6}}};
  assert.equal(scoreProductQuality(p,{groupId:'ketchup-standard'}).score,null);
