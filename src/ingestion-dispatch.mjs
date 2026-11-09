@@ -20,10 +20,11 @@ export function changeSignal(store,resources) {
     ...store.activityFacebook().map(item=>['facebook-activity',item.externalId,item.token]),
     ...Object.values(state.activities??{}).filter(item=>!item.mergedInto && item.plan?.status==='pending').map(item=>['activity-plan',item.id,item.plan.requestedAt]),
     ...(feed.changedPages ?? []).map(id=>['activity-page',id,feed.pages?.find(page=>page.id===id)?.hash]),
-    ...(feed.hsia?.candidates?store.activityFeedCandidates({limit:10000}).items.map(item=>['activity-candidate',item.url,item.hash]):[])
+    ...(feed.hsia?.candidates?store.activityFeedCandidates({limit:10000}).items.map(item=>['activity-candidate',item.url,item.hash]):[]),
+    ...(store.shopping?.queue()??[]).filter(item=>!['shopping-list-route','shopping-stock-review'].includes(item.do)).map(item=>['shopping',item.do,item.storeId,item.watchId,item.productId,item.productKey,item.fingerprint,item.lastReview?.checkedAt,item.watchIds,item.do==='shopping-feed-review'?store.shopping.feedFingerprint(item.storeId):null])
   ].sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
-  return {signature:rows.length?createHash('sha256').update(JSON.stringify(rows)).digest('hex'):null,count:rows.length,
-    originalsOnly:rows.length>0&&rows.every(row=>row[0]==='ready-original'||row[0]==='drive'&&row[4]==='source-original')};
+  return {signature:rows.length?createHash('sha256').update(JSON.stringify(rows)).digest('hex'):null,count:rows.length,items:rows.map(row=>JSON.stringify(row)),
+    shoppingOnly:rows.length>0&&rows.every(row=>row[0]==='shopping'),originalsOnly:rows.length>0&&rows.every(row=>row[0]==='ready-original'||row[0]==='drive'&&row[4]==='source-original')};
 }
 
 function osloDayAndHour(timestamp) {
@@ -102,6 +103,7 @@ export function createIngestionDispatcher({store,resources,root,dataDir,launch=l
     const cfg=config();if(running||cfg.enabled!==true)return;
     // Family-submitted work has priority over automatically discovered work.
     if(store.phone.list().some(item=>['queued','processing'].includes(item.status))||store.calendarActions().length)return;
+    if(store.shopping?.stockIntake?.work().some(item=>!item.retryAt||Date.parse(item.retryAt)<=clock()))return;
     const local=osloDayAndHour(clock());
     if(state.daily?.day!==local.day){state.daily={day:local.day,attempts:0,retryAt:null};save();}
     const fullDue=cfg.dailyFullFallback===true && (local.hour>7 || local.hour===7&&local.minute>=15) && !fullRunRecorded(store,local.day) && state.daily.attempts<3 && (!state.daily.retryAt||state.daily.retryAt<=clock());
@@ -120,6 +122,7 @@ export function createIngestionDispatcher({store,resources,root,dataDir,launch=l
     const lease=store.beginRun();if(!lease.acquired)return;
     retryAfterLogin=false;
     const token=lease.lease.token;running=true;
+    const scope=fullDue?'alle':work.shoppingOnly?'handel':'kildeendringer';
     if(fullDue){state.daily.attempts++;state.daily.retryAt=null;}
     else{state.lastSignature=work.signature;state.attempts=changed?1:(state.attempts??0)+1;state.retryAt=null;}
     state.lastStartedAt=clock();save();
@@ -130,6 +133,8 @@ Start med next. Les collected ID og ressursuttrekk (resource ID) før nettleser.
 Behandle review-queue, profilvurderinger, manglende originaler/Drive og kalenderendringer samt nye aktivitetskandidater/endret sidetekst. Bevar aktivitetsforslag som forslag uten automatisk kalenderføring. Nettleser brukes ved dokumenterte hull i data/kommentarer eller tilgang, ikke bare fordi global dekning har eldre åpne flater. Gjenbruk kildefaner. Ikke kontroller alle kildeoversikter på nytt og ikke endre udekkede overflater/kildestatus til ok. Daglig kontroll ivaretar dekningsvinduene.
 Sjekk change-completion før avslutning. outcome:"ok" med scope:"kildeendringer" krever complete:true for endringsarbeidet, og betyr aldri at alle kildeoverflater er dekket. Ved ekstern blokkering gjør resten ferdig og registrer partial med konkrete blockers og resumeHint. Frigjør ${token} i finally. Vær stille ved uendret allerede varslet blokkering; varsle nye viktige funn eller endret feil.`;
     const originalReuse='Kjente uendrede dokumentavslag: gjenbruk feilkontrollpunktet under docs/drift og eksisterende ressurs-/dokumentkvitteringer. Ikke gjenta Drive-metadata, Docs-lesing, nettleseråpning, nedlasting eller PDF-rendering bare fordi samme gamle originalrestanse fortsatt inngår i completion. Kravet om et konkret Google-forsøk gjelder første diagnose av et tilgangsproblem og nye publiseringshandlinger, ikke hvert senere avgrensede run. Kontroller på nytt ved faktisk ny tilgang, rettet lenke, ny versjon eller nye bytes. Behandle alle nye kilder/handlinger som vanlig; behold det uløste originalhullet og rapporter partial uten ny identisk tilgangskontroll.';
+    const shoppingPrompt=`Handel: behandle alle tilgjengelige oppgaver i shopping-queue. Les AGENTS.md, .local/AGENTS.md hvis den finnes, familieprofilen og handelsavsnittene i docs/runbook.md. Bruk gjeldende lokalt dokumentert discovery-/prisoppdatering; aldri en statisk whitelist som erstatning for nye varianter. Start med next, prioriter telefon og kalenderhandlinger, og behandle shopping-product-review, shopping-market-refresh, shopping-review, shopping-feed-review og shopping-order-link. Nye eller endrede produkter må gjennomgås på gjeldende fingerprint før markedskalibrering. Oppdater alle forfalte varegrupper; én fersk gruppe beviser ikke at resten er kontrollert. Hold hver kundeavisside mot shopping-checklist og registrer alle reelle treff eller konkrete comparable:false-begrunnelser. Kjedepriser beviser ikke lokal lagerstatus eller kundevilkår. Les shopping-feed før kvittering og fortsett hvis nye/endrede innlegg gjenstår. Behandle shopping-list-route bare når den er klar for nytt forsøk; ikke overstyr familiens avkrysning eller fjernede varer. Ingen bestillinger, meldinger, grensetester eller selvstendige Oda-kurvhandlinger. Bare tjenestens normale sortering av en familieopprettet listevare kan legge varen i kurven, med verifisert kvittering. Uklar kurvskriving skal aldri gjentas. Kontroller shopping-queue og completion.shopping før slutt. Ved eksterne blokkeringer gjør resten ferdig og registrer partial med konkrete blockers og resumeHint; aldri ok med handlearbeid igjen.`;
+    const scopedPrompt=scope==='handel'?`Gjør en avgrenset handelskjøring med scope:"handel", ikke skole-/aktivitetskontroll. Kjøringslåsen er allerede tatt: ${token}. Ikke kall begin-run. Forny og frigjør bare denne låsen med end-run i finally. ${shoppingPrompt} Registrer run med scope:"handel".`:prompt+'\n'+shoppingPrompt;
     let finished=false;
     const finish=(code,error)=>{
       if(finished)return;finished=true;
@@ -138,13 +143,14 @@ Sjekk change-completion før avslutning. outcome:"ok" med scope:"kildeendringer"
         state.daily.retryAt=!fullRunRecorded(store,state.daily.day)&&state.daily.attempts<3?clock()+[0,30,120][state.daily.attempts]*60000:null;
       }else{
         const left=changeSignal(store,resources);
+        if(left.items.some(item=>!work.items.includes(item)))state.attempts=0;
         state.lastSignature=left.signature;
         state.retryAt=left.count && state.attempts<3?clock()+[0,30,120][state.attempts]*60000:null;
         const wait=resourceWait(left);if(wait)state.retryAt=Math.max(state.retryAt??0,wait);
       }
       state.worker=null;release(token);running=false;save();
     };
-    try{const child=launch({root,prompt:prompt+'\n'+originalReuse,onExit:finish});if(!finished&&child?.pid){state.worker={pid:child.pid,token,scope:fullDue?'alle':'kildeendringer',startedAt:clock()};save();}}catch(error){finish(-1,error.message);}
+    try{const child=launch({root,prompt:scopedPrompt+'\n'+originalReuse,onExit:finish});if(!finished&&child?.pid){state.worker={pid:child.pid,token,scope,startedAt:clock()};save();}}catch(error){finish(-1,error.message);}
   }
   function renew(){if(running&&state.worker&&store.snapshot().runLease?.token===state.worker.token)store.renewRun(state.worker.token);}
   const status=()=>{clearRecoveredLoginError();return {enabled:config().enabled===true,running,workerScope:state.worker?.scope??null,attempts:state.attempts??0,dailyFullFallback:config().dailyFullFallback===true,dailyFull:state.daily??null,lastStartedAt:state.lastStartedAt??null,lastFinishedAt:state.lastFinishedAt??null,retryAt:state.retryAt??null,lastError:state.lastError??null};};

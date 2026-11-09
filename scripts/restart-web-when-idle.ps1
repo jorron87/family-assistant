@@ -3,7 +3,7 @@ $taskRoot = Split-Path -Parent $PSScriptRoot
 $deployLog = Join-Path $taskRoot 'artifacts/review-policy-deployment.json'
 $base = 'http://127.0.0.1:4318'
 # Aldri start på nytt med kode som ikke kompilerer: sjekk syntaks først.
-foreach ($file in 'src/server.mjs','src/store.mjs','src/cli.mjs','src/collector.mjs','src/activity-feeds.mjs','src/resources.mjs','src/google-publisher.mjs','src/ingestion-dispatch.mjs','src/library-feed.mjs') {
+foreach ($file in 'src/server.mjs','src/store.mjs','src/cli.mjs','src/collector.mjs','src/activity-feeds.mjs','src/resources.mjs','src/google-publisher.mjs','src/ingestion-dispatch.mjs','src/library-feed.mjs','src/phone-dispatch.mjs','src/phone-server.mjs','src/shopping.mjs','src/shopping-stock.mjs','src/shopping-oda-cart.mjs','src/shopping-planning.mjs','public/shopping-view.mjs') {
     & node --check (Join-Path $taskRoot $file)
     if ($LASTEXITCODE -ne 0) { throw "Syntaksfeil i $file. Omstart avbrutt." }
 }

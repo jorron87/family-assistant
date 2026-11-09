@@ -687,9 +687,11 @@ export function createStore(dataDir = DATA_DIR) {
     const vigiloIssues = vigiloCoverage().filter((entry) => entry.issues.length);
     const profileReviews = Object.values(state.rawItems).filter((raw) => !raw.discardedAt && rawIsActive(raw) && raw.profileReviewedRevision !== raw.revision).map((raw) => ({ rawId: raw.id, title: raw.title, revision: raw.revision }));
     const phonePending=Object.values(state.phone?.inbox??{}).filter(item=>['queued','processing','blocked'].includes(item.status)).map(item=>({id:item.id,rawId:item.rawId,title:item.title,status:item.status,note:item.note}));
+    const shoppingStatus=shopping.completion();
     return {
-      complete: !phonePending.length && !pendingItems.length && !incompleteSurfaces.length && !incompleteSources.length && !missingDrive.length && !unsyncedCalendar.length && !vigiloIssues.length && !profileReviews.length,
-      counts: { phonePending:phonePending.length,pendingItems: pendingItems.length, incompleteSurfaces: incompleteSurfaces.length, incompleteSources: incompleteSources.length, missingDrive: missingDrive.length, unsyncedCalendar: unsyncedCalendar.length, vigiloIssues: vigiloIssues.length, profileReviews: profileReviews.length },
+      complete: !phonePending.length && !pendingItems.length && !incompleteSurfaces.length && !incompleteSources.length && !missingDrive.length && !unsyncedCalendar.length && !vigiloIssues.length && !profileReviews.length && shoppingStatus.complete,
+      counts: { phonePending:phonePending.length,pendingItems: pendingItems.length, incompleteSurfaces: incompleteSurfaces.length, incompleteSources: incompleteSources.length, missingDrive: missingDrive.length, unsyncedCalendar: unsyncedCalendar.length, vigiloIssues: vigiloIssues.length, profileReviews: profileReviews.length,shoppingPending:shoppingStatus.work.length,shoppingBlocked:shoppingStatus.blockedStores.length+shoppingStatus.blockedRoutes.length },
+      shopping:shoppingStatus,
       phonePending,pendingItems, incompleteSurfaces, incompleteSources, missingDrive, unsyncedCalendar, vigiloIssues, profileReviews,
       cutoffAt:new Date(cutoffAt()).toISOString(), historyDays:state.reviewPolicy.historyDays,
       historicalMissingDrive, historicalSurfaces:Object.values(state.surfaces).filter(historicalOnly),
@@ -702,6 +704,7 @@ export function createStore(dataDir = DATA_DIR) {
     const pendingActivities=Object.values(state.activities).filter(item=>!item.mergedInto && item.plan?.status==='pending');
     const counts=Object.fromEntries(['pendingItems','missingDrive','unsyncedCalendar','profileReviews'].map(key=>[key,report[key].length]));
     counts.facebookActivities=activityFacebook().length;counts.activityCandidates=feed.hsia?.candidates??0;counts.activityPages=feed.changedPages?.length??0;counts.activityPlans=pendingActivities.length;
+    counts.shoppingPending=report.counts.shoppingPending;counts.shoppingBlocked=report.counts.shoppingBlocked;
     return {scope:'kildeendringer',complete:Object.values(counts).every(n=>n===0),counts,note:'Gjelder endringsarbeid og publisering, ikke full kildekontroll.'};
   }
 
@@ -712,7 +715,7 @@ export function createStore(dataDir = DATA_DIR) {
     }
     if (input.outcome === "ok") {
       const report = completionReport();
-      if (input.scope==='handel' ? shopping.queue().length || shopping.view().reviews.some(r=>r.status==='blocked') : input.scope==='kildeendringer' ? !changeCompletion().complete : ['telefon','familiehandlinger'].includes(input.scope) ? report.phonePending.length || calendarActions().length : !report.complete) throw new Error(`Kjøringen kan ikke rapporteres ok med restanser: ${JSON.stringify(report.counts)}.`);
+      if (input.scope==='lager'?shopping.stockIntake.work().length||shopping.stockIntake.blocked().length:input.scope==='handel' ? !report.shopping.complete : input.scope==='kildeendringer' ? !changeCompletion().complete : ['telefon','familiehandlinger'].includes(input.scope) ? report.phonePending.length || calendarActions().length : !report.complete) throw new Error(`Kjøringen kan ikke rapporteres ok med restanser: ${JSON.stringify(report.counts)}.`);
     } else if (["partial", "needs_login", "error"].includes(input.outcome)) {
       if (!Array.isArray(input.blockers) || !input.blockers.length || !input.blockers.every((blocker) => words(blocker, 500).length >= 12)) {
         throw new Error("Ufullstendig kjøring krever konkrete blockers. Arbeidsmengde eller planlagt sluttid er ikke en blokkering.");
@@ -721,7 +724,7 @@ export function createStore(dataDir = DATA_DIR) {
     } else {
       throw new Error("Ugyldig kjøringsutfall.");
     }
-    if (input.scope && !['alle','telefon','familiehandlinger','kildeendringer','handel'].includes(input.scope)) throw new Error('Ugyldig kjøringsomfang.');
+    if (input.scope && !['alle','telefon','familiehandlinger','kildeendringer','handel','lager'].includes(input.scope)) throw new Error('Ugyldig kjøringsomfang.');
     // An agent's report timestamp must not override the observed lease start.
     // After release we have no observed start; do not invent a zero duration or
     // associate the report with another agent's previous lease.
@@ -1613,7 +1616,7 @@ export function createStore(dataDir = DATA_DIR) {
     save();
   }
   const phone=phoneStore(state,{save,upsertRaw,addAttachment});
-  const shopping=shoppingStore(state,{save});
+  const shopping=shoppingStore(state,{save,files:{write:(id,bytes)=>writeFileSync(join(dataDir,'attachments',`${id}.enc`),encrypt(bytes,key)),read:id=>decrypt(readFileSync(join(dataDir,'attachments',`${id}.enc`)),key)}});
   if(reconcileSourceReviews(state.sourceStatus,state.runs))save();
   return { shopping, repairText, backupArchive, eventHistory, event, mergeEvents, splitHomework, activityFacebook, changeCompletion, collectedItems, collectedList, sourceItems, editProfile, phone, calendarActions, calendarAction, setEventVisibility, upsertActivity, activityReaction, activityPlan, activitySource, snapshot, runHistory, profile: () => profileView(state.profile), profileFact, reviewProfile, documentStatus, reviewDocument, checkTask, upsertRaw, upsertFinding, updateSource, observeListing, markReviewed, updateSurface, reviewQueue, completionReport, addAttachment, getAttachment, linkDrive, linkCalendar, updateProfile, recordRun, beginRun, renewRun, endRun, collectorIngest, collectorConfig, collectorStatus, collectorRefresh, collectorFacebookSweep, collectedItem, activityFeedHsia, activityFeedCandidates, activityFeedNeedsDetail, activityFeedDetail, activityFeedPage, activityFeedError, activityFeedPageText, activityFeedStatus };
 }

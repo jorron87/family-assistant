@@ -90,6 +90,11 @@ async function handle(req, res) {
     if(path==='/api/shopping/source/file'&&method==='GET'){const offer=store.shopping.offerSource(new URL(req.url,`http://${host}`).searchParams.get('offerId'));const loaded=await offerSources.load(offer.sourceUrl);if(loaded.kind!=='pdf')return send(res,404,{error:'Kilden er ikke en PDF.'});return send(res,200,loaded.bytes,'application/pdf');}
     if(path==='/api/shopping/checklist'&&method==='GET')return send(res,200,store.shopping.checklist());
     if(path==='/api/shopping/queue'&&method==='GET')return send(res,200,store.shopping.queue());
+    if(path==='/api/shopping/stock-intake'&&method==='GET')return send(res,200,store.shopping.stockIntake.list());
+    const stockItem=/^\/api\/shopping\/stock-intake\/([a-f0-9-]{36})$/.exec(path);
+    if(stockItem&&method==='GET')return send(res,200,store.shopping.stockIntake.get(stockItem[1]));
+    const stockImage=/^\/api\/shopping\/stock-image\/([a-f0-9-]{36})\/([a-f0-9-]{36})$/.exec(path);
+    if(stockImage&&method==='GET'){const image=store.shopping.stockIntake.image(stockImage[1],stockImage[2]);return send(res,200,image.bytes,image.attachment.mimeType);}
     if(path==='/api/shopping/catalog'&&method==='GET')return send(res,200,store.shopping.catalogEntries(new URL(req.url,`http://${host}`).searchParams.get('watchId')??undefined));
     if(path==='/api/shopping/image'&&method==='GET'){const url=store.shopping.imageSource(new URL(req.url,`http://${host}`).searchParams.get('id'));const image=url?await productImages.load(url):null;if(!image)return send(res,404,{error:'Fant ikke bildet.'});res.setHeader('Cache-Control','private, max-age=86400');return send(res,200,image.bytes,image.type);}
     if(path==='/api/shopping/oda/live'&&method==='GET')return send(res,200,await odaCart.read(new URL(req.url,`http://${host}`).searchParams.has('force')));
@@ -100,7 +105,14 @@ async function handle(req, res) {
     }
     if(path.startsWith('/api/shopping/')&&method==='POST'){
       if(req.headers['x-family-request']!=='1'||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host))return send(res,403,{error:'Ugyldig avsender.'});
+      const stockUpload=/^\/api\/shopping\/stock-intake\/([a-f0-9-]{36})\/files\/(\d)$/.exec(path);
+      if(stockUpload)return send(res,200,store.shopping.stockIntake.upload(stockUpload[1],Number(stockUpload[2]),{bytes:await body(req,10*1024*1024),fileName:decodeURIComponent(req.headers['x-file-name']??'lagerbilde')}));
       const input=await json(req);
+      if(path==='/api/shopping/stock-intake')return send(res,200,store.shopping.stockIntake.begin(input));
+      const stockSubmit=/^\/api\/shopping\/stock-intake\/([a-f0-9-]{36})\/submit$/.exec(path);
+      if(stockSubmit){const result=store.shopping.stockIntake.submit(stockSubmit[1]);send(res,200,result);queueMicrotask(dispatchTick);return;}
+      if(path==='/api/shopping/stock-review')return send(res,200,store.shopping.stockIntake.review(input));
+      if(path==='/api/shopping/stock-action')return send(res,200,store.shopping.stockIntake.action(input));
       if(path==='/api/shopping/kassal/configure')return send(res,200,kassal.configure(input));
       if(path==='/api/shopping/kassal/search')return send(res,200,await kassal.search(input));
       if(path==='/api/shopping/kassal/stores')return send(res,200,await kassal.stores(input));
@@ -423,6 +435,11 @@ doorbell.attach(servers.at(-1));
 servers.at(-1).listen(port, host, () => console.log(`Familien: http://${host}:${port}`));
 // Family controls are available on the living-room display; ingestion stays private.
 servers.push(createServer((req,res) => {
+  const kioskStock=new URL(req.url,`http://${host}`).pathname;
+  if(kioskStock.startsWith('/api/shopping/stock-')){
+    if(req.method==='POST'&&/^\/api\/shopping\/(?:stock-action|stock-intake(?:\/[a-f0-9-]{36}\/(?:submit|files\/[0-7]))?)$/.test(kioskStock))return handle(req,res);
+    return send(res,req.method==='GET'?403:405,{error:'Gjennomgang og bildeoriginaler er bare tilgjengelige på agentporten.'});
+  }
   if(/^\/(?:api\/(?:resources|collector|google)(?:[/?]|$)|google-setup|shopping-setup|api\/shopping\/oda\/(?:connect|callback|tools)|api\/shopping\/(?:orders|settings|offer|review|nutrition|catalog|link|feed))/.test(req.url))return send(res,req.method==='GET'?403:405,{error:'Kildeoriginaler og integrasjonsoppsett er bare tilgjengelige lokalt på agentporten.'});
   if (req.method !== "GET" && !(req.method === "POST" && /^(?:\/api\/shopping\/(?:watch|pantry|item|deal|list|oda\/(?:sync|search|add|cart|probe|review|line|swap))|\/api\/home-assistant\/command|\/api\/doorbell\/frame|\/api\/profile\/edit|\/api\/events\/[a-f0-9]{24}\/(?:tasks\/[a-zA-Z0-9:_-]{1,100}|visibility)|\/api\/activities\/[a-f0-9]{24}\/reaction)$/.test(new URL(req.url,`http://${host}`).pathname))) return send(res,405,{error:"Handlingen er bare tilgjengelig lokalt på agentporten."});
   return handle(req,res);

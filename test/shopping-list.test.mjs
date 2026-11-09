@@ -115,6 +115,7 @@ test('product photos never reopen a review and are only served from stored addre
  shop.catalogObserve({watchId:w.id,products:[{id:1,store:'ODA_NO',name:entry.name,image:'https://images.example.com/mel.jpg'}]});
  const after=shop.catalogEntries(w.id)[0];assert.equal(after.status,'approved');assert.equal(after.fingerprint,entry.fingerprint);assert.equal(after.image,'https://images.example.com/mel.jpg');
  const row=shop.familyView().odaDraft.items;const id=row.length?row[0].image:null;
+ assert.equal(shop.familyView().items.find(x=>x.id===w.id).image,id);
  assert.equal(shop.imageSource('notstored'),null);if(id)assert.equal(shop.imageSource(id),'https://images.example.com/mel.jpg');
 });
 
@@ -130,14 +131,32 @@ test('a store that is simply cheap is shown when stock is low and the gain is re
  const make=(cheap,extra={})=>{const {shop}=setup();shop.settings({stores:[{id:'near',name:'Nærbutikk – Kassal-kjedepriser',url:'https://example.com/near',minSavings:0,chainCode:'SPAR_NO'}]});const w=flour(shop,extra);
   const products=[['SPAR_NO',9,cheap],['MENY_NO',10,100]];
   for(const [store,id,price] of products){const seen=shop.catalogObserve({watchId:w.id,products:[{id,store,name:'Mel 1 kg',currentPrice:price,lastChecked:'2026-11-08T10:00:00Z'}]});shop.catalogReview({watchId:w.id,id,store,fingerprint:seen.entries[0].fingerprint,status:'approved',packAmount:1,unit:'kg',equivalenceEvidence:'Samme mel'});}
-  shop.market({watchId:w.id,products:products.map(([store,id,price])=>({id,store,unit:'kg',packAmount:1,reviewed:true,equivalenceEvidence:'Samme mel',lastChecked:'2026-11-08T10:00:00Z',currentPrice:price,history:history(price)}))});
+  shop.market({watchId:w.id,products:products.map(([store,id,price])=>({id,store,unit:'kg',packAmount:1,reviewed:true,equivalenceEvidence:'Samme mel',lastChecked:'2026-11-08T11:00:00Z',currentPrice:price,history:history(100)}))});
   return {shop,w};};
  let {shop,w}=make(30);let [row]=shop.familyView().steady;
- assert.equal(shop.familyView().summary.potential,420);assert.equal(shop.familyView().summary.dealCount,1);assert.equal(shop.familyView().summary.top,'Mel');
- assert.equal(row.storeName,'Nærbutikk');assert.equal(row.packs,12);assert.equal(row.average,65);assert.equal(row.diffPct,54);assert.equal(row.saving,420);
+ assert.equal(shop.familyView().summary.potential,840);assert.equal(shop.familyView().summary.dealCount,1);assert.equal(shop.familyView().summary.top,'Mel');
+ assert.equal(row.storeName,'Nærbutikk');assert.equal(row.packs,12);assert.equal(row.referencePrice,100);assert.equal(row.diffPct,70);assert.equal(row.saving,840);
  shop.pantry({watchId:w.id,amount:6});assert.equal(shop.familyView().steady.length,0);
  shop.pantry({watchId:w.id,amount:1});assert.equal(shop.familyView().steady[0].packs,11);
  assert.equal(shop.list({action:'add',watchId:w.id,packAmount:1,storeName:'Nærbutikk',packs:11,unitPrice:30,saving:385}).reason,'Fast lav pris');assert.equal(shop.familyView().steady.length,0);
  assert.equal(make(95).shop.familyView().steady.length,0);
  assert.equal(make(30,{purchaseAmount:1}).shop.familyView().steady.length,0);
+ const capped=make(30,{maxPacks:2});assert.equal(capped.shop.familyView().steady[0].packs,2);
+ const lower=make(30,{referenceCeiling:{price:20,checkedAt:'2026-11-08T10:00:00Z',sourceUrl:'https://example.com/lower',evidence:'Lavere bekreftet alternativ'}});assert.equal(lower.shop.familyView().steady.length,0);
+});
+
+test('a flat cheap history does not manufacture savings from expensive chains',()=>{
+ const {shop}=setup();const w=flour(shop);withChain(shop,w,30);
+ shop.market({watchId:w.id,products:[['SPAR_NO',9,30],['MENY_NO',10,100]].map(([store,id,currentPrice])=>({id,store,unit:'kg',packAmount:1,reviewed:true,equivalenceEvidence:'Samme mel',lastChecked:'2026-11-08T10:00:00Z',currentPrice,history:history(currentPrice)}))});
+ assert.equal(shop.familyView().steady.length,0);
+});
+
+test('list routing preserves chosen variants and refuses bought, urgent or malformed Oda writes atomically',()=>{
+ const {shop}=setup();const w=flour(shop);odaItem(shop,w.id,{id:1,productId:555});odaItem(shop,w.id,{id:2,productId:777,price:25});
+ shop.list({action:'variant',watchId:w.id,productId:777});assert.equal(shop.list({action:'add',name:'Mel'}).odaProductId,777);
+ const e=shop.list({action:'add',name:'Ukjent'}),before=shop.familyView().list.open;
+ assert.throws(()=>shop.list({action:'route',id:e.id,storeName:'Oda',reason:'Pris',odaProductId:9,packs:1.5}),/mengde/);
+ assert.deepEqual(shop.familyView().list.open,before);
+ shop.list({action:'check',id:e.id});assert.throws(()=>shop.list({action:'route',id:e.id,storeName:'Oda',reason:'Pris',odaProductId:9,packs:1}),/kjøpt/);
+ const urgent=shop.list({action:'add',name:'Haster',need:'now'});assert.throws(()=>shop.list({action:'route',id:urgent.id,storeName:'Oda',reason:'Pris',odaProductId:9,packs:1}),/nærbutikk/);
 });

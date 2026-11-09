@@ -39,6 +39,8 @@ test('a repeated request does not write twice, and a change that does not land i
   await ok.oda.authorize();ok.lines.set(7,1);
   await ok.oda.changeCart({requestId:id(4),productId:7,delta:1});const before=ok.counts().writes;
   await ok.oda.changeCart({requestId:id(4),productId:7,delta:1});assert.equal(ok.counts().writes,before);assert.equal(ok.lines.get(7),2);
+  await assert.rejects(ok.oda.changeCart({requestId:id(4),productId:8,delta:1}),/allerede brukt/);
+  await assert.rejects(ok.oda.addToCart({requestId:id(4),productId:7,quantity:1}),/allerede brukt/);assert.equal(ok.counts().writes,before);
   await assert.rejects(ok.oda.changeCart({requestId:id(5),productId:7,delta:0}),/Ugyldig/);
  }finally{await ok.done();}
  const bad=harness({drop:true});
@@ -71,4 +73,12 @@ test('an unconfirmed cart write stays visible on the list for the family to chec
   const result=await h.live.list({action:'route',id:entry.id,storeName:'Oda',reason:'Billigst',odaProductId:77,packs:1});
   assert.match(result.cartError,/Sjekk kurven/);assert.equal(h.shop.familyView().list.open[0].cartError,result.cartError);
  }finally{await h.done();}
+});
+
+test('a quantity probe restores only what actually changed and preserves existing cart contents',async()=>{
+ for(const drop of [false,true]){
+  const h=harness({drop});
+  try{await h.oda.authorize();h.lines.set(7,2);const result=await h.oda.probeLimit({productId:7,quantity:10});assert.equal(h.lines.get(7),2);assert.equal(result.restored,true);assert.equal(h.counts().writes,drop?1:2);}
+  finally{await h.done();}
+ }
 });

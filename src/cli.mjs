@@ -47,6 +47,13 @@ async function execute(command, args, flags) {
   switch (command) {
     case 'shopping': result=await request('/api/shopping');break;
     case 'shopping-queue': result=await request('/api/shopping/queue');break;
+    case 'stock-intake': result=await request('/api/shopping/stock-intake'+(args[0]?'/'+encodeURIComponent(args[0]):''));break;
+    case 'stock-review': result=await request('/api/shopping/stock-review','POST',json(args[0]));break;
+    case 'stock-export': {
+      const response=await fetch(`${base}/api/shopping/stock-image/${encodeURIComponent(args[0])}/${encodeURIComponent(args[1])}`);
+      if(!response.ok)throw Error((await response.json()).error);
+      writeFileSync(outputPath(args[2]),Buffer.from(await response.arrayBuffer()));result={path:args[2]};break;
+    }
     case 'shopping-orders': result=await request('/api/shopping/orders','POST',json(args[0]));break;
     case 'shopping-settings': result=await request('/api/shopping/settings','POST',json(args[0]));break;
     case 'shopping-watch': result=await request('/api/shopping/watch','POST',json(args[0]));break;

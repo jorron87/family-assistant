@@ -34,7 +34,7 @@ test('a merely good deal stops at three months, even when the product keeps for 
 test('short-dated offers cannot recommend more than their date allows',()=>{
  const {shop}=setup();const flour=watch(shop);shop.offer(offer(flour.id,{bestBefore:'2027-02-20'}));
  assert.equal(best(shop).shelfMonths,3);assert.equal(best(shop).packs,3);assert.equal(shop.familyView().deals[0].bestBefore,'2027-02-20');
- shop.offer(offer(flour.id,{bestBefore:'2026-10-17'}));assert.equal(best(shop).shelfMonths,.5);assert.equal(best(shop).packs,1);
+ shop.offer(offer(flour.id,{bestBefore:'2026-10-17'}));assert.equal(best(shop),undefined);assert.equal(shop.familyView().covered.length,0);
  assert.throws(()=>shop.offer(offer(flour.id,{bestBefore:'snart'})),/dato/);
 });
 test('a marginal discount only covers the next trip',()=>{

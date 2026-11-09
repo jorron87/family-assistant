@@ -36,8 +36,7 @@ export function createOdaCart({oda,shopping,now=Date.now}) {
    cached=null;
    return {...entry,inCart:true,packs:quantity};
   }catch(error){
-   if(/pågår/.test(error.message))return entry;
-   return shopping.list({action:'cartError',id:entry.id,message:'Kunne ikke bekrefte at varen kom i kurven. Sjekk kurven.'});
+   return shopping.list({action:'cartError',id:entry.id,message:/pågår/.test(error.message)?'Oda er opptatt. Varen er bevart på listen; sjekk kurven før du legger den til.':'Kunne ikke bekrefte at varen kom i kurven. Sjekk kurven.'});
   }
  }
  return {read,change,swap,list};

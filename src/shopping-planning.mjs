@@ -28,8 +28,10 @@ export const shelfLifeMonths=watch=>watch.shelfLifeMonths??defaultShelfLifeMonth
 /** A dated offer, such as short-dated surplus stock, cannot outlast its own date. */
 export function shelfWithDate(months,bestBefore,at) {
  if(!bestBefore)return months;
- const left=(Date.parse(bestBefore+'T12:00:00Z')-at)/(DAYS_PER_MONTH*DAY);
- return Math.min(months,left<1?.5:Math.floor(left));
+ const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Oslo',year:'numeric',month:'2-digit',day:'2-digit'}).format(at);
+ const days=Math.max(0,(Date.parse(bestBefore)-Date.parse(today))/DAY+1);
+ const left=days/DAYS_PER_MONTH;
+ return Math.min(months,left>=1?Math.floor(left):left);
 }
 
 /** Yearly amount, in the watch's unit. Null means the need is genuinely unknown. */

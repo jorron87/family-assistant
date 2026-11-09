@@ -47,6 +47,12 @@ export function phoneHandler({odaCart=null,productImages=null,oda=null,store,roo
         return send(res,200,{members,events,login,weeklyLetters:letters,childIds:store.profile().members.filter(member=>member.role==='child').map(member=>member.id)});
       }
       if(path==='/send/api/shopping/family'&&req.method==='GET')return send(res,200,{...store.shopping.familyView(),oda:oda?.status()??{connected:false}});
+      if(path==='/send/api/shopping/stock-intake'&&req.method==='POST')return send(res,200,store.shopping.stockIntake.begin({...await json(req),senderMemberId:device.memberId??null}));
+      const stockUpload=/^\/send\/api\/shopping\/stock-intake\/([a-f0-9-]{36})\/files\/(\d)$/.exec(path);
+      if(stockUpload&&req.method==='POST')return send(res,200,store.shopping.stockIntake.upload(stockUpload[1],Number(stockUpload[2]),{bytes:await body(req,10*1024*1024),fileName:decodeURIComponent(req.headers['x-file-name']??'lagerbilde')}));
+      const stockSubmit=/^\/send\/api\/shopping\/stock-intake\/([a-f0-9-]{36})\/submit$/.exec(path);
+      if(stockSubmit&&req.method==='POST'){await json(req);const result=store.shopping.stockIntake.submit(stockSubmit[1]);send(res,200,result);queueMicrotask(onQueued);return;}
+      if(path==='/send/api/shopping/stock-action'&&req.method==='POST')return send(res,200,store.shopping.stockIntake.action(await json(req)));
       if(path==='/send/api/shopping/image'&&req.method==='GET'&&productImages){const url=store.shopping.imageSource(new URL(req.url,'http://localhost').searchParams.get('id'));const image=url?await productImages.load(url):null;if(!image)return send(res,404,{error:'Fant ikke bildet.'});res.setHeader('Cache-Control','private, max-age=86400');return send(res,200,image.bytes,image.type);}
       if(path==='/send/api/shopping/summary'&&req.method==='GET')return send(res,200,store.shopping.familySummary());
       if(req.method==='POST'&&path==='/send/api/shopping/list'){const input=await json(req);return send(res,200,odaCart?await odaCart.list(input):store.shopping.list(input));}

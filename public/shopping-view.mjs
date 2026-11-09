@@ -41,6 +41,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
   const check={itemId:null,query:'',price:'',size:null,custom:'',customUnit:null};
   let listNeed='later',cart=null,cartHolder=null,draftSync=null;
   const cartPending=new Map();
+  const stockDraft={text:'',location:'',mode:'minimum',files:[],intakeId:null,clientId:crypto.randomUUID()},stockPreviews=new Map();let stockSending=false;
   let dirty=false,data=null,tab='buy',search='',location='all',stale=false,odaQuery='',toastTimer=null;
   const chosen=new Map(),openSections=new Set();
   panel.classList.add('shop');
@@ -83,7 +84,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
       updateBanner(summary);
       if(data&&summary.rev!==data.rev&&visible()){
         // The shared list follows what others tick off, unless someone is typing.
-        if(tab==='list'&&!cartBusy&&document.activeElement?.tagName!=='INPUT'){await load();render(true);}
+        if((tab==='list'&&!cartBusy||tab==='pantry'&&!stockSending)&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)){await load();render(true);}
         else if(!stale){stale=true;panel.querySelector('.shop-refresh')?.removeAttribute('hidden');}
       }
     }catch{}
@@ -129,7 +130,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
       try{
         const reply=await api('/pantry',{watchId:item.id,packs:[...counts].map(([size,count])=>({amount:size,count}))});
         const index=data.items.findIndex(x=>x.id===item.id);
-        if(index>=0)data.items[index]=reply.item;
+        if(index>=0)data.items[index]={...data.items[index],...reply.item,stockEvidence:null};
         dirty=true;afterSave(reply.item);
       }catch(error){fail(error);}
     };
@@ -334,7 +335,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
         const card=el('article',undefined,'shop-deal'),top=el('div',undefined,'shop-steady'),text=el('div',undefined,'shop-list-text');
         text.append(el('h4',item.name),el('p',item.storeName+' · '+item.productName,'shop-sub'));
         top.append(thumb(item.image),text);card.append(top);
-        const line=el('p',undefined,'shop-price');line.append(el('strong',price(item.unitPrice)+'/'+item.unit),el('span',' · snitt '+price(item.average)+'/'+item.unit+' · '+item.diffPct+' % lavere'));card.append(line);
+        const line=el('p',undefined,'shop-price');line.append(el('strong',price(item.unitPrice)+'/'+item.unit),el('span',' · referanse '+price(item.referencePrice)+'/'+item.unit+' · '+item.diffPct+' % lavere'));card.append(line);
         const total=el('div',undefined,'shop-total');total.append(el('span','Kjøp '+item.packs+' × '+packLabel(item.packAmount,item.unit)+' ('+amount(item.packs*item.packAmount,item.unit)+') · '+kr(item.cost)),el('strong','Spar '+kr(item.saving)));card.append(total);
         const stockItem=data.items.find(x=>x.id===item.watchId);
         card.append(el('p',(item.stock.known?'Dere har '+(stockItem?stockSummary(stockItem):'lite igjen')+'. ':'Lager ikke talt. ')+'Kjedepris, så sjekk at butikken har den.','shop-sub'));
@@ -566,13 +567,71 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
   }
 
   // ---- Lager ----
+  const PANTRY_GROUPS=[
+    ['Grønnsaker',/grønnsak|brokkoli|blomkål|rosenkål|spinat|avokado|tomater|mais(korn)?|gulrot|løk|hvitløk|ingefær|potet/i],
+    ['Frukt og bær',/bær|jordbær|bringebær|ananas|mango|banan|eple|appelsin|frukt|rosin|syltetøy/i],
+    ['Kjøtt og kylling',/kylling|kalkun|kjøtt|storfe|svin|biff|bacon|pølse|skinke|karbonade/i],
+    ['Fisk og sjømat',/laks|torsk|fisk|ørret|makrell|reke|sjømat|tunfisk/i],
+    ['Meieri og egg',/melk|fløte|rømme|yoghurt|ost|smør|bremykt|margarin|egg|grana|parmesan/i],
+    ['Brød og bakst',/brød|rundstykk|knekkebrød|baguett|polarbrød|tortilla|lompe/i],
+    ['Tørrvarer og baking',/mel|pasta|ris\b|havre|sukker|salt|gjær|kakao|sjokolade|nøtt|cashew|valnøtt|stivelse/i],
+    ['Olje, sauser og hermetikk',/olje|eddik|saus|sennep|ketchup|kokos|peanøtt|honning/i],
+    ['Drikke og kaffe',/kaffe|te\b|juice|saft|brus|drikke/i],
+    ['Hjem og hygiene',/såpe|spray|papir|bleie|tann|solidox|vask|rengjør|pose/i],
+    ['Til dyrene',/katt|hund|litter|ever clean|dyrefôr/i]
+  ];
+  const pantryGroup=item=>PANTRY_GROUPS.find(([,pattern])=>pattern.test(item.name))?.[0]??'Andre varer';
+  function resetStockDraft(){for(const url of stockPreviews.values())URL.revokeObjectURL(url);stockPreviews.clear();Object.assign(stockDraft,{text:'',location:'',mode:'minimum',files:[],intakeId:null,clientId:crypto.randomUUID()});}
+  function stockIntakeCard() {
+    const card=el('section',undefined,'shop-card shop-stock-intake'),form=el('form'),description=el('textarea');
+    description.rows=3;description.maxLength=2000;description.placeholder='For eksempel: 400 gram kyllingfilet og 15 tomatbokser à 400 g';description.value=stockDraft.text;description.setAttribute('aria-label','Hva har du på lager?');description.oninput=()=>{stockDraft.text=description.value;};
+    const where=el('input');where.placeholder='For eksempel: fryser i boden, øverste skuff';where.maxLength=120;where.value=stockDraft.location;where.setAttribute('aria-label','Hvor ligger varene?');where.oninput=()=>{stockDraft.location=where.value;};
+    const mode=el('select');for(const [value,label] of [['minimum','Bare det som er synlig – behold minst dette'],['replace','Jeg har telt hele beholdningen av disse varene']])mode.append(Object.assign(el('option',label),{value}));mode.value=stockDraft.mode;mode.onchange=()=>{stockDraft.mode=mode.value;};mode.setAttribute('aria-label','Hvor komplett er tellingen?');
+    const photos=el('input');photos.type='file';photos.accept='image/jpeg,image/png,image/webp';photos.multiple=true;photos.setAttribute('aria-label','Bilder av lageret');
+    const previews=el('div',undefined,'shop-stock-previews');
+    const showPhotos=()=>{previews.replaceChildren();for(const file of stockDraft.files){if(!stockPreviews.has(file))stockPreviews.set(file,URL.createObjectURL(file));const figure=el('figure'),img=el('img');img.src=stockPreviews.get(file);img.alt=file.name;figure.append(img,el('figcaption',file.name));previews.append(figure);}};
+    photos.onchange=()=>{const selected=[...photos.files];if(selected.length>8||selected.some(f=>f.size>10*1024*1024)||selected.reduce((n,f)=>n+f.size,0)>40*1024*1024){photos.value='';toast('Velg opptil åtte bilder, maks 10 MB hver og 40 MB totalt.');return;}for(const url of stockPreviews.values())URL.revokeObjectURL(url);stockPreviews.clear();stockDraft.files=selected;showPhotos();};showPhotos();
+    const submit=el('button',stockSending?'Sender …':stockDraft.intakeId?'Fortsett innsending':'La agenten telle','primary');submit.type='submit';submit.disabled=stockSending;
+    for(const input of [description,where,mode,photos])input.disabled=stockSending||!!stockDraft.intakeId;
+    const error=el('p','','shop-error');error.setAttribute('role','status');
+    form.onsubmit=async event=>{
+      event.preventDefault();if(stockSending)return;
+      if(!stockDraft.text.trim()&&!stockDraft.files.length){error.textContent='Skriv hva du har, eller velg et bilde.';return;}
+      stockSending=true;submit.disabled=true;submit.textContent='Sender …';for(const input of [description,where,mode,photos])input.disabled=true;
+      try{
+        if(!stockDraft.intakeId){const entry=await api('/stock-intake',{clientId:stockDraft.clientId,text:stockDraft.text,location:stockDraft.location,mode:stockDraft.mode,fileCount:stockDraft.files.length});stockDraft.intakeId=entry.id;}
+        for(let slot=0;slot<stockDraft.files.length;slot++){const file=stockDraft.files[slot],response=await fetch(base+'/stock-intake/'+stockDraft.intakeId+'/files/'+slot,{method:'POST',credentials:'same-origin',headers:{'X-Family-Request':'1','X-File-Name':encodeURIComponent(file.name)},body:file,signal:AbortSignal.timeout(60000)});if(!response.ok)throw Error((await response.json()).error??'Bildet kunne ikke lastes opp.');}
+        await api('/stock-intake/'+stockDraft.intakeId+'/submit',{});resetStockDraft();await load();stockSending=false;render(true);toast('Sendt. Agenten kobler varene og teller lageret.');
+      }catch(problem){stockSending=false;render(true);toast(problem.message);}finally{stockSending=false;submit.disabled=false;if(!stockDraft.intakeId)for(const input of [description,where,mode,photos])input.disabled=false;}
+    };
+    const actions=el('div',undefined,'shop-actions');actions.append(submit);
+    if(stockDraft.intakeId)actions.append(button('Avbryt innsending',()=>act(async()=>{await api('/stock-action',{id:stockDraft.intakeId,action:'cancel'});resetStockDraft();},'Innsending avbrutt.')));
+    else if(stockDraft.text||stockDraft.files.length)actions.append(button('Tøm',()=>{resetStockDraft();render(true);}));
+    card.append(el('h3','Fortell eller vis hva du har'),el('p','Skriv fritt, eller legg ved bilder av pantry, kjøleskap og fryser. Overlappende bilder av samme samling telles én gang.','shop-sub'));
+    form.append(field('Varer og mengder',description),field('Plassering (valgfritt)',where),field('Tellemetode',mode),field('Bilder · JPG, PNG eller WebP',photos),previews,actions,error);card.append(form);return card;
+  }
+  function stockReports(root) {
+    const reports=data.stockReports??[];if(!reports.length)return;
+    const labels={uploading:'Ikke sendt ennå',queued:'Agenten teller …',done:'Lageret er oppdatert',needs_input:'Trenger avklaring',acknowledged:'Avklaring sett'};
+    root.append(details('stock-reports','Lagertellinger ('+reports.length+')',holder=>{
+      for(const report of reports.slice(0,12)){
+        const row=el('article',undefined,'shop-stock-report');row.append(el('strong',labels[report.status]??report.status),el('p',[report.text,report.location].filter(Boolean).join(' · '),'shop-sub'));
+        if(report.result){for(const change of report.result.changes)row.append(el('p',change.name+': '+amount(change.amount,change.unit)+(report.mode==='minimum'?' (minst)':'')));for(const missing of report.result.unmatched)row.append(el('p',missing.description+' · '+missing.reason,'shop-error'));row.append(el('p',report.result.evidence,'shop-sub'));}
+        else if(report.note)row.append(el('p',report.note,'shop-sub'));
+        if(report.result?.changes.length)row.append(button('Angre telling',()=>act(()=>api('/stock-action',{id:report.id,action:'undo'}),'Tellingen er angret.')));
+        if(report.status==='needs_input')row.append(button('Jeg har sett avklaringen',()=>act(()=>api('/stock-action',{id:report.id,action:'dismiss'}),'Avklaringen er lukket.')));
+        if(['uploading','queued'].includes(report.status))row.append(button('Avbryt',()=>act(()=>api('/stock-action',{id:report.id,action:'cancel'}),'Tellingen er avbrutt.')));
+        holder.append(row);
+      }
+    },'shop-fold'));
+  }
   function pantryRow(item) {
-    const row=el('div',undefined,'shop-item'+(item.enabled?'':' paused'));
+    const row=el('div',undefined,'shop-item');
     const head=button('',()=>itemDialog(item),'shop-item-head');
     const title=el('span',undefined,'shop-item-title');
-    const status=el('span',stockSummary(item)+(item.stock.needsCheck?' · sjekk gjerne':''),'shop-sub');
+    const status=el('span',stockSummary(item)+(item.stockEvidence?.estimated?' · anslag fra bilde':'')+(item.stock.needsCheck?' · sjekk gjerne':''),'shop-sub');
     title.append(el('strong',item.name),status);
-    head.append(title,el('span','›','shop-chevron'));
+    head.append(thumb(item.image),title,el('span','›','shop-chevron'));
     row.append(head);
     row.append(stockEditor(item,updated=>{status.textContent=stockSummary(updated);}));
     return row;
@@ -580,7 +639,8 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
   function pantryList(holder) {
     const needle=search.toLocaleLowerCase('nb-NO');
     const items=data.items.filter(x=>(location==='all'||x.storage===location)&&x.name.toLocaleLowerCase('nb-NO').includes(needle));
-    holder.replaceChildren(...items.map(pantryRow));
+    holder.replaceChildren();
+    for(const group of [...PANTRY_GROUPS.map(([name])=>name),'Andre varer']){const members=items.filter(x=>pantryGroup(x)===group).sort((a,b)=>a.name.localeCompare(b.name,'nb'));if(!members.length)continue;const section=el('section',undefined,'shop-pantry-group'),head=el('div',undefined,'shop-store-head');head.append(el('h3',group),el('span',members.filter(x=>x.stock.known).length+' av '+members.length+' telt','shop-sub'));section.append(head,...members.map(pantryRow));holder.append(section);}
     if(!items.length)holder.append(el('p','Ingen varer her.','shop-sub'));
   }
   function renderPantry(root) {
@@ -590,7 +650,8 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     const input=el('input');input.type='search';input.placeholder='Finn en vare';input.value=search;input.setAttribute('aria-label','Søk i lageret');
     const list=el('div',undefined,'shop-list');
     input.oninput=()=>{search=input.value;pantryList(list);};
-    root.append(intro,input,chips(LOCATIONS,location,value=>{location=value;render(true);},'Velg sted'),button('Legg til vare',()=>itemDialog(null),'shop-add'),list);
+    root.append(intro,details('stock-input','Oppdater lager med tekst eller bilder',holder=>holder.append(stockIntakeCard()),'shop-fold'));stockReports(root);
+    root.append(input,chips(LOCATIONS,location,value=>{location=value;render(true);},'Velg sted'),button('Legg til vare manuelt',()=>itemDialog(null),'shop-add'),list);
     pantryList(list);
   }
 

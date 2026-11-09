@@ -438,7 +438,7 @@ test("run completion requires reviewed queue, full coverage, Drive copies and sy
   const raw = store.upsertRaw({ source:"spond", externalId:"trip", title:"Tur", findings:[{ canonicalKey:"trip", title:"Tur", start:"2026-10-01T08:00:00+02:00", end:"2026-10-01T09:00:00+02:00" }] });
   store.observeListing({ source:"spond", surface:"events", items:[{ externalId:"trip", title:"Tur" }] });
   store.updateSurface({ source:"spond", surface:"events", health:"partial", nextPageHint:"Neste side" });
-  assert.deepEqual(store.completionReport().counts, { phonePending:0,pendingItems:1, incompleteSurfaces:1, incompleteSources:0, missingDrive:1, unsyncedCalendar:1, vigiloIssues:0, profileReviews:1 });
+  assert.deepEqual(store.completionReport().counts, { phonePending:0,pendingItems:1, incompleteSurfaces:1, incompleteSources:0, missingDrive:1, unsyncedCalendar:1, vigiloIssues:0, profileReviews:1,shoppingPending:0,shoppingBlocked:0 });
   assert.throws(() => store.recordRun({ outcome:"ok" }), /restanser/);
   assert.throws(() => store.recordRun({ outcome:"partial", summary:"Trenger mer tid" }), /blockers/);
   store.markReviewed({ source:"spond", surface:"events", externalId:"trip", rawId:raw.item.id });

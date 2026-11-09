@@ -27,6 +27,10 @@ Bruk `shopping-settings` til historisk startdato, lagringsnotat og eksplisitt va
 
 Oda dekker ikke nødvendigvis hele matbudsjettet eller forbruket. Kostholdsanalyse trenger næringsdeklarasjoner og målbar mengde; den gjetter ikke næringsinnhold eller barnas energibehov fra handlekurven.
 
+## Lagerinnsendinger
+
+Før daglig bruk av Lager: test en fritekstmengde og to overlappende bilder i separat testdataområde. Kontroller at den valgte agenten starter, faktisk leser begge bilder, teller én fysisk samling én gang og frigjør egen lease. Prøv også uklare etiketter, nyere manuell beholdning, avbrutt opplasting og Angre. Lager støtter JPG/PNG/WebP; eksporter HEIC som JPG. Bilder og tellingshistorikk lagres privat kryptert, uten automatisk Drive-/kalenderpublisering. Lagerinnsendinger bruker den eksisterende familiehandlingsdispatcheren også når prisovervåkning er av. Se runbookens Lager-kontrakter, og ta dem inn i eksisterende planlagte agentjobber uten å endre familiens runtime, modell, tider eller tillatelser.
+
 ## Mobil utenfor hjemmenettet
 
 Sett en HTTPS-tunnel/reverse proxy til **bare port4320** og `/send/`; bruk egen adresse i `config/phone-access.json`. En tunnel på samme PC kan nå loopback direkte. Ved LAN-bruk må `FAMILIEN_PHONE_HOST` settes uttrykkelig og brannmur begrenses passende. Åpne `/phone-setup` lokalt på4318 for å lage en tidsbegrenset invitasjon/QR. Velg riktig avsender per telefon og legg siden på hjemskjermen. Invitasjoner og enhetstilgang er hemmeligheter. Test utlogging/tilbakekalling og ekte bilde/tekstinnsending før familiens daglige bruk. Bare den valgte agenten behandler data; ingen eksterne AI-kall gjøres av prosjektet uten agentoppsettet.

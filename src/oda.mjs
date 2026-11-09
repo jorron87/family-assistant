@@ -90,11 +90,12 @@ export function createOda({dataDir,shopping,redirectUrl,makeClient=()=>new Clien
     try{
       during=await call('manipulate_cart',{operations:[{productId,quantity}]});
       accepted=cartQuantity(during,productId)-initial;
-    }catch(problem){error=problem.message;}
+    }catch{error='Oda-testen kunne ikke bekreftes. Kontroller kurven.';}
     finally{
-      await call('manipulate_cart',{operations:[{productId,quantity:-quantity}]}).catch(()=>{});
+      // Read first: an ambiguous add may have changed nothing. Subtracting the
+      // requested test quantity blindly can erase the family's existing line.
       const fresh=await call('get_cart').catch(()=>null);
-      if(fresh&&cartQuantity(fresh,productId)>initial)await call('manipulate_cart',{operations:[{productId,quantity:initial-cartQuantity(fresh,productId)}]}).catch(()=>{});
+      if(fresh&&cartQuantity(fresh,productId)!==initial)await call('manipulate_cart',{operations:[{productId,quantity:initial-cartQuantity(fresh,productId)}]}).catch(()=>{error='Tilbakestillingen må kontrolleres hos Oda.';});
     }
     const after=await call('get_cart'),lines=[];
     const walk=value=>{if(!value||typeof value!=='object')return;if(value.product?.id===productId){lines.push(value);return;}for(const child of Object.values(value))if(child&&typeof child==='object')walk(child);};
@@ -104,7 +105,7 @@ export function createOda({dataDir,shopping,redirectUrl,makeClient=()=>new Clien
   const verifiedWrite=async(requestId,fields,write,verify)=>{
     if(!/^[a-zA-Z0-9-]{16,100}$/.test(requestId??''))throw Error('Ugyldig kurvhandling.');
     const previous=shopping.receipt(requestId);
-    if(previous){if(previous.status==='confirmed')return previous;throw Error('Denne kurvhandlingen må kontrolleres hos Oda før et nytt forsøk.');}
+    if(previous){if(Object.entries(fields).some(([key,value])=>previous[key]!==value))throw Error('Handlings-ID er allerede brukt.');if(previous.status==='confirmed')return previous;throw Error('Denne kurvhandlingen må kontrolleres hos Oda før et nytt forsøk.');}
     const before=await call('get_cart');
     shopping.cartReceipt(requestId,{status:'in_flight',...fields});
     try{
@@ -117,24 +118,24 @@ export function createOda({dataDir,shopping,redirectUrl,makeClient=()=>new Clien
   async function changeCart(input) {return exclusive(async()=>{
     const {requestId,productId,delta}=input;
     if(!Number.isSafeInteger(productId)||productId<1||!Number.isInteger(delta)||delta===0||Math.abs(delta)>200)throw Error('Ugyldig kurvhandling.');
-    return verifiedWrite(requestId,{productId,quantity:delta},()=>call('manipulate_cart',{operations:[{productId,quantity:delta}]}),(after,before)=>cartQuantity(after,productId)===Math.max(0,cartQuantity(before,productId)+delta));
+    return verifiedWrite(requestId,{operation:'change',productId,quantity:delta},()=>call('manipulate_cart',{operations:[{productId,quantity:delta}]}),(after,before)=>cartQuantity(after,productId)===Math.max(0,cartQuantity(before,productId)+delta));
   });}
   async function swapInCart(input) {return exclusive(async()=>{
     const {requestId,fromProductId,toProductId,quantity}=input;
     if(![fromProductId,toProductId].every(id=>Number.isSafeInteger(id)&&id>0)||fromProductId===toProductId||!Number.isInteger(quantity)||quantity<1||quantity>100)throw Error('Ugyldig kurvhandling.');
-    return verifiedWrite(requestId,{productId:toProductId,quantity},before=>call('manipulate_cart',{operations:[{productId:fromProductId,quantity:-cartQuantity(before,fromProductId)},{productId:toProductId,quantity}]}),(after,before)=>cartQuantity(after,fromProductId)===0&&cartQuantity(after,toProductId)===cartQuantity(before,toProductId)+quantity);
+    return verifiedWrite(requestId,{operation:'swap',fromProductId,productId:toProductId,quantity},before=>call('manipulate_cart',{operations:[{productId:fromProductId,quantity:-cartQuantity(before,fromProductId)},{productId:toProductId,quantity}]}),(after,before)=>cartQuantity(after,fromProductId)===0&&cartQuantity(after,toProductId)===cartQuantity(before,toProductId)+quantity);
   });}
   async function addToCart(input) {return exclusive(async()=>{
     const {requestId,productId,quantity}=input;
     if(!/^[a-zA-Z0-9-]{16,100}$/.test(requestId??'')||!Number.isSafeInteger(productId)||productId<1||!Number.isInteger(quantity)||quantity<1||quantity>100)throw Error('Ugyldig kurvhandling.');
     const previous=shopping.receipt(requestId);
-    if(previous){if(previous.productId!==productId||previous.quantity!==quantity)throw Error('Handlings-ID er allerede brukt.');if(previous.status==='confirmed')return previous;throw Error('Denne kurvhandlingen må kontrolleres hos Oda før et nytt forsøk.');}
+    if(previous){if(previous.operation&&previous.operation!=='add'||previous.productId!==productId||previous.quantity!==quantity)throw Error('Handlings-ID er allerede brukt.');if(previous.status==='confirmed')return previous;throw Error('Denne kurvhandlingen må kontrolleres hos Oda før et nytt forsøk.');}
     const before=await call('get_cart'),initial=cartQuantity(before,productId);
-    shopping.cartReceipt(requestId,{status:'in_flight',productId,quantity,initial});
+    shopping.cartReceipt(requestId,{status:'in_flight',operation:'add',productId,quantity,initial});
     try{
       await call('manipulate_cart',{operations:[{productId,quantity}]});
       const after=await call('get_cart');
-      if(cartQuantity(after,productId)<initial+quantity)throw Error('Mengden kunne ikke bekreftes.');
+      if(cartQuantity(after,productId)!==initial+quantity)throw Error('Mengden kunne ikke bekreftes.');
       const link=new URL(after.url);if(link.protocol!=='https:'||link.hostname!=='oda.com')throw Error('Ukjent kurvlenke.');
       return shopping.cartReceipt(requestId,{status:'confirmed',productId,quantity,url:link.href});
     }catch{shopping.cartReceipt(requestId,{status:'uncertain'});throw Error('Kurvhandlingen kunne ikke bekreftes. Kontroller handlekurven hos Oda; handlingen gjentas ikke automatisk.');}
