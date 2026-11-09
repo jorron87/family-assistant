@@ -1,0 +1,8 @@
+{
+  "enabled": false,
+  "chainCodes": ["KIWI", "REMA_1000", "COOP_EXTRA"],
+  "minSpacingMs": 1500,
+  "cycleCalls": 4,
+  "refreshHours": 24,
+  "queryOverrides": {}
+}

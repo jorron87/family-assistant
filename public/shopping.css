@@ -9,6 +9,9 @@
 .shop .shop-tabs button.on { background: var(--s-card); font-weight: 600; }
 .shop-refresh { width: 100%; min-height: 44px; margin-bottom: 12px; border: 0; border-radius: 12px; background: var(--s-green); color: #fff; font: inherit; cursor: pointer; }
 .shop-refresh[hidden] { display: none; }
+.shop-same-brand { align-self: flex-start; margin-top: 3px; }
+.shop-brand-deal { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--s-line); }
+.shop-brand-deal .shop-list-text { flex: 1; min-width: 0; }
 .shop-compare-missing { flex-basis: 100%; margin-top: 4px !important; }
 .shop .shop-explore { min-height: 42px; padding: 8px 14px; border: 1px solid var(--s-line); border-radius: 11px; background: transparent; color: var(--s-green); font: inherit; font-size: 14.5px; cursor: pointer; }
 .shop-hero, .shop-card, .shop-store { padding: 18px; border: 1px solid var(--s-line); border-radius: 18px; background: var(--s-card); }

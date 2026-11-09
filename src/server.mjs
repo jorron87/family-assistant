@@ -26,6 +26,7 @@ import {createGooglePublisher} from './google-publisher.mjs';
 import {weeklyLetters} from './weekly-letters.mjs';
 import {createOda} from './oda.mjs';
 import {createKassal} from './kassal.mjs';
+import {createSesumCollector,sesumSenderAllowed} from './shopping-sesum.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 let libraryPrices;
@@ -56,6 +57,10 @@ const port = Number(process.env.FAMILIEN_PORT ?? 4318);
 const oda=createOda({dataDir:DATA_DIR,shopping:store.shopping,redirectUrl:`http://127.0.0.1:${port}/api/shopping/oda/callback`});
 const odaCart=createOdaCart({oda,shopping:store.shopping});
 const kassal=createKassal({dataDir:DATA_DIR});
+let sesumConfig={enabled:false};
+try{sesumConfig=readConfig('shopping-sesum.json');}catch(error){if(error.code!=='ENOENT')throw error;}
+const sesum=createSesumCollector({dataDir:DATA_DIR,config:sesumConfig,families:()=>store.shopping.sesumFamilies(),receivePrices:input=>store.shopping.sesumReceivePrices(input)});
+const sesumStatus=()=>({...sesum.status(),priceIntegration:store.shopping.sesumPriceStatus()});
 PUBLIC_FILES.set('shopping-view.mjs','text/javascript; charset=utf-8');PUBLIC_FILES.set('barcode.mjs','text/javascript; charset=utf-8');
 PUBLIC_FILES.set('shopping.css','text/css; charset=utf-8');
 PUBLIC_FILES.set('pantry-groups.mjs','text/javascript; charset=utf-8');
@@ -89,6 +94,20 @@ async function handle(req, res) {
   try {
     const path = new URL(req.url, `http://${host}:${port}`).pathname;
     const method = req.method;
+    if(path.startsWith('/api/shopping/sesum/')){
+      const extension=path==='/api/shopping/sesum/work'||path==='/api/shopping/sesum/receive';
+      if(!sesumSenderAllowed(req.headers,{extension,write:method==='POST'}))return send(res,403,{error:'Ugyldig Sesum-avsender.'});
+      if(method==='POST'&&!String(req.headers['content-type']??'').toLowerCase().startsWith('application/json'))return send(res,403,{error:'Sesum krever JSON.'});
+      if(path==='/api/shopping/sesum/work'&&method==='GET')return send(res,200,sesum.work({peek:new URL(req.url,`http://${host}`).searchParams.get('peek')==='1'}));
+      if(path==='/api/shopping/sesum/status'&&method==='GET')return send(res,200,sesumStatus());
+      if(path==='/api/shopping/sesum/candidates'&&method==='GET')return send(res,200,store.shopping.sesumCandidates(new URL(req.url,`http://${host}`).searchParams.get('familyId')??undefined));
+      if(path==='/api/shopping/sesum/catalog'&&method==='GET')return send(res,200,sesum.catalog({familyId:new URL(req.url,`http://${host}`).searchParams.get('familyId')}));
+      if(path==='/api/shopping/sesum/receive'&&method==='POST')return send(res,200,await sesum.receive(await json(req)));
+      if(path==='/api/shopping/sesum/review'&&method==='POST')return send(res,200,store.shopping.sesumPriceReview(await json(req)));
+      if(path==='/api/shopping/sesum/register'&&method==='POST')return send(res,200,store.shopping.sesumRegister(await json(req)));
+      if(path==='/api/shopping/sesum/refresh'&&method==='POST'){sesum.refresh();return send(res,200,sesumStatus());}
+      return send(res,405,{error:'Ukjent Sesum-operasjon.'});
+    }
     if(path==='/shopping-setup'&&method==='GET')return send(res,200,readFileSync(join(root,'public','shopping-setup.html')),'text/html; charset=utf-8');
     if(path==='/api/shopping'&&method==='GET')return send(res,200,{...store.shopping.view(),oda:oda.status(),kassal:kassal.status()});
     if(path==='/api/shopping/family'&&method==='GET')return send(res,200,{...store.shopping.familyView(),oda:oda.status()});
@@ -466,7 +485,7 @@ servers.push(createServer((req,res) => {
     if(req.method==='POST'&&/^\/api\/shopping\/(?:stock-action|stock-scan|stock-intake(?:\/[a-f0-9-]{36}\/(?:submit|files\/[0-7]))?)$/.test(kioskStock))return handle(req,res);
     return send(res,req.method==='GET'?403:405,{error:'Gjennomgang og bildeoriginaler er bare tilgjengelige på agentporten.'});
   }
-  if(/^\/(?:api\/(?:resources|collector|google)(?:[/?]|$)|google-setup|shopping-setup|api\/shopping\/oda\/(?:connect|callback|tools)|api\/shopping\/(?:orders|settings|offer|review|nutrition|catalog|link|feed|library-))/.test(req.url))return send(res,req.method==='GET'?403:405,{error:'Kildeoriginaler og integrasjonsoppsett er bare tilgjengelige lokalt på agentporten.'});
+  if(/^\/(?:api\/(?:resources|collector|google)(?:[/?]|$)|google-setup|shopping-setup|api\/shopping\/oda\/(?:connect|callback|tools)|api\/shopping\/(?:sesum\/|orders|settings|offer|review|nutrition|catalog|link|feed|library-))/.test(req.url))return send(res,req.method==='GET'?403:405,{error:'Kildeoriginaler og integrasjonsoppsett er bare tilgjengelige lokalt på agentporten.'});
   if (req.method !== "GET" && !(req.method === "POST" && /^(?:\/api\/shopping\/(?:watch|pantry|item|deal|list|oda\/(?:sync|search|add|cart|probe|review|line|swap))|\/api\/home-assistant\/command|\/api\/doorbell\/frame|\/api\/profile\/edit|\/api\/events\/[a-f0-9]{24}\/(?:tasks\/[a-zA-Z0-9:_-]{1,100}|visibility)|\/api\/activities\/[a-f0-9]{24}\/reaction)$/.test(new URL(req.url,`http://${host}`).pathname))) return send(res,405,{error:"Handlingen er bare tilgjengelig lokalt på agentporten."});
   return handle(req,res);
 }));

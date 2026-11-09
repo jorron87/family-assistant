@@ -4,7 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {dirname,join} from 'node:path';
 import {readProductLibrary,productTextHash} from './product-library.mjs';
 
-const INDEX_VERSION=4,FRESH_MS=48*3600000,RETRY_MS=60000;
+const INDEX_VERSION=5,FRESH_MS=48*3600000,RETRY_MS=60000;
 // A product whose newest price receipt is older than this is parked: kept in the
 // library with its reviews, but out of the views and out of agent work queues.
 // It returns by itself when a newer receipt arrives. Nothing is deleted.

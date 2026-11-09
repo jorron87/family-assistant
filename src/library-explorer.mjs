@@ -121,7 +121,7 @@ export function createLibraryExplorer({reader,imageRef,chainName,ownStores=()=>[
  }
  async function bundle() {
   const read=reader();if(!read)return {status:status()};
-  const key=read.builtAt+'|'+Math.floor(Date.now()/86400000)+'|'+[...new Set(ownStores())].sort().join(','); // Products pass the price horizon as days go by.
+  const key=read.builtAt+'|'+(read.cacheKey??'')+'|'+Math.floor(Date.now()/86400000)+'|'+[...new Set(ownStores())].sort().join(','); // Semantic overlays change independently of the library's build time.
   if(cached?.key===key)return cached;
   if(pending?.key===key)return pending.work;
   const work=compile(read,key).then(done=>{cached=done;return done;}).finally(()=>{if(pending?.work===work)pending=null;});

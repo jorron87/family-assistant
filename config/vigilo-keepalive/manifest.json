@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Familien – innhenting og øktkontroll",
-  "version": "1.6.13",
-  "description": "Beskytter innlogget Vigilo-fane mot minneutlasting og henter lister fra Vigilo, Spond og Facebook-grupper til den lokale Familien-tjenesten.",
+  "version": "1.7.0",
+  "description": "Beskytter Vigilo-økten og henter avgrenset innhold fra Vigilo, Spond, Facebook og Sesum til den lokale Familien-tjenesten.",
   "permissions": [
     "alarms",
     "scripting",
@@ -13,6 +13,7 @@
     "https://spond.com/*",
     "https://api.spond.com/*",
     "https://www.facebook.com/*",
+    "https://www.sesum.no/*",
     "http://127.0.0.1:4318/*"
   ],
   "background": {
@@ -65,6 +66,17 @@
       "js": [
         "collector-bridge.js"
       ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://www.sesum.no/*"],
+      "js": ["sesum-core.js", "collector-sesum.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://www.sesum.no/*"],
+      "js": ["collector-bridge.js"],
       "run_at": "document_start"
     }
   ],

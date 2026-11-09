@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {shoppingStore} from '../src/shopping.mjs';
+import {shoppingStore,collapseSameProduct,sameProductLine} from '../src/shopping.mjs';
 
 const NOW='2026-11-08T12:00:00Z';
 function setup() {
@@ -159,4 +159,26 @@ test('list routing preserves chosen variants and refuses bought, urgent or malfo
  assert.deepEqual(shop.familyView().list.open,before);
  shop.list({action:'check',id:e.id});assert.throws(()=>shop.list({action:'route',id:e.id,storeName:'Oda',reason:'Pris',odaProductId:9,packs:1}),/kjøpt/);
  const urgent=shop.list({action:'add',name:'Haster',need:'now'});assert.throws(()=>shop.list({action:'route',id:urgent.id,storeName:'Oda',reason:'Pris',odaProductId:9,packs:1}),/nærbutikk/);
+});
+
+test('the same physical product shows once, at the cheapest of the family\'s own stores',()=>{
+ const row=(storeName,ean,unitPrice,own=true,extra={})=>({storeName,ean,brand:'Heinz',name:'Ketchup',packAmount:.57,unitPrice,own,offer:false,odaProductId:null,...extra});
+ const out=collapseSameProduct([row('MENY','0087157239',70),row('SPAR','87157239',68),row('Bunnpris','87157239',60,false),row('Europris','8715700',37)]);
+ assert.equal(out.length,2,'leading zeros do not make it another product');
+ const heinz=out.find(x=>x.ean!=='8715700');
+ assert.equal(heinz.storeName,'SPAR','a chain the family does not use cannot be the row they act on');
+ assert.deepEqual(heinz.alsoAt.map(x=>x.storeName),['Bunnpris','MENY']);
+ assert.equal(collapseSameProduct([row('Oda','1',10,true,{odaProductId:5}),row('MENY','1',9)]).length,2,'an Oda row stays so a line can move back');
+ assert.equal(collapseSameProduct([row('A','1',10,true,{offer:true}),row('B','1',9)]).length,2,'an offer keeps its own terms');
+ assert.equal(collapseSameProduct([row('A','',10),row('B','',9)]).length,1,'brand, name and pack identify a row without a barcode');
+ assert.equal(collapseSameProduct([row('A','',10,true,{brand:null}),row('B','',9,true,{brand:null})]).length,2,'with nothing to go on, rows stay apart');
+});
+
+test('a product line ignores brand and pack size but never a real variant',()=>{
+ assert.equal(sameProductLine('Tomatketchup 1 kg','Ketchup 1,35 kg Heinz','Heinz'),true);
+ assert.equal(sameProductLine('Ketchup 570 g','Tomatketchup 570g Heinz','Heinz'),true);
+ assert.equal(sameProductLine('Økologiske havregryn Lettkokte, 1 kg','Havregryn Lettkokte 1,1kg Bjørn','Bjørn'),false);
+ assert.equal(sameProductLine('Frisk Pust tannkrem 75 ml','Solidox Tannkrem Totalbeskyttelse 75ml','Solidox'),false);
+ assert.equal(sameProductLine('Ketchup Pickle 460g Heinz','Tomatketchup 570g Heinz','Heinz'),false);
+ assert.equal(sameProductLine('','Ketchup','Heinz'),false);
 });

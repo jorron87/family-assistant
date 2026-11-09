@@ -2,6 +2,30 @@ import test from 'node:test';import assert from 'node:assert/strict';import {mkd
 import {createIngestionDispatcher,changeSignal} from '../src/ingestion-dispatch.mjs';
 import {createStore} from '../src/store.mjs';
 
+test('same-count Sesum review changes wake dispatch by source identity, metadata and followed family',()=>{
+  let rows=[{do:'shopping-sesum-review',sourceKey:'sesum:KIWI:123',sourceFingerprint:'metadata-a',familyIds:['family-b','family-a'],receiptAt:'2026-11-09T08:00:00Z'}];
+  const store={snapshot:()=>({rawItems:{},events:{}}),reviewQueue:()=>({items:[]}),completionReport:()=>({profileReviews:[],missingDrive:[],unsyncedCalendar:[]}),activityFacebook:()=>[],activityFeedStatus:()=>({changedPages:[]}),shopping:{queue:()=>rows}};
+  const first=changeSignal(store);assert.equal(first.count,1);assert.equal(first.shoppingOnly,true);assert.ok(first.signature);
+  rows[0].receiptAt='2026-11-09T10:00:00Z';rows[0].fetchedAt='2026-11-09T11:00:00Z';
+  assert.equal(changeSignal(store).signature,first.signature,'ordinary price/fetch time alone does not reopen unchanged product review');
+  rows[0].familyIds.reverse();assert.equal(changeSignal(store).signature,first.signature,'family ordering is not new work');
+  rows[0].sourceFingerprint='metadata-b';const changedMetadata=changeSignal(store);assert.equal(changedMetadata.count,first.count);assert.notEqual(changedMetadata.signature,first.signature);
+  rows[0].sourceKey='sesum:COOP_EXTRA:456';const changedSource=changeSignal(store);assert.equal(changedSource.count,first.count);assert.notEqual(changedSource.signature,changedMetadata.signature);
+  rows[0].familyIds.push('newly-followed');assert.notEqual(changeSignal(store).signature,changedSource.signature,'new family association is meaningful even at the same pending row count');
+  rows[0].do='shopping-sesum-discovery';assert.equal(changeSignal(store).shoppingOnly,true);assert.equal(changeSignal(store).count,1);
+  rows=[];assert.equal(changeSignal(store).signature,null);
+});
+
+test('new Sesum discovery launches the existing shopping agent with research and registration instructions',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'familien-dispatch-sesum-'));let lease=null,launch,rows=[{do:'shopping-sesum-discovery',sourceKey:'sesum:KIWI:123',sourceFingerprint:'current-source',familyIds:['family-a']}];
+  const store={snapshot:()=>({runLease:lease,rawItems:{},events:{}}),reviewQueue:()=>({items:[]}),completionReport:()=>({profileReviews:[],missingDrive:[],unsyncedCalendar:[]}),activityFacebook:()=>[],activityFeedStatus:()=>({changedPages:[]}),shopping:{queue:()=>rows},phone:{list:()=>[]},calendarActions:()=>[],beginRun:()=>({acquired:true,lease:lease={token:'test-owned-lease'}}),endRun:token=>{assert.equal(token,lease.token);lease=null;},renewRun:()=>{}};
+  try{
+    const d=createIngestionDispatcher({store,root:'.',dataDir:dir,clock:()=>Date.parse('2026-11-09T12:00:00Z'),readConfig:()=>({enabled:true,minGapMinutes:0}),alive:()=>true,launch:input=>{launch=input;return {pid:123};}});
+    d.tick();assert.equal(d.status().workerScope,'handel');assert.match(launch.prompt,/shopping-sesum-discovery/);assert.match(launch.prompt,/shopping-sesum-register/);assert.match(launch.prompt,/shopping-sesum-catalog/);assert.match(launch.prompt,/Manglende EAN eller gjennomgått donor er aldri automatisk avslag/);
+    rows=[];launch.onExit(0);assert.equal(lease,null);assert.equal(d.status().running,false);
+  }finally{assert.ok(dir.startsWith(join(tmpdir(),'familien-dispatch-sesum-')));rmSync(dir,{recursive:true,force:true});}
+});
+
 test('an edit to an already pending source item changes the dispatch signal',()=>{
   const dir=mkdtempSync(join(tmpdir(),'familien-dispatch-'));
   try{

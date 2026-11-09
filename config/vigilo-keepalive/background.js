@@ -214,11 +214,15 @@ void ensureAlarm().catch(()=>{});
 const collectorLocal = 'http://127.0.0.1:4318';
 const collectorAllowed = (path, method) => (method === 'GET' && path === '/api/collector/config') || (method === 'POST' && ['/api/collector','/api/resources/receive'].includes(path));
 const collectorOrigins = new Set(['https://web-parent.prod.vigilo-oas.no', 'https://spond.com', 'https://www.facebook.com']);
+// Sesum can submit only its read observations. It cannot reach school intake,
+// original files, catalog approvals, family settings or cart operations.
+const sesumRelayAllowed = (path, method) => method === 'GET' && path === '/api/shopping/sesum/work' || method === 'POST' && path === '/api/shopping/sesum/receive';
 chrome.runtime.onMessage?.addListener((message, sender, sendResponse) => {
   if (message?.type !== 'familien-collector') return false;
   let origin = '';
   try { origin = new URL(sender.tab?.url ?? '').origin; } catch { /* ingen fane */ }
-  if (!collectorOrigins.has(origin) || !collectorAllowed(message.path, message.method)) { sendResponse({ok: false}); return false; }
+  const allowed = origin === 'https://www.sesum.no' ? sender.frameId === 0 && sesumRelayAllowed(message.path,message.method) : collectorOrigins.has(origin) && collectorAllowed(message.path,message.method);
+  if (!allowed) { sendResponse({ok: false}); return false; }
   (async () => {
     try {
       const response = await fetch(collectorLocal + message.path, {
@@ -298,3 +302,48 @@ async function facebookTick() {
   finally { facebookRunning = false; }
 }
 chrome.alarms?.onAlarm?.addListener(alarm => { if (alarm.name === alarmName) void facebookTick().catch(() => {}); });
+
+// ---- Sesum: separate bounded shopping queue; never navigates a source tab. ----
+const sesumOrigin = 'https://www.sesum.no', sesumAlarm = 'familien-sesum';
+let sesumRunning;
+async function ensureSesumAlarm() {
+  const alarm = await chrome.alarms.get(sesumAlarm);
+  if (alarm?.periodInMinutes !== 1) await chrome.alarms.create(sesumAlarm,{periodInMinutes:1});
+}
+async function wakeSesumCollector(tabId) {
+  let bridge;
+  try { bridge = await bounded(chrome.tabs.sendMessage(tabId,{type:'familien-collector-ping'})); } catch { /* repair after an extension update */ }
+  if (!bridge?.ok) await chrome.scripting.executeScript({target:{tabId},files:['collector-bridge.js']});
+  const [main] = await bounded(chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:() => globalThis.__familienSesumCollector === 'sesum-collector-1.7.0' && globalThis.__familienSesumCollectorBuild === 'sesum-collector-build-1.7.0-3'}));
+  if (!main?.result) await chrome.scripting.executeScript({target:{tabId},world:'MAIN',files:['sesum-core.js','collector-sesum.js']});
+  await bounded(chrome.tabs.sendMessage(tabId,{type:'familien-collector-wake'}));
+}
+async function sesumTick() {
+  if (sesumRunning || !chrome.tabs?.query || !chrome.tabs?.sendMessage) return sesumRunning;
+  sesumRunning = (async () => {
+    // The background only decides whether to wake the page. Reserving work is
+    // the page collector's job; a preflight must never consume its own queue.
+    const response = await fetch(collectorLocal + '/api/shopping/sesum/work?peek=1',{signal:AbortSignal.timeout(4000)});
+    if (!response.ok) return;
+    const work = await response.json();
+    if (!work?.enabled || !work.jobs?.length || Date.parse(work.pauseUntil ?? '') > Date.now()) return;
+    const tabs = (await chrome.tabs.query({url:sesumOrigin+'/*'})).filter(tab => {
+      try {return new URL(tab.url).origin === sesumOrigin;} catch {return false;}
+    });
+    if (!tabs.length) { await chrome.tabs.create({url:sesumOrigin+'/',active:false}); return; }
+    // A visible user's Sesum tab can supply its ordinary session without being
+    // navigated, focused, reloaded, pinned or having in-progress input touched.
+    const tab = tabs.find(candidate => !candidate.discarded && !candidate.frozen && candidate.status !== 'loading');
+    if (tab) await wakeSesumCollector(tab.id);
+    else {
+      const discarded = tabs.find(candidate => candidate.discarded && !candidate.frozen && candidate.status !== 'loading');
+      if (discarded) await chrome.tabs.reload(discarded.id);
+    }
+  })().finally(() => {sesumRunning=undefined;});
+  return sesumRunning;
+}
+const requestSesumTick = () => {void ensureSesumAlarm().then(sesumTick).catch(() => {});};
+chrome.runtime.onInstalled.addListener(requestSesumTick);
+chrome.runtime.onStartup.addListener(requestSesumTick);
+chrome.alarms?.onAlarm?.addListener(alarm => {if(alarm.name === sesumAlarm) void sesumTick().catch(() => {});});
+void ensureSesumAlarm().catch(() => {});

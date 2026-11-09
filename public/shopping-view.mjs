@@ -337,6 +337,18 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
       return section;
     });
   }
+  // A drop on the brand actually bought, which the cheapest store brand would hide.
+  function brandDealsBlock() {
+    const box=el('section',undefined,'shop-card');
+    box.append(el('h3','Samme vare, lavere pris'),el('p','Kjedepriser fra de siste 48 timene. Ikke sjekket mot lokalt lager eller kampanjevilkår.','shop-sub'));
+    for(const deal of data.brandDeals){
+      const {place}=deal,row=el('div',undefined,'shop-brand-deal'),text=el('div',undefined,'shop-list-text');
+      text.append(productName(place.name,{key:place.productKey}),el('span',[place.storeName,place.packPrice!=null?price(place.packPrice):null,price(place.unitPrice)+'/'+deal.unit,alsoAtText(place)].filter(Boolean).join(' · '),'shop-sub'),el('span',`${place.dropPct} % under ${deal.currentName}, ${price(deal.currentUnit)}/${deal.unit}${place.annualSaving?` · spar opptil ${kr(place.annualSaving)} på 12 måneder`:''}`,'shop-sub'));
+      row.append(thumb(place.image),text,button(placeAction(place),()=>addElsewhere(place,{watchId:deal.watchId,name:deal.name,unit:deal.unit,currentUnit:deal.currentUnit,amount:()=>place.packAmount||0,label:()=>''})));
+      box.append(row);
+    }
+    return box;
+  }
   function renderBuy(root) {
     const hero=el('section',undefined,'shop-hero');
     const potential=data.summary.potential;
@@ -347,6 +359,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
       hero.append(el('div',data.monitoring?'Ingen kupp akkurat nå':'Tilbudsovervåkning er av','shop-hero-number small'),el('p',`${data.storesCheckedToday} butikker sjekket i dag${data.saved.year?` · ${kr(data.saved.year)} spart i år`:''}`,'shop-sub'));
     }
     root.append(hero,priceCheck());
+    if(data.brandDeals?.length)root.append(brandDealsBlock());
     root.append(...storeSections(data.deals));
     if(data.steady.length){
       const section=el('section',undefined,'shop-store');
@@ -495,12 +508,14 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     const body=place.offerId?{action:'add',offerId:place.offerId,packs:place.maxPacks?Math.min(place.maxPacks,packs):packs}:{action:'add',alternative:true,...(context.watchId?{watchId:context.watchId}:{}),name:context.name,detail:place.name,storeName:place.storeName,productKey:place.productKey,packs,packAmount:place.packAmount,unit:context.unit,unitPrice:place.unitPrice,saving:saving===null?null:Math.round(saving*100)/100,imageId:place.image};
     act(async()=>{await api('/list',body);if(context.replaceEntry)await api('/list',{action:'remove',id:context.replaceEntry});},'Lagt på listen for '+place.storeName+'.',context.removeFromCart,context.removeFromCart?'Fjern fra kurven':undefined);
   }
+  const alsoAtText=row=>row.alsoAt?.length?'også hos '+row.alsoAt.filter(x=>x.own||row.alsoAt.length<3).map(x=>x.storeName).join(', '):null;
   function cheaperBlock(item,context) {
     const box=el('div',undefined,'shop-elsewhere');
     box.append(el('strong','Denne varen kan kjøpes billigere:'));
     for(const place of item.places){
       const row=el('div',undefined,'shop-elsewhere-row'),text=el('div',undefined,'shop-list-text');
-      text.append(el('strong',place.storeName+(place.online?' (+ frakt)':'')+': '+price(place.unitPrice)+'/'+context.unit),el('span',[place.name,place.offer?'tilbud':null,place.own?null:'utenfor butikkene deres'].filter(Boolean).join(' · '),'shop-sub'));
+      text.append(el('strong',place.storeName+(place.online?' (+ frakt)':'')+': '+price(place.unitPrice)+'/'+context.unit),el('span',[place.name,place.offer?'tilbud':null,alsoAtText(place),place.own?null:'utenfor butikkene deres'].filter(Boolean).join(' · '),'shop-sub'));
+      if(place.sameBrand)text.append(el('span',`Samme vare, annet sted · ${place.dropPct} % lavere`,'shop-badge excellent shop-same-brand'));
       appendPills(text,place);
       row.append(thumb(place.image),text,button(placeAction(place),()=>addElsewhere(place,context)));
       box.append(row);
@@ -526,7 +541,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
       if(others.length)node.append(el('p','Samme varefamilie hos andre kjeder','shop-sub shop-variant-head'));
       for(const other of others){
         const row=el('div',undefined,'shop-variant'),text=el('div',undefined,'shop-list-text');
-        text.append(productName(other.name,{key:other.productKey}),el('span',[other.storeName+(other.online?' (+ frakt)':''),other.packPrice!=null?price(other.packPrice):null,price(other.unitPrice)+'/'+unit,other===others[0]?'billigst':null,other.offer?'tilbud':null,other.own?null:'utenfor butikkene deres'].filter(Boolean).join(' · '),'shop-sub'));
+        text.append(productName(other.name,{key:other.productKey}),el('span',[other.storeName+(other.online?' (+ frakt)':''),other.packPrice!=null?price(other.packPrice):null,price(other.unitPrice)+'/'+unit,other===others[0]?'billigst':null,other.offer?'tilbud':null,alsoAtText(other),other.own?null:'utenfor butikkene deres'].filter(Boolean).join(' · '),'shop-sub'));
         appendPills(text,other);
         row.append(thumb(other.image),text);if(context&&other.storeName!==context.currentStore)row.append(button(placeAction(other),()=>addElsewhere(other,context)));node.append(row);
       }
