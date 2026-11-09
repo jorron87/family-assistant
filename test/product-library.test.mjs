@@ -35,6 +35,15 @@ test('explicit reviewed groups compare gross package prices across canonical pac
  assert.equal(data.products[0].name,'Cashewnøtter naturell');assert.throws(()=>reader.compare('missing'),/Unknown/);
 });
 
+test('length comparison uses documented meters and rejects a direct price per roll',()=>{
+ const data=fixture(),g={...group('baking-roll','m'),name:'Bakepapir, rull 38 cm',inclusionCriteria:'Rull med dokumentert bredde 38 cm',comparisonBasis:'Pris per meter ved lik bredde'};data.groups=[g];
+ data.products=[product(1,'CHAIN_A',{name:'Bakepapir 8 m',unit:'m',canonicalPackAmount:8,packEvidence:'8 meter og 38 cm bredde dokumentert'}),product(2,'CHAIN_B',{name:'Bakepapir 10 m',unit:'m',canonicalPackAmount:10,packEvidence:'10 meter og 38 cm bredde dokumentert'})];
+ data.memberships=data.products.map(p=>membership(p,{groupId:g.id,reviewedGroupFingerprint:groupMetadataFingerprint(g)}));data.prices=[price(data.products[0],24),price(data.products[1],25)];
+ let reader=createProductLibrary(data,{now:NOW}),view=reader.compare(g.id);assert.equal(reader.audit().ok,true);assert.equal(view.cheapest.unitPrice,2.5);assert.equal(view.cheapest.unit,'m');
+ data.products[1]=product(2,'CHAIN_B',{name:'Bakepapir med ukjent lengde',unit:'m',canonicalPackAmount:null,packEvidence:'Lengde ukjent'});data.memberships[1]=membership(data.products[1],{groupId:g.id,reviewedGroupFingerprint:groupMetadataFingerprint(g)});data.prices[1]=price(data.products[1],null,{grossUnitPrice:1,unit:'stk',unitPriceEvidence:'Pris per rull',priceIncludesVat:true});
+ view=createProductLibrary(data,{now:NOW}).compare(g.id);assert.deepEqual(view.cheapest.productKeys,['kassal:CHAIN_A:1']);assert.equal(view.rows.find(r=>r.productKey===data.products[1].productKey).unitPrice,null);
+});
+
 test('stale prices retain membership but never win today; the latest actual receipt wins over older cheap rows',()=>{
  const data=fixture();data.prices=[price(data.products[0],1,{receiptAt:OLD}),price(data.products[1],2,{receiptAt:'2026-11-09T10:00:00Z'}),price(data.products[1],25)];
  const view=createProductLibrary(data,{now:NOW}).compare('cashew');

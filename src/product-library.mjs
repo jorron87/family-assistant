@@ -3,7 +3,7 @@ import {readFileSync,statSync} from 'node:fs';
 import {isUtf8} from 'node:buffer';
 import {scoreProductQuality} from './product-quality.mjs';
 
-const UNITS=new Set(['kg','l','stk']);
+const UNITS=new Set(['kg','l','stk','m']);
 const FRESH_MS=48*3600000;
 const plain=value=>value!==null&&typeof value==='object'&&!Array.isArray(value)&&[Object.prototype,null].includes(Object.getPrototypeOf(value));
 const nonempty=value=>typeof value==='string'&&value.trim().length>0;
