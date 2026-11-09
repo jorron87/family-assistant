@@ -415,18 +415,25 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
   }
 
   // ---- Handleliste ----
+  const familyBestText=(best,unit)=>'Billigst i varefamilien: '+price(best.unitPrice)+'/'+unit+' hos '+best.storeName+(best.online?' (+ frakt)':'')+' ('+best.name+')'+(best.own?'':', utenfor butikkene deres')+'.';
   function thumb(id) {
     const box=el('span',undefined,'shop-thumb');
     if(id){const img=el('img');img.src=base+'/image?id='+id;img.alt='';img.loading='lazy';img.onerror=()=>img.remove();box.append(img);}
     return box;
   }
-  function variantChooser(watchId,variants,currentId,unit,onPick) {
-    return details('variant:'+watchId,'Andre varianter ('+variants.length+')',node=>{
+  function variantChooser(watchId,variants,currentId,unit,onPick,others=[]) {
+    return details('variant:'+watchId,'Andre varianter ('+(variants.length+others.length)+')',node=>{
       for(const variant of variants){
         const row=el('div',undefined,'shop-variant'),text=el('div',undefined,'shop-list-text'),chosen=variant.productId===currentId;
-        text.append(el('strong',variant.name),el('span',price(variant.packPrice)+' · '+price(variant.unitPrice)+'/'+unit+(variant===variants[0]?' · billigst':'')+(variant.quality?` · ${variant.quality.label} ${nf(0).format(variant.quality.score)} av 100`:'')+(variant.library?' · annet merke':'')+(variant.maxAtOda!=null?' · maks '+variant.maxAtOda:''),'shop-sub'));
+        text.append(el('strong',variant.name),el('span',price(variant.packPrice)+' · '+price(variant.unitPrice)+'/'+unit+(variant===variants[0]?(others.length?' · billigst hos Oda':' · billigst'):'')+(variant.quality?` · ${variant.quality.label} ${nf(0).format(variant.quality.score)} av 100`:'')+(variant.library?' · annet merke':'')+(variant.maxAtOda!=null?' · maks '+variant.maxAtOda:''),'shop-sub'));
         row.append(thumb(variant.image),text,chosen?el('span','Valgt','shop-onlist'):button('Velg',()=>{if(onPick)return onPick(variant);draftEdits.delete(watchId);act(()=>api('/list',{action:'variant',watchId,productId:variant.productId}),'Oda-variant valgt.');}));
         node.append(row);
+      }
+      if(others.length)node.append(el('p','Samme varefamilie hos andre kjeder','shop-sub shop-variant-head'));
+      for(const other of others){
+        const row=el('div',undefined,'shop-variant'),text=el('div',undefined,'shop-list-text');
+        text.append(el('strong',other.name),el('span',[other.storeName+(other.online?' (+ frakt)':''),other.packPrice!=null?price(other.packPrice):null,price(other.unitPrice)+'/'+unit,other===others[0]?'billigst':null,other.offer?'tilbud':null,other.quality?`${other.quality.label} ${nf(0).format(other.quality.score)} av 100`:null,other.own?null:'utenfor butikkene deres'].filter(Boolean).join(' · '),'shop-sub'));
+        row.append(thumb(null),text);node.append(row);
       }
     },'shop-variants');
   }
@@ -449,7 +456,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
       picks.append(button('Ingen av disse',()=>act(()=>api('/list',{action:'choose',id:entry.id,agent:true}),'Vi finner beste sted.'),'shop-quiet'));
       row.append(picks);
     }
-    if(entry.variants?.length>1&&!entry.checkedAt)row.append(variantChooser(entry.watchId,entry.variants,entry.odaProductId,entry.unit));
+    if((entry.variants?.length>1||entry.others?.length)&&!entry.checkedAt)row.append(variantChooser(entry.watchId,entry.variants,entry.odaProductId,entry.unit,undefined,entry.others));
     return row;
   }
   async function loadCart(force=false) {
@@ -492,8 +499,9 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
       box.append(el('span','Lignende vare hos Oda: '+other.name+', '+price(other.unitPrice)+'/'+other.unit+' ('+other.diffPct+' % lavere).'+quality),button('Bytt',()=>act(async()=>{const quantity=other.linePackAmount?Math.max(1,Math.round(line.quantity*other.linePackAmount/other.packAmount)):line.quantity;cart=await api('/oda/swap',{requestId:crypto.randomUUID(),fromProductId:line.productId,toProductId:other.productId,quantity});},'Variant byttet i kurven.')));
       row.append(box);
     }
-    if(line.cheapestKnown&&!line.elsewhere)row.append(el('div','Billigste vi kjenner: '+price(line.cheapestKnown.unitPrice)+'/'+line.unit+' hos '+line.cheapestKnown.storeName+'.','shop-known'));
-    if(line.variants?.length>1)row.append(variantChooser(line.watchId,line.variants,line.productId,line.unit,swapTo));
+    if(line.familyBest&&!line.elsewhere)row.append(el('div',familyBestText(line.familyBest,line.unit??line.familyUnit),'shop-known'));
+    else if(line.cheapestKnown&&!line.elsewhere)row.append(el('div','Billigste vi kjenner: '+price(line.cheapestKnown.unitPrice)+'/'+line.unit+' hos '+line.cheapestKnown.storeName+'.','shop-known'));
+    if(line.variants?.length>1||line.others?.length)row.append(variantChooser(line.watchId??'product:'+line.productId,line.variants,line.productId,line.unit??line.familyUnit,swapTo,line.others));
     return row;
   }
   function drawCart() {
@@ -538,7 +546,8 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
         step.append(button('−',()=>change(-1)),value,button('+',()=>change(1)));
         const status=el('span',cartState.get(item.watchId)?.text??'','shop-draft-status');
         row.append(on,thumb(item.image),text,step,status);
-        if(item.variants?.length>1)row.append(variantChooser(item.watchId,item.variants,item.productId,item.unit));
+        if(item.familyBest&&!item.elsewhere)row.append(el('div',familyBestText(item.familyBest,item.unit),'shop-known'));
+        if(item.variants?.length>1||item.others?.length)row.append(variantChooser(item.watchId,item.variants,item.productId,item.unit,undefined,item.others));
         if(item.elsewhere){
           const warn=el('div',undefined,'shop-warning');
           warn.append(el('span','Bør ikke kjøpes på Oda: '+item.elsewhere.diffPct+' % billigere hos '+item.elsewhere.storeName+' ('+price(item.elsewhere.unitPrice)+'/'+item.unit+', spar '+kr(item.elsewhere.saving)+').'));

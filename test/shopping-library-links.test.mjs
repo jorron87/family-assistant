@@ -30,7 +30,8 @@ function fixture(t) {
 test('a library group lends nothing until the watch has an explicit link, and exclusions and chains hold',t=>{
  const f=fixture(t);f.native(f.rows[0]);f.native(f.rows[5],'excluded');
  let view=f.shop.familyView();assert.equal(view.items[0].prices.current,60);
- assert.deepEqual(view.odaDraft.items[0].variants.map(x=>x.productId),[1]);
+ assert.deepEqual(view.odaDraft.items[0].variants.map(x=>x.productId),[2,1,3],'an undecided family is shown for comparison');
+ assert.equal(view.odaDraft.items[0].productId,1);
  assert.ok(f.shop.queue().some(x=>x.do==='shopping-library-link'&&x.reason==='undecided'));
  f.link();view=f.shop.familyView();
  assert.equal(view.items[0].prices.current,20,'cheapest linked product at an allowed chain');
@@ -166,4 +167,28 @@ test('the server reads a compact index and rebuilds it outside the request',t=>{
  const failing=libraryPriceProvider(f.file,{now:()=>new Date(NOW),indexFile:path.join(f.dir,'none.json'),build:(a,b,done)=>{builds++;done(false);}});
  const before=builds;failing([]);failing([]);assert.equal(builds,before+1,'a failed build backs off');assert.equal(failing([]).status,'building');
  assert.ok(fs.statSync(indexFile).size<fs.statSync(f.file).size*2);
+});
+
+test('the big shop compares the same library family across every chain with a fresh price',t=>{
+ const f=fixture(t);f.shop.settings({stores:[{id:'meny',name:'MENY – Kassal-kjedepriser',url:'https://example.com/meny',minSavings:0,chainCode:'MENY_NO'}]});f.native(f.rows[0]);
+ let row=f.shop.familyView().odaDraft.items[0];
+ assert.equal(f.shop.familyView().items[0].prices.current,60,'an undecided family never moves the price');
+ assert.deepEqual(row.others.map(x=>[x.storeName,x.unitPrice,x.own]),[['Joker',10,false],['MENY',24,true]]);
+ assert.deepEqual(row.familyBest,{storeName:'Joker',name:'Joker ketchup 500 g',unitPrice:10,own:false,online:false});
+ assert.equal(row.elsewhere,null,'a chain outside the family stores never steers the purchase');
+ f.link();row=f.shop.familyView().odaDraft.items[0];
+ assert.deepEqual(row.others.map(x=>x.storeName),['Joker','MENY'],'a linked family shows every chain too');
+ f.shop.libraryLink({watchId:f.w.id,evidence:'Eksakt variant',links:[]});row=f.shop.familyView().odaDraft.items[0];
+ assert.deepEqual(row.others,[]);assert.deepEqual(row.variants.map(x=>x.productId),[1],'a declined watch shows no family');
+});
+
+test('family rows respect exclusions, show one row per chain first, and appear on cart lines',t=>{
+ const f=fixture(t);f.native(f.rows[0]);f.native(f.rows[4],'excluded');
+ let row=f.shop.familyView().odaDraft.items[0];assert.deepEqual(row.others.map(x=>x.storeName),['MENY']);
+ const cart=id=>f.shop.cartReview({groups:[{items:[{product:{id,name:'Ketchup'},quantity:1,totalGrossAmount:'30.00'}]}],validationMessages:[],totalGrossAmount:'30.00'}).lines[0];
+ const hit=cart(1);assert.equal(hit.watchId,f.w.id);assert.deepEqual(hit.others.map(x=>x.storeName),['MENY']);assert.equal(hit.familyBest.unitPrice,24);
+ assert.ok(hit.variants.some(x=>x.productId===2));
+ f.shop.list({action:'variant',watchId:f.w.id,productId:2});assert.equal(f.shop.familyView().odaDraft.items[0].productId,2,'a family product can be chosen');
+ const state=f.state.shopping;delete state.odaChoices[f.w.id];state.watches[f.w.id].enabled=false;
+ const outside=cart(2);assert.equal(outside.watchId,null);assert.deepEqual(outside.others.map(x=>x.storeName),['Rest','MENY']);assert.equal(outside.familyUnit,'kg');
 });

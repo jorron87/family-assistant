@@ -165,6 +165,8 @@ Handlelisten plasserer fritekst bare ved eksakt varegruppenavn. Alt annet blir `
 
 Lageret kan skannes med strekkode (`POST /api/shopping/stock-scan`, `action` `lookup`/`apply`/`undo`). Bare produkter familien allerede har godkjent i katalogen eller gjennom en gruppekobling kan gi en lagerlinje, og pakningen må være dokumentert. Hver skanning er en familiehandling på én pakke. Ukjent kode endrer ingenting.
 
+Storhandelsforslaget, handlelisten og kurven viser `others` og `familyBest`: samme varefamilie hos alle andre kjeder med fersk pris, billigst først. En koblet varegruppe bruker koblingene sine, en varegruppe uten beslutning bruker bibliotekgruppene til den valgte varen, og en avslått varegruppe viser ingen familie. Dette er sammenligning: rader uten kobling påvirker aldri priser, referanser eller «Bør ikke kjøpes på Oda», og kjeder utenfor butikkene i innstillingene merkes. Familiens egne avslag skjules.
+
 Registrerte kjøp utenfor Oda holder årsbehovet oppe når Oda-kjøpene faller bort, men bare det som ikke lenger er på lager teller. Næring hentes automatisk fra biblioteket for native Oda-ordrelinjer der samme produkt er gjennomgått; navnefingerprintede UI-ordre kan ikke kobles slik.
 
 Dette gjelder Kjøp nå, fast lavpris, storhandelsforslag, prisguide, prisvurdering, Lager, liste og kurvsjekk. Storhandelen viser både pakningspris og normalisert pris: 38,90 kr for 225 g er 172,89 kr/kg. Kjedepris beviser fortsatt ikke frakt, lokal beholdning eller andre kjøpsvilkår.

@@ -136,7 +136,7 @@ export function planQuantities({tier,need,shelfMonths,stock,offer,caps,unitSavin
  return {options,recommended:options.at(-1)??null,fullMonths:limit,covered};
 }
 
-const CHAIN_NAMES={ODA_NO:'Oda',MENY_NO:'MENY',SPAR_NO:'SPAR',EUROPRIS_NO:'Europris',KIWI:'KIWI',REMA_1000:'REMA 1000',COOP_EXTRA:'Extra'};
+const CHAIN_NAMES={ODA_NO:'Oda',MENY_NO:'MENY',SPAR_NO:'SPAR',EUROPRIS_NO:'Europris',KIWI:'KIWI',REMA_1000:'REMA 1000',COOP_EXTRA:'Extra',COOP_NO:'Coop',JOKER_NO:'Joker',BUNNPRIS:'Bunnpris',FUDI:'Fudi',HOLDBART:'Holdbart',ENGROSSNETT_NO:'Engrosnett',HAVARISTEN:'Havaristen'};
 export const chainName=code=>CHAIN_NAMES[code]??code;
 const coverRank=stock=>!stock.known||stock.months==null?1:stock.months<TRIP_MONTHS?1.5:stock.months<3?1.2:.8;
 export const dealScore=deal=>(deal.saving??0)*(deal.tier==='excellent'?1.5:deal.tier==='small'?.2:1)*coverRank(deal.stock);
