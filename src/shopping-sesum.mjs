@@ -79,10 +79,12 @@ function productResult(result,job,chains,now){
   const p=result.product;
   if(!p||!['string','number'].includes(typeof p.id)||!/^[1-9]\d*$/.test(String(p.id))||!Number.isSafeInteger(Number(p.id))||String(p.id)!==new URL(job.url).pathname.match(/^\/produkt\/(\d+)/)?.[1]||!text(p.name,1000)||!Array.isArray(result.prices)||result.prices.length>100)throw Error('Ufullstendig Sesum-varekvittering.');
   const field=(value,label,max)=>{if(value==null)return null;if(typeof value!=='string'||value.length>max)throw Error('Ugyldig Sesum-'+label+'.');return text(value,max);};
-  const product={id:String(p.id),name:text(p.name,1000),brand:field(p.brand,'merke',300),vendor:field(p.vendor,'leverandør',300),ean:p.ean??null,weight:p.weight??null,weightUnit:field(p.weightUnit,'vektenhet',30),soldByWeight:typeof p.soldByWeight==='boolean'?p.soldByWeight:null,sourceUrl:job.url};
+  const product={id:String(p.id),name:text(p.name,1000),brand:field(p.brand,'merke',300),vendor:field(p.vendor,'leverandør',300),ean:p.ean??null,nonEanCodes:p.nonEanCodes??[],weight:p.weight??null,weightUnit:field(p.weightUnit,'vektenhet',30),soldByWeight:typeof p.soldByWeight==='boolean'?p.soldByWeight:null,sourceUrl:job.url};
   if(product.weight!==null&&(!Number.isFinite(product.weight)||product.weight<=0||product.weight>1e9))throw Error('Ugyldig Sesum-vekt.');
   if(p.soldByWeight!=null&&typeof p.soldByWeight!=='boolean')throw Error('Ugyldig Sesum-vektgrunnlag.');
   if(product.ean!==null){const eans=Array.isArray(product.ean)?product.ean:[product.ean];if(eans.length>30||!eans.every(ean=>typeof ean==='string'&&/^\d{8,14}$/.test(ean)))throw Error('Ugyldig Sesum-strekkode.');}
+  if(!Array.isArray(product.nonEanCodes)||product.nonEanCodes.length>30||product.nonEanCodes.some(code=>typeof code!=='string'||!/^\d{1,7}$/.test(code)))throw Error('Ugyldig lokal Sesum-kode.');
+  product.nonEanCodes=unique(product.nonEanCodes);
   const safePromotion=value=>{
     if(!value||typeof value!=='object'||Array.isArray(value))return null;
     const keys=['id','title','description','startsAt','endsAt','startDate','endDate','validFrom','validTo','valid_from','valid_to','valid_until','validUntil','memberOnly','member_only','memberProgram','member_program','customerLimit','customer_limit','limit','quantity','price','multi_buy_quantity','multi_buy_price','multi_buy_pay_for','conditions'];
@@ -181,6 +183,24 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
     return run;
   }
   function refresh(){if(!enabled)return status();load();start(snapshot());return status();}
+  function retry(input){
+    if(!enabled)throw Error('Sesum-innhenting er ikke aktivert.');
+    load();const run=state.run,evidence=text(input?.evidence,2000),ids=input?.jobIds;
+    if(!run||input?.runId!==undefined&&input.runId!==run.id)throw Error('Ukjent eller utgått Sesum-kjøring.');
+    if(!evidence||!Array.isArray(ids)||!ids.length||ids.length>10000)throw Error('Oppgi Sesum-jobber og konkret begrunnelse.');
+    const selected=unique(ids).map(id=>{
+      if(!text(id,200)||!Object.hasOwn(run.jobs,id))throw Error('Ukjent Sesum-jobb.');
+      const job=run.jobs[id];if(!['partial','blocked'].includes(job.status))throw Error('Bare partial/blocked Sesum-jobber kan prøves på nytt.');
+      return job;
+    });
+    const requestedAt=now().toISOString();
+    for(const job of selected){
+      job.retryHistory=[...(job.retryHistory??[]),{requestedAt,evidence,previousStatus:job.status,previousAttempts:job.attempts,previousError:job.error??null,previousErrors:job.errors??[],previousCompletedAt:job.completedAt??null}].slice(-20);
+      job.status='pending';job.attempts=0;job.deliveredUntil=null;job.retryAt=null;job.error=null;job.errors=[];job.completedAt=null;
+    }
+    run.status='collecting';run.finishedAt=null;save();
+    return {runId:run.id,retried:selected.map(job=>job.id),count:selected.length,pauseUntil:state.pauseUntil??null};
+  }
   function fairSelection(run,ready){
     const scheduler={nextKind:'product',searchAfterFamilyId:null,productAfterFamilyId:null,...run.scheduler},selected=[],used=new Set();
     const familyIds=run.families.map(f=>f.familyId),byKind={search:new Map(),product:new Map()};
@@ -291,5 +311,5 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
     const items=[...rows.values()].filter(row=>familyId===null||row.familyIds.includes(familyId)).sort((a,b)=>a.sourceUrl.localeCompare(b.sourceUrl));
     return {enabled:true,runId:state.run?.id??null,items:structuredClone(items),coverageNote:'Registrerte kildeobservasjoner, inkludert uavklarte priser og separate tilsvarende-forslag. Ingen produktgodkjenning, ny prisdato eller lokal lagerstatus følger av innhentingen.'};
   }
-  return {work,receive,refresh,status,catalog};
+  return {work,receive,refresh,retry,status,catalog};
 }

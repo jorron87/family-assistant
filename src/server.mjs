@@ -106,6 +106,7 @@ async function handle(req, res) {
       if(path==='/api/shopping/sesum/review'&&method==='POST')return send(res,200,store.shopping.sesumPriceReview(await json(req)));
       if(path==='/api/shopping/sesum/register'&&method==='POST')return send(res,200,store.shopping.sesumRegister(await json(req)));
       if(path==='/api/shopping/sesum/refresh'&&method==='POST'){sesum.refresh();return send(res,200,sesumStatus());}
+      if(path==='/api/shopping/sesum/retry'&&method==='POST')return send(res,200,sesum.retry(await json(req)));
       return send(res,405,{error:'Ukjent Sesum-operasjon.'});
     }
     if(path==='/shopping-setup'&&method==='GET')return send(res,200,readFileSync(join(root,'public','shopping-setup.html')),'text/html; charset=utf-8');

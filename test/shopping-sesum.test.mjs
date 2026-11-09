@@ -111,6 +111,39 @@ test('multiple EANs and unknown weight mode survive; unproven quotes remain raw 
   assert.equal(f.client.status().manifest[0].chains[2].freshProducts,0);
 });
 
+test('valid EANs and separate short source codes reach encrypted catalog without a PLU identity inference',async t=>{
+  const f=fixture(t);let work=f.client.work(),job=work.jobs[0];await f.client.receive(response(work,job,search(job,{products:[productUrl]})));work=f.client.work();job=work.jobs[0];
+  const result=product(job);result.product.name='Synthetic potatoes';result.product.ean=['1234567890123'];result.product.nonEanCodes=['4073','0001','4073'];
+  await f.client.receive(response(work,job,result));const received=f.received[0].products[0];assert.deepEqual(received.ean,['1234567890123']);assert.deepEqual(received.nonEanCodes,['4073','0001']);
+  const restored=createSesumCollector(f.options),saved=restored.catalog().items[0].product;assert.deepEqual(saved.ean,['1234567890123']);assert.deepEqual(saved.nonEanCodes,['4073','0001']);assert.equal(saved.prices[0].price,7.9);
+});
+
+test('only a selected schema-failed product is retried after a fix; every completed search is retained',async t=>{
+  const f=fixture(t,{familyCount:2,cycleCalls:2});let work=f.client.work();
+  await f.client.receive(response(work,work.jobs[0],search(work.jobs[0],{products:[productUrl]})));await f.client.receive(response(work,work.jobs[1],search(work.jobs[1])));
+  work=f.client.work();const job=work.jobs[0];assert.equal(job.kind,'product');
+  await f.client.receive(response(work,job,{ok:false,kind:'product',sourceUrl:job.url,errors:['invalid_ean']},'partial'));
+  const path=join(f.dataDir,'sesum-collector.json.enc'),before=JSON.parse(decrypt(readFileSync(path),f.options.encryptionKey));
+  assert.throws(()=>f.client.retry({jobIds:[job.id,work.jobs[0].id+'unknown'],evidence:'Parser supports short source codes now.'}),/Ukjent/);
+  assert.deepEqual(JSON.parse(decrypt(readFileSync(path),f.options.encryptionKey)),before,'invalid retry batches do not partly mutate progress');
+  const receipt=f.client.retry({runId:work.runId,jobIds:[job.id],evidence:'Parser now separates short source codes from EAN.'});assert.deepEqual(receipt.retried,[job.id]);assert.equal(receipt.runId,work.runId);
+  const after=JSON.parse(decrypt(readFileSync(path),f.options.encryptionKey));for(const [id,old] of Object.entries(before.run.jobs))if(id!==job.id)assert.deepEqual(after.run.jobs[id],old);
+  assert.equal(after.run.jobs[job.id].attempts,0);assert.equal(after.run.jobs[job.id].retryHistory[0].previousErrors[0],'invalid_ean');
+  work=f.client.work();assert.deepEqual(work.jobs.map(j=>j.id),[job.id]);const fixed=product(job);fixed.product.ean=['1234567890123'];fixed.product.nonEanCodes=['4073'];await f.client.receive(response(work,job,fixed));
+  assert.equal(f.client.status().status,'complete');assert.equal(f.client.status().jobCountsByKind.search.complete,2);assert.equal(f.received.length,1);assert.deepEqual(f.client.catalog().items[0].product.nonEanCodes,['4073']);
+});
+
+test('retrying selected blocked work cannot clear an authentication pause and needs explicit evidence',async t=>{
+  const f=fixture(t);let work=f.client.work(),job=work.jobs[0];
+  for(let attempt=0;attempt<3;attempt++){
+    if(attempt){f.advance(11*60000);work=f.client.work();job=work.jobs[0];}
+    await f.client.receive({runId:work.runId,jobId:job.id,status:'error',fetchedAt:when,error:{code:'auth_required',retryAfterMs:600000}});
+  }
+  const pause=f.client.status().pauseUntil;assert.equal(f.client.status().jobCounts.blocked,1);assert.throws(()=>f.client.retry({jobIds:[job.id]}),/begrunnelse/);
+  const receipt=f.client.retry({jobIds:[job.id],evidence:'Retry selected job after normal access is restored.'});assert.equal(receipt.pauseUntil,pause);assert.equal(f.client.status().pauseUntil,pause);assert.deepEqual(f.client.work().jobs,[]);
+  assert.equal(createSesumCollector(f.options).status().pauseUntil,pause);f.advance(11*60000);assert.equal(f.client.work().jobs[0].id,job.id);
+});
+
 test('similar-product suggestions with null or invalid URLs cannot reject own valid price receipts',async t=>{
   const f=fixture(t);let work=f.client.work(),job=work.jobs[0];
   await f.client.receive(response(work,job,search(job,{products:[productUrl]})));work=f.client.work();job=work.jobs[0];
@@ -146,7 +179,7 @@ test('all 91 families keep local query overrides while unknown fields and malfor
   const job=work.jobs[0];await f.client.receive(response(work,job,search(job,{products:[productUrl]})));
   // Use a single-family fixture so the own-product job is the next eligible job.
   const own=fixture(t);let next=own.client.work(),searchJob=next.jobs[0];await own.client.receive(response(next,searchJob,search(searchJob,{products:[productUrl]})));next=own.client.work();const detail=next.jobs[0];
-  for(const patch of [{brand:{cookie:'private'}},{vendor:'v'.repeat(301)},{weight:-1},{weightUnit:'g'.repeat(31)},{soldByWeight:'false'},{ean:Array(31).fill('12345678')}]){
+  for(const patch of [{brand:{cookie:'private'}},{vendor:'v'.repeat(301)},{weight:-1},{weightUnit:'g'.repeat(31)},{soldByWeight:'false'},{ean:Array(31).fill('12345678')},{ean:['1234567890123','4073']},{nonEanCodes:['not-a-code']},{nonEanCodes:['12345678']},{nonEanCodes:Array(31).fill('4073')}]){
     const result=product(detail);Object.assign(result.product,patch);await assert.rejects(own.client.receive(response(next,detail,result)),/Sesum/);
   }
   assert.equal(own.received.length,0);const valid=product(detail);valid.product.cookie='must-not-cross';valid.prices[0].token='must-not-cross';

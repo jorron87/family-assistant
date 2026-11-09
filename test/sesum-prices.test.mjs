@@ -25,6 +25,16 @@ test('matching names, EAN and brand only suggest donors; they never approve a so
  assert.equal(f.prices.overlay().product(candidate.sourceKey),null);assert.equal(f.prices.overlay().quote(f.productKey).price.grossPackPrice,15);
  assert.equal(f.prices.candidates('family:other').length,0);
 });
+
+test('short source codes are preserved separately and never become barcode donor matches',()=>{
+ const f=fixture();f.p.ean='4073';
+ f.ingest(f.source({name:'Unmapped produce',brand:null,ean:[],nonEanCodes:['4073']}));
+ const first=f.prices.candidates()[0];
+ assert.deepEqual(first.source.nonEanCodes,['4073']);assert.deepEqual(first.source.ean,[]);assert.deepEqual(first.donors,[]);
+ f.ingest(f.source({name:'Unmapped produce',brand:null,ean:[],nonEanCodes:['4074']}));
+ assert.notEqual(f.prices.candidates()[0].sourceFingerprint,first.sourceFingerprint,'changed local identifiers require a new review');
+ assert.throws(()=>f.ingest(f.source({nonEanCodes:['not-a-code']})),/non-EAN/);
+});
 test('a reviewed bridge recomputes the unit price from package price and revives parked source rows',()=>{
  const f=fixture({old:true});f.ingest();f.approve();const key=f.prices.candidates()[0].sourceKey,over=f.prices.overlay();
  assert.equal(over.active(key),true);assert.equal(over.product(key).donorProductKey,f.productKey);assert.equal(over.product(key).source,'sesum');

@@ -58,7 +58,7 @@ function packOf(source){
  return null;
 }
 export function sesumSourceFingerprint(source){
- return hash(Object.fromEntries(['id','store','name','brand','vendor','ean','weight','weightUnit','soldByWeight','sourceUrl'].map(key=>[key,source[key]??null])));
+ return hash(Object.fromEntries(['id','store','name','brand','vendor','ean','weight','weightUnit','soldByWeight','sourceUrl',...(source.nonEanCodes?.length?['nonEanCodes']:[])].map(key=>[key,source[key]??null])));
 }
 export function sesumDonorFingerprint(product){
  if(typeof product?.metadataFingerprint==='string'&&/^[a-f0-9]{64}$/.test(product.metadataFingerprint))return product.metadataFingerprint;
@@ -72,7 +72,9 @@ function normalizedRows(products,fetchedAt,at){
   const id=String(input.id),weight=input.weight??null;
   if(weight!==null&&(!positive(weight)||weight>1e9))throw Error('Invalid Sesum product weight.');
   if(input.soldByWeight!=null&&typeof input.soldByWeight!=='boolean')throw Error('Invalid Sesum weight mode.');
-  const product={id,name:text(input.name,'Sesum product name',1000,{required:true}),brand:text(input.brand,'brand',300),vendor:text(input.vendor,'vendor',300),ean:eans(input.ean),weight,weightUnit:text(input.weightUnit,'weight unit',30),soldByWeight:input.soldByWeight??null,sourceUrl:productUrl(input.sourceUrl,id)};
+  const nonEanCodes=input.nonEanCodes??[];
+  if(!Array.isArray(nonEanCodes)||nonEanCodes.length>30||nonEanCodes.some(code=>typeof code!=='string'||!/^\d{1,7}$/.test(code)))throw Error('Invalid Sesum non-EAN code.');
+  const product={id,name:text(input.name,'Sesum product name',1000,{required:true}),brand:text(input.brand,'brand',300),vendor:text(input.vendor,'vendor',300),ean:eans(input.ean),...(nonEanCodes.length?{nonEanCodes:[...new Set(nonEanCodes)].sort()}:{}),weight,weightUnit:text(input.weightUnit,'weight unit',30),soldByWeight:input.soldByWeight??null,sourceUrl:productUrl(input.sourceUrl,id)};
   const ownPrices=input.prices??(Array.isArray(input.priceCandidates)?[]:null);
   if(!Array.isArray(ownPrices)||ownPrices.length>100)throw Error('Invalid Sesum chain prices.');
   if(input.priceCandidates!=null&&(!Array.isArray(input.priceCandidates)||input.priceCandidates.length>100))throw Error('Invalid Sesum price candidates.');

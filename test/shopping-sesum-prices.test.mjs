@@ -32,6 +32,7 @@ test('all followed families enter the manifest and price observations require an
   f.ingest();assert.ok(f.shop.queue().some(q=>q.do==='shopping-sesum-review'));
   assert.equal(f.shop.familyView().items.find(i=>i.id===f.w.id).prices.current,60,'observation never approves a source mapping');
   f.approve();assert.equal(f.shop.familyView().items.find(i=>i.id===f.w.id).prices.current,40,'500g pack price is recomputed, rawUnitPrice is ignored');
+  assert.equal(f.shop.familyView().items.find(i=>i.id===f.w.id).prices.currentSourceUrl,'https://www.sesum.no/produkt/71-test-whole-beans-500g','the displayed price links to its actual source receipt while native metadata URLs remain unchanged');
   assert.ok(!f.shop.queue().some(q=>q.do==='shopping-sesum-review'));
 });
 

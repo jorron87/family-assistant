@@ -113,12 +113,17 @@
     let ean = raw.ean == null ? null : raw.ean;
     if (typeof ean === 'number' && Number.isSafeInteger(ean)) ean = String(ean);
     if (typeof ean === 'string') ean = [ean];
-    if (ean !== null && (!Array.isArray(ean) || ean.some((item) => typeof item !== 'string' || !/^\d{8,14}$/.test(item)))) throw new Error('invalid_ean');
+    // This delivered field sometimes mixes barcodes with short catalogue
+    // codes. Keep short digit strings as separate evidence; they are neither
+    // EANs nor reviewed identities and must never enter barcode matching.
+    if (ean !== null && (!Array.isArray(ean) || ean.length > 30 || ean.some((item) => typeof item !== 'string' || !/^\d{1,14}$/.test(item)))) throw new Error('invalid_ean');
+    const barcodes = [...new Set((ean ?? []).filter(item => item.length >= 8))];
+    const nonEanCodes = [...new Set((ean ?? []).filter(item => item.length < 8))];
     if (raw.weight != null && (!finite(raw.weight) || raw.weight <= 0)) throw new Error('invalid_weight');
     if (raw.soldByWeight != null && typeof raw.soldByWeight !== 'boolean') throw new Error('invalid_sold_by_weight');
     return {
       id: positiveId(raw.id), name: text(raw.name, false), brand: text(raw.brand), vendor: text(raw.vendor),
-      ean: ean === null ? null : [...new Set(ean)], weight: raw.weight ?? null, weightUnit: text(raw.weightUnit),
+      ean: barcodes.length ? barcodes : null, nonEanCodes, weight: raw.weight ?? null, weightUnit: text(raw.weightUnit),
       soldByWeight: raw.soldByWeight ?? null, sourceUrl: url
     };
   }

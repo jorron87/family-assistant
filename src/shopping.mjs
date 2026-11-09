@@ -220,7 +220,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       const unitPrice=p.grossPackPrice!=null&&packAmount>0?p.grossPackPrice/packAmount:p.directUnitVerified&&p.unit===e.unit?p.grossUnitPrice:null;
       const conflict=Date.parse(p.receiptAt)===Date.parse(e.lastChecked)&&e.unitPrice>0&&unitPrice>0&&Math.abs(e.unitPrice-unitPrice)>1e-8;
       const valid=p.fresh&&!p.reasons.length&&!conflict;
-      native.set(k,{...e,packAmount,price:valid&&packAmount>0?p.grossPackPrice??unitPrice*packAmount:null,unitPrice:valid?unitPrice:null,lastChecked:p.receiptAt,priceSource:'library'});
+      native.set(k,{...e,packAmount,price:valid&&packAmount>0?p.grossPackPrice??unitPrice*packAmount:null,unitPrice:valid?unitPrice:null,lastChecked:p.receiptAt,priceSource:'library',priceSourceUrl:p.sourceUrl??e.priceSourceUrl??e.sourceUrl});
     }
     // An explicit, reviewed group link adds its other products. Any native row
     // for the same product wins, so a family exclusion always holds.
@@ -232,13 +232,13 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
         if(nativeHoldsMember(p,m.productKey,w.id,entries))continue;
         if(!m.eligible||native.has(k)&&native.get(k).status!=='pending')continue; // An approved family member needs no second review.
         const packAmount=p.pack>0?p.pack:null;
-        native.set(k,{watchId:w.id,store:p.store,id:p.id,productKey:m.productKey,name:p.name,ean:p.ean,brand:p.brand,sourceUrl:p.sourceUrl,status:'approved',approved:true,unit:w.unit,packAmount,price:packAmount?m.price.grossPackPrice??m.unitPrice*packAmount:null,unitPrice:m.unitPrice,lastChecked:m.price.receiptAt,priceSource:'library',origin:'library',groupId:m.groupId,image:p.image??null});
+        native.set(k,{watchId:w.id,store:p.store,id:p.id,productKey:m.productKey,name:p.name,ean:p.ean,brand:p.brand,sourceUrl:p.sourceUrl,status:'approved',approved:true,unit:w.unit,packAmount,price:packAmount?m.price.grossPackPrice??m.unitPrice*packAmount:null,unitPrice:m.unitPrice,lastChecked:m.price.receiptAt,priceSource:'library',priceSourceUrl:m.price.sourceUrl??p.sourceUrl,origin:'library',groupId:m.groupId,image:p.image??null});
       }
     }
     const quotes=[];
     for(const p of native.values())if(p.approved&&(!variablePack(p.name)||p.priceSource==='library')&&p.unitPrice>0&&Number.isFinite(p.unitPrice)&&freshPrice(p.lastChecked,at)){
       const store=s.settings.stores.find(x=>x.chainCode===p.store);
-      quotes.push({...p,storeId:store?.id??null,storeName:p.store==='ODA_NO'?'Oda':store?.name.replace(/\s*[–-]\s*Kassal.*$/,'')??chainName(p.store),chainCode:p.store,sourceUrl:p.sourceUrl??null,kind:'catalog'});
+      quotes.push({...p,storeId:store?.id??null,storeName:p.store==='ODA_NO'?'Oda':store?.name.replace(/\s*[–-]\s*Kassal.*$/,'')??chainName(p.store),chainCode:p.store,sourceUrl:p.priceSourceUrl??p.sourceUrl??null,kind:'catalog'});
     }
     for(const o of Object.values(s.offers)){
       const store=s.settings.stores.find(x=>x.id===o.storeId),w=s.watches[o.watchId];
@@ -1302,7 +1302,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const source=sesumPrices.sourceRecord(input.sourceKey),requirements=sesumRequirements();
     if(!source||source.sourceFingerprint!==input.sourceFingerprint)throw Error('Sesum-kilden er endret; les gjeldende fingerprint.');
     if(!Array.isArray(input.familyIds)||!input.familyIds.length||new Set(input.familyIds).size!==input.familyIds.length||!input.familyFingerprints||typeof input.familyFingerprints!=='object')throw Error('Familieavslag krever familyIds og gjeldende familyFingerprints; søketreff er bare spor.');
-    const evidence=required(input.equivalenceEvidence,'Konkret familiebelegg');
+    if(typeof input.equivalenceEvidence!=='string'||!input.equivalenceEvidence.trim()||input.equivalenceEvidence.length>6000)throw Error('Konkret familiebelegg på høyst 6000 tegn kreves.');
+    const evidence=input.equivalenceEvidence.trim();
     for(const id of input.familyIds)if(!source.familyIds.includes(id)||!requirements.has(id)||!Object.hasOwn(input.familyFingerprints,id)||input.familyFingerprints[id]!==requirements.get(id))throw Error('Varefamilien er endret eller ukjent; les gjeldende krav før vurdering.');
     return update(()=>{
       s.sesumFamilyReviews[input.sourceKey]??={};

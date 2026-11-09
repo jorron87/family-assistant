@@ -61,6 +61,23 @@ test('null EAN remains unknown; malformed packages or receipts fail closed', () 
   }
 });
 
+test('short source catalogue codes stay separate from EANs without losing own prices or variable-weight status', () => {
+  const source = { ...product, ean: ['7030000000101', '4073', '12', '4073'], soldByWeight: true };
+  const parsed = core.parseProduct(html({ product: source, prices: [price] }), productUrl);
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.product.ean, ['7030000000101']);
+  assert.deepEqual(parsed.product.nonEanCodes, ['4073', '12']);
+  assert.equal(parsed.product.soldByWeight, true, 'parsing a price never establishes a fixed package');
+  assert.equal(parsed.prices[0].price, price.price);
+  assert.equal(parsed.prices[0].observedAt, price.observedAt);
+  const onlyShort = core.parseProduct(html({ product: { ...source, ean: ['4073'] }, prices: [price] }), productUrl);
+  assert.equal(onlyShort.ok, true);assert.equal(onlyShort.product.ean, null);assert.deepEqual(onlyShort.product.nonEanCodes, ['4073']);
+  for (const ean of [['40x3'], [''], ['123456789012345'], ['4073', null], [4073]]) {
+    const failed = core.parseProduct(html({ product: { ...source, ean }, prices: [price] }), productUrl);
+    assert.equal(failed.ok, false);assert.deepEqual(failed.prices, [], 'malformed fields do not certify any own price');
+  }
+});
+
 test('unexpected or conflicting own product schema cannot select a cheap unrelated row', () => {
   assert.equal(core.parseProduct(html({ product: { ...product, id: 999 }, prices: [price] }), productUrl).ok, false);
   assert.equal(core.parseProduct(html([{ product, prices: [price] }, { product, prices: [{ ...price, price: 1 }] }]), productUrl).ok, false);

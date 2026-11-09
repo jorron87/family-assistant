@@ -48,6 +48,7 @@ async function execute(command, args, flags) {
     case 'shopping': result=await request('/api/shopping');break;
     case 'shopping-sesum': result=await request('/api/shopping/sesum/status');break;
     case 'shopping-sesum-refresh': result=await request('/api/shopping/sesum/refresh','POST',{});break;
+    case 'shopping-sesum-retry': result=await request('/api/shopping/sesum/retry','POST',json(args[0]));break;
     case 'shopping-sesum-candidates': result=await request('/api/shopping/sesum/candidates'+(args[0]?'?familyId='+encodeURIComponent(args[0]):''));break;
     case 'shopping-sesum-catalog': result=await request('/api/shopping/sesum/catalog'+(args[0]?'?familyId='+encodeURIComponent(args[0]):''));break;
     case 'shopping-sesum-review': result=await request('/api/shopping/sesum/review','POST',json(args[0]));break;
