@@ -112,6 +112,23 @@ test('crispbread fiber score uses only a sourced per-100g nutrition fact',()=>{
  assert.equal(scoreProductQuality(product,{groupId:'crispbread-rye'}).status,'review-required');
  assert.equal(scoreProductQuality(product,{groupId:'bread-white',reviewCurrent:true}).status,'not-applicable');
 });
+
+test('fruit muesli fiber compares sourced labels within its own group and suppresses conflicts',()=>{
+ const p={ingredients:'Havre, frukt.',nutrition:{basis:'g',per100:{fiber:8.6,sugars:13,salt:.31},sourceUrl:'https://producer.example/label'}};
+ const opts={groupId:'muesli-fruit-raisin-pineapple-banana',reviewCurrent:true},a=scoreProductQuality(p,opts),b=scoreProductQuality({...p,nutrition:{...p.nutrition,per100:{fiber:9.8,sugars:15,salt:.05}}},opts);
+ assert.equal(a.score,57.3);assert.equal(b.score,65.3);assert.equal(a.measurement.value,8.6);assert.equal(a.nutrition.sugars,13);assert.equal(a.normalization.target,15);
+ assert.notEqual(a.comparisonKey,scoreProductQuality(p,{groupId:'crispbread-rye',reviewCurrent:true}).comparisonKey);
+ assert.equal(scoreProductQuality({...p,nutritionObservation:{fiberConflict:{evidence:'Etiketter avviker'}}},opts).score,null);
+ assert.equal(scoreProductQuality({...p,nutrition:{...p.nutrition,sourceUrl:null}},opts).score,null);assert.equal(scoreProductQuality({...p,nutrition:{...p.nutrition,basis:'ml'}},opts).score,null);
+ assert.equal(scoreProductQuality(p,{groupId:'muesli-fruit-raisin-pineapple-banana'}).status,'review-required');assert.equal(scoreProductQuality(p,{groupId:'muesli-other',reviewCurrent:true}).status,'not-applicable');
+});
+
+test('mild pasta sauce sums only complete declared tomato components and never treats purée as fresh tomato',()=>{
+ const id='pasta-sauce-tomato-mild-herbs',a=score('Tomater 84% (Italia), vann, løk.',id),b=score('Tomat 71,5 %, daddeltomat 24 %, løk.',id);
+ assert.equal(a.score,84);assert.equal(b.score,95.5);assert.equal(b.measurement.evidence.length,2);assert.equal(a.comparisonKey,b.comparisonKey);assert.notEqual(a.comparisonKey,score('Tomater (148 g per 100 g ketchup)').comparisonKey);
+ for(const s of ['Hakkede tomater 45 %, vann, tomatpuré.','Tomater (73%), tomatpuré (17%), løk.','Tomat 80 %, tomatjuice 10 %.','Tomat 80 %, daddeltomat, salt.','Tomat 80 %, tomat 30 %.','Tomat 40 %, hakkede tomater 30 %.','Tomat 40 % av tomatene er norske, vann.'])assert.equal(score(s,id).score,null,s);
+ assert.equal(scoreProductQuality({ingredients:'Tomat 90 %, salt.'},{groupId:id}).status,'review-required');
+});
 test('fishsticks only score an explicitly stated share of fish in the product',()=>{
  const check=s=>score(s,'fishsticks-breaded');
  assert.equal(check('Alaska pollock 65 % (fisk), kavring, olje.').score,65);
