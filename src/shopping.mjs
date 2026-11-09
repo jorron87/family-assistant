@@ -545,7 +545,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       const better=w?betterThanOda(w,hit.product.unitPrice,line.quantity*hit.product.packAmount,found,at):null;
       const lineUnit=hit?hit.product.unitPrice:null,cheapestVariant=hit?products.get(hit.watchId)[0]:null;
       const cheaperVariant=cheapestVariant&&cheapestVariant.productId!==line.product.id&&cheapestVariant.unitPrice<lineUnit?{productId:cheapestVariant.productId,name:cheapestVariant.name,unitPrice:round(cheapestVariant.unitPrice),packPrice:cheapestVariant.currentPrice,packAmount:cheapestVariant.packAmount,diffPct:Math.round((lineUnit-cheapestVariant.unitPrice)/lineUnit*100)}:null;
-      const knownLow=w?offersElsewhere(w,found,at)[0]:null,cheapestKnown=knownLow&&knownLow.unitPrice<(cheaperVariant?.unitPrice??lineUnit)?{storeName:knownLow.storeName,unitPrice:round(knownLow.unitPrice)}:null;
+      const knownLow=w?quotesFor(w,found.prices)[0]:null,cheapestKnown=knownLow&&knownLow.unitPrice<(cheaperVariant?.unitPrice??lineUnit)?{storeName:knownLow.storeName,unitPrice:round(knownLow.unitPrice)}:null;
       return {unitPrice:lineUnit===null?null:round(lineUnit),cheaperVariant,cheapestKnown,productId:line.product.id,name:line.product.name,quantity:line.quantity,total:line.totalGrossAmount,limit:message??over,elsewhere:better,watchId:hit?.watchId??null,unit:w?.unit??null,packAmount:hit?.product.packAmount??null,image:imageRef(hit?.product.image),variants:hit?variantsOf(products.get(hit.watchId)):[]};
     })};
   }

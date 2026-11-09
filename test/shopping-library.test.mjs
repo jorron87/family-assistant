@@ -57,4 +57,8 @@ test('variable weights require a verified direct unit quote and never become an 
  f.p.name=seen.name;f.p.canonicalPackAmount=null;f.p.unit=null;f.p.metadataFingerprint=productMetadataFingerprint(f.p);f.d.memberships[0].reviewedFingerprint=f.p.metadataFingerprint;
  Object.assign(f.d.prices[0],{grossPackPrice:null,grossUnitPrice:40,unit:'kg',unitPriceEvidence:'Primary source explicitly quotes gross40NOK/kg',priceIncludesVat:true});f.write();
  assert.equal(f.shop.familyView().items[0].prices.current,40);assert.equal(f.shop.familyView().odaDraft.items.length,0);
+ const fixed=f.shop.catalogObserve({watchId:f.w.id,products:[{id:'2',store:'ODA_NO',name:'Whole beans 500g fixed',sourceUrl:'https://oda.com/no/products/456-fixed/',currentPrice:30,lastChecked:RECEIPT}]}).entries[0];
+ f.shop.catalogReview({watchId:f.w.id,id:'2',store:'ODA_NO',fingerprint:fixed.fingerprint,status:'approved',packAmount:.5,unit:'kg',equivalenceEvidence:'Reviewed fixed 500g whole beans'});
+ const cart=f.shop.cartReview({groups:[{items:[{product:{id:456,name:fixed.name},quantity:1,totalGrossAmount:30}]}],validationMessages:[]});
+ assert.deepEqual(cart.lines[0].cheapestKnown,{storeName:'Oda',unitPrice:40},'cart includes verified unit quotes without inventing a buyable pack');
 });
