@@ -1,6 +1,6 @@
 // A transparent category-specific ingredient-content score, not a health rating.
 // It never approves equivalence, changes a price, or supplies missing label facts.
-export const QUALITY_MODEL_VERSION='ingredient-content-v11';
+export const QUALITY_MODEL_VERSION='ingredient-content-v12';
 const clean=v=>String(v??'').normalize('NFC').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
 const number=v=>Number(v.replace(',','.'));
 const decimal='(?<![\\d.,])(\\d{1,4}(?:[.,]\\d{1,3})?)';
@@ -37,6 +37,46 @@ function fishGratinPercent(ingredients){
  if(found.length>1)return{fact:null,reason:'multiple-main-fish-components'};
  return uniqueFact(found,100);
 }
+// Compare only an explicitly declared share of a single chicken-meat ingredient.
+// Cooking yield, compound ingredients, and chicken-derived aroma are not meat share.
+function chickenColdcutPercent(ingredients){
+ const meat='(?:(?:kvernet|hakket|renskåret|norsk)\\s+)*(?:kyllingfilet|kyllingbryst|brystkjøtt\\s+av\\s+kylling)';
+ const re=new RegExp('^'+meat+'\\s*\\*?\\s*(?:uten\\s+skinn\\s*)?(?:\\(opprinnelse[^()]*\\)\\s*)?\\*?\\s*(?:\\(\\s*)?'+decimal+'\\s*%(?!\\s*\\)?\\s*av\\b)','i');
+ const found=[];
+ for(const part of components(ingredients)){
+  if(/^kyllingaroma\b/i.test(part))continue;
+  if(!/kylling/i.test(part))continue;
+  const m=part.match(re);if(!m)return{fact:null,reason:'ambiguous-chicken-components'};
+  found.push({value:number(m[1]),text:m[0],field:'ingredients'});
+ }
+ if(found.length>1)return{fact:null,reason:'multiple-chicken-components'};
+ return uniqueFact(found,100);
+}
+// A single explicitly quantified meat ingredient can be compared across the
+// reviewed cooked-ham groups. Yield statements are a different measurement.
+function cookedHamPercent(ingredients){
+ const meat='(?:(?:norsk|renskåret)\\s+)*(?:(?:sammensatte\\s+stykker\\s+av\\s+)?svinekjøtt(?:\\s+av\\s+skinke)?|skinke\\s+av\\s+svin)';
+ const re=new RegExp('^'+meat+'\\s*\\*?\\s*(?:\\(\\s*)?'+decimal+'\\s*%(?!\\s*\\)?\\s*av\\b)','i');
+ const found=[];
+ for(const part of components(ingredients)){
+  if(!/svin|skinke/i.test(part))continue;
+  const m=part.match(re);if(!m)return{fact:null,reason:'ambiguous-pork-components'};
+  found.push({value:number(m[1]),text:m[0],field:'ingredients'});
+ }
+ if(found.length>1)return{fact:null,reason:'multiple-pork-components'};
+ return uniqueFact(found,100);
+}
+function potatoSaladPercent(ingredients){
+ const re=new RegExp('^potet(?:er|skiver)?\\s*\\*?\\s*(?:\\(\\s*)?'+decimal+'\\s*%(?!\\s*\\)?\\s*av\\b)','i');
+ const found=[];
+ for(const part of components(ingredients)){
+  if(!/potet/i.test(part))continue;
+  const m=part.match(re);if(!m)return{fact:null,reason:'ambiguous-potato-components'};
+  found.push({value:number(m[1]),text:m[0],field:'ingredients'});
+ }
+ if(found.length>1)return{fact:null,reason:'multiple-potato-components'};
+ return uniqueFact(found,100);
+}
 // Only add individually declared tomato ingredients when every tomato component
 // is an unambiguous, directly declared un-concentrated ingredient. Tomato purée,
 // juice or an undeclared component would make the total a partial lower bound.
@@ -68,6 +108,9 @@ function profile(groupId){
  if(id==='hazelnut-chocolate-spread')return{id:'hazelnut-spread',label:'Deklarert hasselnøttandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'(?:hasselnøtt(?:er|kjerner|masse)?|hasselnötter)(?:\\s*/\\s*hasselnøddekerner)?'};
  if(['fishcakes-ordinary','fishcakes-high','fishcakes-very-high'].includes(id))return{id:'fishcakes',label:'Deklarert total fiskeandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'fisk'};
  if(id==='fishsticks-breaded')return{id:'fishsticks',label:'Deklarert fiskeandel',basis:'declared-fish-percent',unit:'%',target:100};
+ if(id==='chicken-coldcuts-plain')return{id:'chicken-coldcut',label:'Deklarert andel av kyllingkjøttingrediensen',basis:'declared-chicken-meat-ingredient-percent',unit:'%',target:100};
+ if(['ham-cooked','ham-cooked-sliced-80-89'].includes(id))return{id:'cooked-ham',label:'Deklarert andel av svinekjøttingrediensen',basis:'declared-pork-meat-ingredient-percent',unit:'%',target:100};
+ if(['potato-salad-creme-fraiche','potato-salad-creme-practical'].includes(id))return{id:'potato-salad',label:'Deklarert potetandel',basis:'declared-potato-ingredient-percent',unit:'%',target:100};
  if(/^fish-gratin-macaroni-(?:practical-frozen|frozen-(?:20|30)pct)$/.test(id))return{id:'fish-gratin',label:'Deklarert andel av hovedfiskingrediensen',basis:'declared-main-fish-ingredient-percent',unit:'%',target:100};
  if(id==='pasta-sauce-tomato-mild-herbs')return{id:'pasta-tomato',label:'Deklarert tomatandel i saus',basis:'declared-unconcentrated-tomato-percent',unit:'%',target:100};
  if(id==='beans-white-in-tomato-sauce')return{id:'beans-in-tomato',label:'Deklarert bønneandel i tomatbønner',basis:'declared-bean-percent',unit:'%',target:100,token:'(?:utbløtte\\s+)?(?:hvite\\s+)?bønner'};
@@ -91,9 +134,12 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
  if(p.id==='fruit-muesli'){base.label='Kostfiber';base.limitations=['Måler kun deklarert kostfiber per 100 g spiseklar fruktmüsli.','15 g per 100 g er modellens skaleringsmål, ikke en anbefalt inntaksmengde eller grenseverdi.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering, og viser ikke direkte fullkornsandel.'];}
  if(p.id==='pasta-tomato')base.limitations=['Måler bare uttrykkelig deklarerte tomatandeler i mild ferdig pastasaus.','Tomatpuré, konsentrert juice og uoppgitte tomatandeler gjør totalen uavklart og gir ingen score.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering; sukker og salt vises separat.'];
  if(p.id==='beans-in-tomato')base.limitations=['Måler kun deklarert bønneandel i det spiseklare helproduktet med saus.','Bønnenes vanninnhold og øvrig oppskrift kan variere; sukker og salt vises separat.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering.'];
+ if(p.id==='chicken-coldcut')base.limitations=['Måler kun uttrykkelig deklarert andel av én kyllingkjøttingrediens i pålegget.','Steking, oppskrift, konsistens og saltinnhold kan variere; kjøttmengde brukt per 100 g ferdig vare har et annet målegrunnlag.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering.'];
+ if(p.id==='cooked-ham')base.limitations=['Måler kun uttrykkelig deklarert andel av én svinekjøttingrediens i kokt skinke.','Sammensatte kjøttstykker, renskåret kjøtt, tilberedning og saltinnhold kan variere; kjøttmengde brukt per 100 g ferdig vare har et annet målegrunnlag.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering.'];
+ if(p.id==='potato-salad')base.limitations=['Måler kun uttrykkelig deklarert potetandel i den ferdige potetsalaten.','Fett, salt, sukker, crème fraîche og øvrige ingredienser beskriver andre egenskaper og vises separat.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering.'];
  if(p.id==='fish-gratin')base.limitations=['Måler bare den uttrykkelig deklarerte andelen av hovedfiskingrediensen i fiskegratengen.','Eventuell fiskefond er ikke inkludert; fiskeslag, makaroni og øvrig oppskrift kan variere.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering; sukker og salt vises separat.'];
  const cross=product?.nutritionObservation?.crossSourceLabel,primary=product?.nutritionObservation?.primaryLabel,ingredients=clean(product?.ingredients||cross?.ingredients),description=clean(product?.description),m=product?.nutrition?.basis==='g'?product.nutrition.per100:null;
- base.nutrition=m?{basis:'per 100 g',fiber:Number.isFinite(m.fiber)?m.fiber:null,sugars:Number.isFinite(m.sugars)?m.sugars:null,salt:Number.isFinite(m.salt)?m.salt:null}:null;
+ base.nutrition=m?{basis:'per 100 g',fat:Number.isFinite(m.fat)?m.fat:null,fiber:Number.isFinite(m.fiber)?m.fiber:null,sugars:Number.isFinite(m.sugars)?m.sugars:null,salt:Number.isFinite(m.salt)?m.salt:null}:null;
  let result;
  if(p.id==='crispbread'||p.id==='fruit-muesli'){
   const fiber=m?.fiber,sourceUrl=product?.nutrition?.sourceUrl;
@@ -102,6 +148,12 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
   result=fishsticksPercent(ingredients);
  }else if(p.id==='fish-gratin'){
   result=fishGratinPercent(ingredients);
+ }else if(p.id==='chicken-coldcut'){
+  result=chickenColdcutPercent(ingredients);
+ }else if(p.id==='cooked-ham'){
+  result=cookedHamPercent(ingredients);
+ }else if(p.id==='potato-salad'){
+  result=potatoSaladPercent(ingredients);
  }else if(p.id==='pasta-tomato'){
   result=pastaTomatoPercent(ingredients);
  }else if(p.id==='beans-in-tomato'&&components(ingredients).filter(part=>/bønn|bean/i.test(part)).length>1){

@@ -166,3 +166,34 @@ test('fish gratin scores only its declared main fish ingredient and excludes sto
  for(const s of ['Seifilet, makaroni 30 %.','Fisk (torsk 30 %), makaroni.','Torsk 20 %, sei 10 %, makaroni.','Torsk 20 %, røkt laks 10 %, makaroni.','Torsk 30 % av fisken, makaroni.','Torsk (30 %) av fisken, makaroni.','Torsk 120 %, makaroni.','Fiskefond (fisk 30 %), makaroni.'])assert.equal(score(s,id).score,null,s);
  assert.equal(scoreProductQuality({ingredients:'Sei 30 %, makaroni.'},{groupId:id}).status,'review-required');
 });
+
+test('chicken cold cuts score only one explicitly declared chicken-meat ingredient',()=>{
+ const id='chicken-coldcuts-plain--coldcut-slices--meat-under-90';
+ const a=score('Kyllingfilet (87 %), vann, salt.',id),b=score('Kyllingbryst (74%), vann, salt.',id),c=score('Kvernet kyllingfilet* uten skinn (87 %), vann.',id),d=score('Kyllingfilet uten skinn (98 %), salt, kyllingaroma.','chicken-coldcuts-plain--cooked-slices');
+ assert.equal(a.score,87);assert.equal(b.score,74);assert.equal(c.score,87);assert.equal(d.score,98);assert.equal(a.comparisonKey,b.comparisonKey);assert.equal(a.comparisonKey,d.comparisonKey);
+ assert.equal(score('Kyllingbryst (opprinnelse norge) 85%, vann.',id).score,85);
+ assert.equal(a.measurement.basis,'declared-chicken-meat-ingredient-percent');
+ for(const text of ['Kyllingfilet, vann 87 %.','Kyllingfilet 87 % av kjøttet, vann.','Kyllingfilet (87 %) av kjøttet, vann.','Kyllingblanding (kyllingfilet 87 %), vann.','Kyllingfilet 87 %, kyllinglår 5 %, vann.','Kyllingfilet 87 %, kyllingbryst 87 %, vann.','Kyllingfilet 101 %, vann.','Kyllingfilet (opprinnelse Norge), vann. Til 100 g ferdig vare har det medgått 107 g kjøtt.','Kyllingfilet (kylling 80 %) 90 %, vann.'])assert.equal(score(text,id).score,null,text);
+ assert.equal(score('Kyllingfilet 87 %, vann.','chicken-thigh-raw').status,'not-applicable');
+ assert.equal(scoreProductQuality({ingredients:'Kyllingfilet 87 %, vann.'},{groupId:id}).status,'review-required');
+});
+
+test('cooked ham scores only one directly declared pork-meat ingredient',()=>{
+ const a=score('Sammensatte stykker av svinekjøtt (84%), vann, salt.','ham-cooked-sliced-80-89');
+ const b=score('Renskåret svinekjøtt av skinke (85 %), vann, salt.','ham-cooked-sliced-80-89');
+ const c=score('Norsk renskåret skinke av svin (92 %), vann, salt.','ham-cooked');
+ const d=score('Norsk svinekjøtt 90 %, vann, salt.','ham-cooked');
+ assert.deepEqual([a.score,b.score,c.score,d.score],[84,85,92,90]);assert.equal(a.comparisonKey,c.comparisonKey);assert.equal(a.measurement.basis,'declared-pork-meat-ingredient-percent');
+ for(const text of ['Svinekjøtt, vann 85 %.','Svinekjøtt (85 %) av råvarene, vann.','Svinekjøtt 84 %, svinekjøtt 84 %, vann.','Svinekjøtt 84 %, svinefett, vann.','Skinke (svinekjøtt 85 %), vann.','Svinekjøtt 101 %, vann.','Svinekjøtt, vann. Til 100 g ferdig vare har det medgått 120 g kjøtt.'])assert.equal(score(text,'ham-cooked').score,null,text);
+ assert.equal(score('Svinekjøtt 84 %, vann.','ham-cured').status,'not-applicable');
+ assert.equal(scoreProductQuality({ingredients:'Svinekjøtt 84 %, vann.'},{groupId:'ham-cooked'}).status,'review-required');
+});
+
+test('potato salad scores only an explicit and complete potato ingredient share',()=>{
+ const opts={groupId:'potato-salad-creme-practical',reviewCurrent:true},p={ingredients:'Poteter 57 %, rapsolje, crème fraîche 11 %, purre, salt.',nutrition:{basis:'g',per100:{fat:16.5,salt:1.2,sugars:2.3}}};
+ const a=scoreProductQuality(p,opts),b=score('Potet (60 %), rapsolje, crème fraîche.','potato-salad-creme-fraiche'),c=score('Potetskiver 60 %, rapsolje, crème fraîche.','potato-salad-creme-practical');
+ assert.deepEqual([a.score,b.score,c.score],[57,60,60]);assert.equal(a.comparisonKey,b.comparisonKey);assert.equal(a.nutrition.fat,16.5);assert.equal(a.nutrition.salt,1.2);assert.equal(a.nutrition.sugars,2.3);
+ for(const text of ['Poteter, crème fraîche 60 %.','Poteter 60 % av grønnsakene, olje.','Potetskiver (60 %) av grønnsakene, olje.','Potetflak 60 %, olje.','Søtpoteter 60 %, olje.','Grønnsaker (potet 60 %), olje.','Poteter 60 %, potetflak, olje.','Poteter 60 %, potetstivelse, olje.','Poteter 60 %, potetskiver 60 %, olje.','Poteter 101 %, olje.'])assert.equal(score(text,opts.groupId).score,null,text);
+ assert.equal(score('Poteter 60 %, olje.','potato-fries').status,'not-applicable');
+ assert.equal(scoreProductQuality(p,{groupId:opts.groupId}).status,'review-required');
+});
