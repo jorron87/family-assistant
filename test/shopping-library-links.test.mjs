@@ -174,7 +174,8 @@ test('the big shop compares the same library family across every chain with a fr
  let row=f.shop.familyView().odaDraft.items[0];
  assert.equal(f.shop.familyView().items[0].prices.current,60,'an undecided family never moves the price');
  assert.deepEqual(row.others.map(x=>[x.storeName,x.unitPrice,x.own]),[['Joker',10,false],['MENY',24,true]]);
- assert.deepEqual(row.familyBest,{storeName:'Joker',name:'Joker ketchup 500 g',unitPrice:10,own:false,online:false});
+ assert.deepEqual(row.places.map(x=>[x.storeName,x.unitPrice,x.own,x.online]),[['Joker',10,false,false],['MENY',24,true,false]]);
+ assert.equal(row.savings.storeName,'Joker');assert.equal(row.savings.perUnit,50);assert.equal(row.savings.annual,300);
  assert.equal(row.elsewhere,null,'a chain outside the family stores never steers the purchase');
  f.link();row=f.shop.familyView().odaDraft.items[0];
  assert.deepEqual(row.others.map(x=>x.storeName),['Joker','MENY'],'a linked family shows every chain too');
@@ -186,9 +187,46 @@ test('family rows respect exclusions, show one row per chain first, and appear o
  const f=fixture(t);f.native(f.rows[0]);f.native(f.rows[4],'excluded');
  let row=f.shop.familyView().odaDraft.items[0];assert.deepEqual(row.others.map(x=>x.storeName),['MENY']);
  const cart=id=>f.shop.cartReview({groups:[{items:[{product:{id,name:'Ketchup'},quantity:1,totalGrossAmount:'30.00'}]}],validationMessages:[],totalGrossAmount:'30.00'}).lines[0];
- const hit=cart(1);assert.equal(hit.watchId,f.w.id);assert.deepEqual(hit.others.map(x=>x.storeName),['MENY']);assert.equal(hit.familyBest.unitPrice,24);
+ const hit=cart(1);assert.equal(hit.watchId,f.w.id);assert.deepEqual(hit.others.map(x=>x.storeName),['MENY']);assert.equal(hit.places[0].unitPrice,24);assert.equal(hit.savings.perUnit,36);
  assert.ok(hit.variants.some(x=>x.productId===2));
  f.shop.list({action:'variant',watchId:f.w.id,productId:2});assert.equal(f.shop.familyView().odaDraft.items[0].productId,2,'a family product can be chosen');
  const state=f.state.shopping;delete state.odaChoices[f.w.id];state.watches[f.w.id].enabled=false;
  const outside=cart(2);assert.equal(outside.watchId,null);assert.deepEqual(outside.others.map(x=>x.storeName),['Rest','MENY']);assert.equal(outside.familyUnit,'kg');
+});
+
+test('a product from another chain goes on that store list and shrinks the Oda suggestion',t=>{
+ const f=fixture(t);f.native(f.rows[0]);
+ const before=f.shop.familyView().odaDraft.items[0],place=before.places.find(x=>x.storeName==='MENY');
+ assert.equal(before.packs,1);
+ const entry=f.shop.list({action:'add',alternative:true,watchId:f.w.id,name:'Tomatketchup',detail:place.name,storeName:place.storeName,packs:1,packAmount:place.packAmount,unit:'kg',unitPrice:place.unitPrice,saving:18});
+ assert.equal(entry.storeName,'MENY');assert.equal(entry.reason,'Billigere enn på Oda');assert.equal(entry.detail,'Meny ketchup 500 g');
+ assert.equal(f.shop.list({action:'add',alternative:true,watchId:f.w.id,name:'Tomatketchup',storeName:'MENY',packs:1,packAmount:.5,unit:'kg',unitPrice:24}).id,entry.id,'pressing twice adds one line');
+ assert.notEqual(f.shop.list({action:'add',alternative:true,watchId:f.w.id,name:'Tomatketchup',storeName:'SPAR',packs:1,packAmount:.5,unit:'kg',unitPrice:24}).id,entry.id,'another store gets its own line');
+ assert.equal(f.shop.familyView().list.open.filter(x=>x.storeName==='MENY').length,1);
+ const free=f.shop.list({action:'add',alternative:true,name:'Ketchup uten varegruppe',detail:'Joker ketchup',storeName:'Joker',packs:2,packAmount:.5,unit:'kg',unitPrice:10});
+ assert.equal(free.watchId,null);assert.equal(free.storeName,'Joker');assert.equal(free.routing,null);
+ assert.throws(()=>f.shop.list({action:'add',alternative:true,name:'x',storeName:'Joker',unit:'tonn'}),/enhet/);
+});
+
+test('every list line that costs more elsewhere is marked, also lines at another store',t=>{
+ const f=fixture(t);f.native(f.rows[0]);
+ const entry=f.shop.list({action:'add',alternative:true,watchId:f.w.id,name:'Tomatketchup',storeName:'MENY',packs:1,packAmount:.5,unit:'kg',unitPrice:60});
+ const row=f.shop.familyView().list.open.find(x=>x.id===entry.id);
+ assert.deepEqual(row.places.map(x=>x.storeName),['Rest']);assert.equal(row.savings.annual,300);
+ f.shop.list({action:'check',id:entry.id});assert.deepEqual(f.shop.familyView().list.done.find(x=>x.id===entry.id).places,[]);
+});
+
+test('savings use a physical store over a web shop whose price lacks freight',t=>{
+ const f=fixture(t);f.shop.settings({stores:[{id:'meny',name:'MENY – Kassal-kjedepriser',url:'https://example.com/meny',minSavings:0,chainCode:'MENY_NO'},{id:'web',name:'Joker (nettbutikk)',url:'https://example.com/web',minSavings:0,chainCode:'JOKER_NO'}]});f.native(f.rows[0]);
+ const row=f.shop.familyView().odaDraft.items[0];assert.equal(row.places[0].online,true);assert.equal(row.savings.storeName,'MENY');assert.equal(row.savings.online,false);
+});
+
+test('photos from other chains come from a sidecar and are served only from known addresses',t=>{
+ const f=fixture(t);fs.writeFileSync(path.join(f.dir,'product-images.json'),JSON.stringify({'kassal:MENY_NO:4':'https://images.example.com/meny.jpg','kassal:ODA_NO:2':'javascript:alert(1)'}));
+ f.native(f.rows[0]);const row=f.shop.familyView().odaDraft.items[0],meny=row.others.find(x=>x.storeName==='MENY');
+ assert.ok(meny.image);assert.equal(f.shop.imageSource(meny.image),'https://images.example.com/meny.jpg');
+ assert.equal(row.others.find(x=>x.storeName==='Rest').image,null);
+ assert.equal(row.variants.find(x=>x.productId===2).image,null,'only https addresses are accepted');
+ const entry=f.shop.list({action:'add',alternative:true,watchId:f.w.id,name:'Tomatketchup',storeName:'MENY',packs:1,packAmount:.5,unit:'kg',unitPrice:24,imageId:meny.image});
+ assert.equal(f.shop.familyView().list.open.find(x=>x.id===entry.id).image,meny.image);
 });

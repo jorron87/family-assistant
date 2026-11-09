@@ -190,3 +190,8 @@ body.kiosk .main-nav button { padding-left: 13px; padding-right: 13px; }
 .shop-scan-option{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.5rem 0}
 .shop-scan-option strong{flex:1 1 60%}
 .shop-scan-open{margin:.4rem 0}
+
+.shop-elsewhere{flex-basis:100%;display:grid;gap:6px;margin-top:6px;padding:10px 12px;border-radius:10px;border:1px solid var(--s-line);background:color-mix(in srgb,var(--s-green) 9%,transparent)}
+.shop-elsewhere-row{display:flex;align-items:center;gap:10px}
+.shop-elsewhere-row .shop-list-text{flex:1 1 auto;min-width:0}
+.shop-elsewhere-note{margin:2px 0 0;font-weight:600}

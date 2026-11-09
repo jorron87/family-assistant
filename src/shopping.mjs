@@ -157,7 +157,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
         const p=m.product,k=key({watchId:w.id,store:p.store,id:p.id});
         if(!m.eligible||native.has(k))continue;
         const packAmount=p.pack>0?p.pack:null;
-        native.set(k,{watchId:w.id,store:p.store,id:p.id,name:p.name,ean:p.ean,brand:p.brand,sourceUrl:p.sourceUrl,status:'approved',approved:true,unit:w.unit,packAmount,price:packAmount?m.price.grossPackPrice??m.unitPrice*packAmount:null,unitPrice:m.unitPrice,lastChecked:m.price.receiptAt,priceSource:'library',origin:'library',groupId:m.groupId});
+        native.set(k,{watchId:w.id,store:p.store,id:p.id,name:p.name,ean:p.ean,brand:p.brand,sourceUrl:p.sourceUrl,status:'approved',approved:true,unit:w.unit,packAmount,price:packAmount?m.price.grossPackPrice??m.unitPrice*packAmount:null,unitPrice:m.unitPrice,lastChecked:m.price.receiptAt,priceSource:'library',origin:'library',groupId:m.groupId,image:p.image??null});
       }
     }
     const quotes=[];
@@ -531,6 +531,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       const map=new Map();
       for(const e of catalog.entries())if(e.image)map.set(imageRef(e.image),e.image);
       for(const e of s.shoppingList)if(e.imageUrl)map.set(imageRef(e.imageUrl),e.imageUrl);
+      for(const url of libReader()?.imageUrls()??[])map.set(imageRef(url),url);
       imageIndex={at:now().getTime(),map};
     }
     return imageIndex.map.get(id)??null;
@@ -559,26 +560,30 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   const cleanStore=name=>name.replace(/\s*[–-]\s*Kassal.*$/,'').replace(/\s*\(nettbutikk\)$/i,'');
   // What the same family costs at other chains, cheapest first. Every chain with
   // a fresh price is shown; only the family's own stores may steer a purchase.
-  function variantBlock(w,options,keep,prices,base,currentUnit) {
+  function variantBlock(w,options,keep,prices,base,currentUnit,{annual=null,excludeStore=null}={}) {
     const reader=prices.reader,rows=new Map();
     if(w)for(const q of quotesFor(w,prices)){
       if(q.store==='ODA_NO'||q.chainCode==='ODA_NO')continue;
       const key=q.kind==='offer'?'offer:'+q.offerId:q.store+'|'+q.id;
-      rows.set(key,{storeName:cleanStore(q.storeName),own:!!q.storeId,online:/nettbutikk/i.test(q.storeName),name:q.name,packAmount:q.packAmount??null,packPrice:q.price??null,unitPrice:round(q.unitPrice),offer:q.kind==='offer',rawQuality:q.kind==='catalog'?reader?.quality(`kassal:${q.store}:${q.id}`)??null:null});
+      rows.set(key,{storeName:cleanStore(q.storeName),own:!!q.storeId,online:/nettbutikk/i.test(q.storeName),name:q.name,packAmount:q.packAmount??null,packPrice:q.price??null,unitPrice:round(q.unitPrice),offer:q.kind==='offer',offerId:q.offerId??null,maxPacks:q.maxPacks??null,image:imageRef(q.image??reader?.product(`kassal:${q.store}:${q.id}`)?.image),rawQuality:q.kind==='catalog'?reader?.quality(`kassal:${q.store}:${q.id}`)??null:null});
     }
     const family=familyMembers(w,base,prices);
     for(const m of family){
       const p=m.product,key=p.store+'|'+p.id;
       if(!m.eligible||p.store==='ODA_NO'||rows.has(key)||w&&prices.excluded.has(w.id+'|'+p.store+'|'+p.id))continue;
       const store=s.settings.stores.find(x=>x.chainCode===p.store);
-      rows.set(key,{storeName:store?cleanStore(store.name):chainName(p.store),own:!!store,online:!!store&&/nettbutikk/i.test(store.name),name:p.name,packAmount:p.pack>0?p.pack:null,packPrice:m.price.grossPackPrice??null,unitPrice:round(m.unitPrice),offer:false,rawQuality:m.quality});
+      rows.set(key,{storeName:store?cleanStore(store.name):chainName(p.store),own:!!store,online:!!store&&/nettbutikk/i.test(store.name),name:p.name,packAmount:p.pack>0?p.pack:null,packPrice:m.price.grossPackPrice??null,unitPrice:round(m.unitPrice),offer:false,offerId:null,maxPacks:null,image:imageRef(p.image),rawQuality:m.quality});
     }
     const sorted=[...rows.values()].sort((a,b)=>a.unitPrice-b.unitPrice),perChain=new Set(),cheapest=sorted.filter(x=>!perChain.has(x.storeName)&&perChain.add(x.storeName));
     const shown=[...new Set([...cheapest,...sorted])].slice(0,Math.max(12,cheapest.length)).sort((a,b)=>a.unitPrice-b.unitPrice);
     const shared=sharedQuality([...options.map(o=>o.quality),...shown.map(x=>x.rawQuality)]);
     const others=shown.map(({rawQuality,...row})=>({...row,quality:shared&&rawQuality?.key===shared?{score:rawQuality.score,label:rawQuality.label}:null}));
-    const low=others[0];
-    return {variants:variantsOf(options,keep,shared),others,familyBest:low&&currentUnit>0&&low.unitPrice<currentUnit?{storeName:low.storeName,name:low.name,unitPrice:low.unitPrice,own:low.own,online:low.online}:null,familyUnit:w?.unit??(family[0]?reader.group(family[0].groupId)?.unit??null:null)};
+    // One line per chain that truly beats this price. Savings use a physical
+    // store when one is cheaper, since web prices still lack freight.
+    const seenChains=new Set(),places=currentUnit>0?others.filter(x=>x.unitPrice<currentUnit*.99&&x.storeName!==excludeStore&&!seenChains.has(x.storeName)&&seenChains.add(x.storeName)).slice(0,3):[];
+    const basis=places.find(x=>!x.online)??places[0]??null,perUnit=basis?currentUnit-basis.unitPrice:0;
+    const savings=basis?{perUnit,annual:annual>0?round(perUnit*annual):null,storeName:basis.storeName,online:basis.online}:null;
+    return {variants:variantsOf(options,keep,shared),others,places,savings,familyUnit:w?.unit??(family[0]?reader.group(family[0].groupId)?.unit??null:null)};
   }
   // A linked group may hold cheaper brands. They are offered, never swapped in.
   const defaultOda=(w,options)=>options.find(x=>x.productId===s.odaChoices[w.id])??options.find(x=>x.origin!=='library')??options[0];
@@ -609,7 +614,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       for(const m of familyMembers(w,list.find(x=>x.productId===s.odaChoices[w.id])??list[0],prices)){
         const p=m.product,oda=p.store==='ODA_NO'?p.sourceUrl?.match(/\/products\/(\d+)-/)?.[1]:null;
         if(!oda||!m.eligible||!(p.pack>0)||prices.excluded.has(w.id+'|'+p.store+'|'+p.id)||list.some(x=>x.productId===Number(oda)))continue;
-        list.push({watchId:w.id,store:p.store,id:p.id,name:p.name,sourceUrl:p.sourceUrl,unit:w.unit,packAmount:p.pack,price:m.price.grossPackPrice??m.unitPrice*p.pack,currentPrice:m.price.grossPackPrice??m.unitPrice*p.pack,unitPrice:m.unitPrice,productId:Number(oda),quality:m.quality,origin:'library',kind:'catalog'});
+        list.push({watchId:w.id,store:p.store,id:p.id,name:p.name,sourceUrl:p.sourceUrl,unit:w.unit,packAmount:p.pack,price:m.price.grossPackPrice??m.unitPrice*p.pack,currentPrice:m.price.grossPackPrice??m.unitPrice*p.pack,unitPrice:m.unitPrice,productId:Number(oda),quality:m.quality,origin:'library',kind:'catalog',image:p.image??null});
       }
       list.sort((x,y)=>x.unitPrice-y.unitPrice);
     }
@@ -665,8 +670,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       const lineUnit=hit?hit.product.unitPrice:null,cheapestVariant=hit?products.get(hit.watchId)[0]:null;
       const cheaperVariant=cheapestVariant&&cheapestVariant.productId!==line.product.id&&cheapestVariant.unitPrice<lineUnit?{productId:cheapestVariant.productId,name:cheapestVariant.name,unitPrice:round(cheapestVariant.unitPrice),packPrice:cheapestVariant.currentPrice,packAmount:cheapestVariant.packAmount,diffPct:Math.round((lineUnit-cheapestVariant.unitPrice)/lineUnit*100)}:null;
       const knownLow=w?quotesFor(w,found.prices)[0]:null,cheapestKnown=knownLow&&knownLow.unitPrice<(cheaperVariant?.unitPrice??lineUnit)?{storeName:knownLow.storeName,unitPrice:round(knownLow.unitPrice)}:null;
-      const outsideKey=hit?null:reader?.byOdaId(line.product.id),outside=outsideKey?reader.product(outsideKey):null,block=hit?variantBlock(w,products.get(hit.watchId),line.product.id,found.prices,hit.product,lineUnit):variantBlock(null,[],null,found.prices,outside?{store:outside.store,id:outside.id}:null,outside&&outside.pack>0&&outside.quote.grossPackPrice?outside.quote.grossPackPrice/outside.pack:null);
-      return {...block,libraryAlternative:hit?null:libraryAlternative(line.product.id,reader),unitPrice:lineUnit===null?null:round(lineUnit),cheaperVariant,cheapestKnown,productId:line.product.id,name:line.product.name,quantity:line.quantity,total:line.totalGrossAmount,limit:message??over,elsewhere:better,watchId:hit?.watchId??null,unit:w?.unit??null,packAmount:hit?.product.packAmount??null,image:imageRef(hit?.product.image)};
+      const outsideKey=hit?null:reader?.byOdaId(line.product.id),outside=outsideKey?reader.product(outsideKey):null,block=hit?variantBlock(w,products.get(hit.watchId),line.product.id,found.prices,hit.product,lineUnit,{annual:needOf(w,a).amount}):variantBlock(null,[],null,found.prices,outside?{store:outside.store,id:outside.id}:null,outside&&outside.pack>0&&outside.quote.grossPackPrice?outside.quote.grossPackPrice/outside.pack:null);
+      return {...block,libraryAlternative:hit?null:libraryAlternative(line.product.id,reader),unitPrice:lineUnit===null?null:round(lineUnit),cheaperVariant,cheapestKnown,productId:line.product.id,name:line.product.name,quantity:line.quantity,total:line.totalGrossAmount,limit:message??over,elsewhere:better,watchId:hit?.watchId??null,unit:w?.unit??null,packAmount:hit?.product.packAmount??outside?.pack??null,image:imageRef(hit?.product.image??outside?.image)};
     })};
   }
   const listOpen=()=>s.shoppingList.filter(x=>!x.checkedAt);
@@ -677,7 +682,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       const cheaper=!entry.checkedAt&&best&&entry.unitPrice>best.unitPrice?{storeName:best.storeName,unitPrice:round(best.unitPrice),sourceUrl:best.sourceUrl}:null;
       const reference=!entry.checkedAt&&w&&o?comparisonReference(w,a,{kind:'offer',offerId:o.id,chainCode:s.settings.stores.find(x=>x.id===o.storeId)?.chainCode,unitPrice:o.price/o.packAmount},priceContext):null;
       const saving=!entry.checkedAt&&o?reference===null?null:round(Math.max(0,reference-o.price/o.packAmount)*entry.packs*o.packAmount):entry.saving;
-      return {...entry,saving,cheaper,image:imageUrl?imageRef(imageUrl):entry.watchId?watchImage(entry.watchId,entry.storeName,byWatch):null,...(entry.storeName==='Oda'&&entry.watchId&&products.has(entry.watchId)?variantBlock(w,products.get(entry.watchId),entry.odaProductId,priceContext,products.get(entry.watchId).find(x=>x.productId===entry.odaProductId)??products.get(entry.watchId)[0],entry.unitPrice):{variants:[],others:[],familyBest:null}),expired:!!o&&o.validTo<today,sourceUrl:o?.sourceUrl??null,validTo:o?.validTo??null};};
+      return {...entry,saving,cheaper,image:imageUrl?imageRef(imageUrl):entry.watchId?watchImage(entry.watchId,entry.storeName,byWatch):null,...(()=>{const options=products.get(entry.watchId)??[],oda=entry.storeName==='Oda';return !entry.checkedAt&&w&&entry.unitPrice?variantBlock(w,oda?options:[],entry.odaProductId,priceContext,options.find(x=>x.productId===entry.odaProductId)??options[0]??null,entry.unitPrice,{annual:needOf(w,a).amount,excludeStore:oda?null:entry.storeName}):{variants:[],others:[],places:[],savings:null};})(),expired:!!o&&o.validTo<today,sourceUrl:o?.sourceUrl??null,validTo:o?.validTo??null};};
     return {open:listOpen().map(decorate),done:s.shoppingList.filter(x=>x.checkedAt).sort((x,y)=>y.checkedAt.localeCompare(x.checkedAt)).slice(0,20).map(decorate)};
   }
   function listAdd(input) {
@@ -692,12 +697,21 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       const entry={...base,offerId:o.id,watchId:o.watchId,name:w?.name??o.name,detail:o.name,storeId:o.storeId,storeName:store?.name??null,packs,packAmount:o.packAmount,unit:o.unit,unitPrice:round(o.price/o.packAmount),saving};
       s.shoppingList.push(entry);return entry;
     }
+    const pickedImage=input.imageId==null?null:imageSource(String(input.imageId));
+    const chosenReason=input.alternative===true?'Billigere enn på Oda':'Fast lav pris';
+    if(input.watchId==null&&input.alternative===true){
+      if(input.unit!=null&&!['kg','l','stk'].includes(input.unit))throw Error('Ugyldig enhet.');
+      const size=input.packAmount==null?null:positive(input.packAmount,'pakningsstørrelse'),storeName=required(input.storeName,'Butikk').slice(0,120),name=required(input.name,'Varenavn').slice(0,120);
+      const same=listOpen().find(x=>!x.watchId&&x.name===name&&x.storeName===storeName);if(same)return same;
+      const entry={...base,name,detail:input.detail==null?null:text(input.detail,200),storeName,packs:size?positive(input.packs??1,'antall'):null,packAmount:size,unit:input.unit??null,unitPrice:input.unitPrice==null?null:positive(input.unitPrice,'pris'),saving:input.saving==null?null:positive(input.saving,'gevinst',true),reason:chosenReason,imageUrl:pickedImage};
+      s.shoppingList.push(entry);return entry;
+    }
     if(input.watchId!=null){
       const w=s.watches[input.watchId];if(!w)throw Error('Ukjent vare.');
-      const size=positive(input.packAmount,'pakningsstørrelse'),rate=rateOf(needOf(w,analysis()));
-      const existing=listOpen().find(x=>x.watchId===w.id&&!x.offerId);if(existing)return existing;
+      const size=input.packAmount==null&&input.storeName?null:positive(input.packAmount,'pakningsstørrelse'),rate=rateOf(needOf(w,analysis()));
+      const existing=listOpen().find(x=>x.watchId===w.id&&!x.offerId&&(!input.storeName||x.storeName===String(input.storeName).slice(0,120)));if(existing)return existing;
       if(input.storeName){
-        const packs=positive(input.packs??1,'antall'),entry={...base,watchId:w.id,name:w.name,detail:input.detail==null?null:text(input.detail,200),storeName:required(input.storeName,'Butikk').slice(0,120),packs,packAmount:size,unit:w.unit,unitPrice:input.unitPrice==null?null:positive(input.unitPrice,'pris'),saving:input.saving==null?null:positive(input.saving,'gevinst',true),reason:'Fast lav pris'};
+        const packs=size?positive(input.packs??1,'antall'):null,entry={...base,watchId:w.id,name:w.name,detail:input.detail==null?null:text(input.detail,200),storeName:required(input.storeName,'Butikk').slice(0,120),packs,packAmount:size,unit:w.unit,unitPrice:input.unitPrice==null?null:positive(input.unitPrice,'pris'),saving:input.saving==null?null:positive(input.saving,'gevinst',true),reason:chosenReason,imageUrl:pickedImage};
         s.shoppingList.push(entry);return entry;
       }
       const entry={...base,watchId:w.id,name:w.name,packs:rate?Math.max(1,Math.ceil(rate/size)):1,packAmount:size,unit:w.unit};
@@ -869,7 +883,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       if(needed<=0){covered++;continue;}
       const wanted=packsFor(needed,{packAmount:best.packAmount,bundlePacks:1,cap:100}),limit=s.odaLimits[best.productId]??null,nameLimit=best.name.match(/maks\s+(\d+)/i),max=limit?.max??(nameLimit?Number(nameLimit[1]):null),packs=max!=null?Math.min(max,wanted):wanted;
       const elsewhere=betterThanOda(w,best.unitPrice,Math.max(wanted*best.packAmount,need.amount/12*Math.min(shelf,gapMonths)),found,at);
-      items.push({...variantBlock(w,options,best.productId,found.prices,best,best.unitPrice),image:imageRef(best.image),watchId:w.id,name:w.name,productId:best.productId,productName:best.name,packAmount:best.packAmount,unit:w.unit,packs,wanted,maxAtOda:max,limitChecked:limit?.checkedAt??null,elsewhere,entryIds:[],packPrice:best.currentPrice,unitPrice:round(best.unitPrice),cost:round(best.currentPrice*packs),tier,stockKnown:stock.known,storage:w.storage});
+      items.push({...variantBlock(w,options,best.productId,found.prices,best,best.unitPrice,{annual:need.amount}),image:imageRef(best.image),watchId:w.id,name:w.name,productId:best.productId,productName:best.name,packAmount:best.packAmount,unit:w.unit,packs,wanted,maxAtOda:max,limitChecked:limit?.checkedAt??null,elsewhere,entryIds:[],packPrice:best.currentPrice,unitPrice:round(best.unitPrice),cost:round(best.currentPrice*packs),tier,stockKnown:stock.known,storage:w.storage});
     }
     for(const e of fromList){
       const row=items.find(x=>(e.watchId&&x.watchId===e.watchId)||x.productId===e.odaProductId),count=e.packs??1;

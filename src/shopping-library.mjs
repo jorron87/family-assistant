@@ -1,16 +1,27 @@
 import {statSync,readFileSync,writeFileSync,renameSync,rmSync} from 'node:fs';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {dirname,join} from 'node:path';
 import {readProductLibrary,productTextHash} from './product-library.mjs';
 
 const INDEX_VERSION=1,FRESH_MS=48*3600000,RETRY_MS=60000;
 const low=value=>String(value??'').normalize('NFC').toLocaleLowerCase('nb-NO');
 const script=fileURLToPath(new URL('../scripts/product-library.mjs',import.meta.url));
 const stampOf=file=>{const info=statSync(file);return `${info.mtimeMs}:${info.size}`;};
+// Product photos live in an optional sidecar so a new photo never touches the
+// reviewed library. They are display data and prove nothing about a product.
+const imagesFile=file=>join(dirname(file),'product-images.json');
+const sourceStamp=file=>{let images='';try{images=stampOf(imagesFile(file));}catch{}return stampOf(file)+'|'+images;};
+function withImages(index,file) {
+ let images={};
+ try{images=JSON.parse(readFileSync(imagesFile(file),'utf8'));}catch{}
+ for(const [key,product] of Object.entries(index.products))if(/^https:\/\//.test(images[key]??''))product.image=images[key];
+ return index;
+}
 const words=value=>low(value).replace(/[^\p{L}\p{N}]+/gu,' ').trim().split(' ').filter(Boolean);
 
 export function writeShoppingIndex(file,output) {
- const source=stampOf(file),index=readProductLibrary(file).shoppingIndex(),temp=`${output}.${process.pid}.tmp`;
+ const source=sourceStamp(file),index=withImages(readProductLibrary(file).shoppingIndex(),file),temp=`${output}.${process.pid}.tmp`;
  const body={version:INDEX_VERSION,builtAt:new Date().toISOString(),source,...index};
  try{writeFileSync(temp,JSON.stringify(body));renameSync(temp,output);}finally{rmSync(temp,{force:true});}
  return {output,source,groups:Object.keys(index.groups).length,products:Object.keys(index.products).length};
@@ -43,6 +54,7 @@ export function createIndexReader(index) {
    builtAt:index.builtAt,
    group:id=>index.groups[id]??null,
    product:key=>index.products[key]??null,
+   imageUrls:()=>Object.values(index.products).map(p=>p.image).filter(Boolean),
    members,groupsOf,
    quote(key){const product=index.products[key];if(!product)return null;return {product,reviewCurrent:groupsOf(key).some(m=>m.s==='approved'&&m.r),price:priceOf(product)};},
    byEan:value=>byEan.get(ean(value))??[],
@@ -74,12 +86,12 @@ export function libraryPriceProvider(file,{now=()=>new Date(),indexFile=null,bui
  let reader=null,stamp=null,indexStamp=null,builtFrom=null,building=false,retryAt=0,status='missing';
  const hashes=new Map();
  function loadDirect() {
-  const next=stampOf(file);
-  if(!reader||next!==stamp){reader=createIndexReader({builtAt:now().toISOString(),...readProductLibrary(file,{now:now()}).shoppingIndex()});stamp=next;}
+  const next=sourceStamp(file);
+  if(!reader||next!==stamp){reader=createIndexReader({builtAt:now().toISOString(),...withImages(readProductLibrary(file,{now:now()}).shoppingIndex(),file)});stamp=next;}
   status='ready';return reader;
  }
  function loadIndexed() {
-  const want=stampOf(file);
+  const want=sourceStamp(file);
   try{const next=stampOf(indexFile);if(next!==indexStamp){const parsed=JSON.parse(readFileSync(indexFile,'utf8'));if(parsed.version===INDEX_VERSION){reader=createIndexReader(parsed);builtFrom=parsed.source;}indexStamp=next;}}catch(error){if(error.code!=='ENOENT')throw error;}
   if(builtFrom!==want&&!building&&Date.now()>=retryAt){building=true;build(file,indexFile,ok=>{building=false;if(!ok)retryAt=Date.now()+RETRY_MS;});}
   // Receipts in a slightly older index still expire on their own 48 hours.
