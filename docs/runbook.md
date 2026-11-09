@@ -115,7 +115,7 @@ Dagens billigste krever approved gjeldende metadata og en dokumentert aktuell br
 
 ## Dokumentert råvarekvalitet i produktbiblioteket
 
-`compare` returnerer `rows[].quality` fra `src/product-quality.mjs` når produktets gjennomgang fortsatt er gyldig. Modellen `ingredient-content-v8` gir en forklarbar score 0–100 for dokumentert råvareinnhold eller en eksplisitt ernæringsdimensjon innen bestemte varetyper. Den godkjenner ingen ekvivalens, påvirker ingen pris eller watch og er ingen samlet helse-, smaks- eller produksjonsvurdering. Ukjente data gir `score:null`, aldri null poeng eller et merke-/prisbasert anslag.
+`compare` returnerer `rows[].quality` fra `src/product-quality.mjs` når produktets gjennomgang fortsatt er gyldig. Modellen `ingredient-content-v9` gir en forklarbar score 0–100 for dokumentert råvareinnhold eller en eksplisitt ernæringsdimensjon innen bestemte varetyper. Den godkjenner ingen ekvivalens, påvirker ingen pris eller watch og er ingen samlet helse-, smaks- eller produksjonsvurdering. Ukjente data gir `score:null`, aldri null poeng eller et merke-/prisbasert anslag.
 
 For ketchup brukes dokumenterte gram tomater brukt per 100 g ketchup, med 200 g som modellens uttrykkelige målverdi: `min(100, gram / 200 × 100)`. Det er en synlig prioriteringsregel, ikke en ernæringsmessig grenseverdi. 148 g gir 74 poeng, 200 g gir 100. Tomatpuré-/konsentratprosent vises som egen opplysning; uten dokumentert konsentrasjon eller råvareekvivalent blir den aldri omregnet til ferske tomater. Modellen ser ikke på merke, pris, økologisk merking eller antall tilsetningsstoffer som helsebevis.
 
@@ -130,6 +130,8 @@ For knekkebrød vises en egen kostfiberdimensjon beregnet fra dokumentert nærin
 For den gjennomgåtte gruppen fruktmüsli med rosin, ananas og banan brukes tilsvarende en egen fiberindikator med skaleringsmål 15 g per 100 g spiseklar vare. Den har en annen sammenligningsnøkkel enn knekkebrød, og målverdien er heller ikke en inntaksanbefaling. Fiber, sukkerarter og salt beskriver separate etikettopplysninger; de er ingen samlet helsevurdering.
 
 For gjennomgått mild tomatpastasaus summerer en egen råvarescore bare entydig deklarerte tomatandeler i ferdig saus. Hvis ingredienslisten også oppgir tomatpuré, konsentrert juice eller en tomatingrediens uten klar andel, er totalen uavklart og scoren ukjent. Den sammenlignes ikke med ketchupens råvareinnsats per 100 g ferdig vare. Tomatandelen er ingen samlet helse- eller smaksscore.
+
+For gjennomgåtte hvite bønner i tomatsaus viser en egen score kun eksplisitt deklarert andel bønner i det spiseklare helproduktet inkludert saus. Flere eller uavklarte bønnekomponenter gir ukjent score. Bønnenes vanninnhold kan variere; sukkerarter og salt vises separat. Høyere bønneandel er ikke en samlet helse- eller smaksvurdering.
 
 `measurement` viser verdi, enhet, målegrunnlag og konkret tekst-/kildebelegg. Motstridende deklarerte mengder gir ukjent score. En separat primæretiketts beskrivelse kan brukes for den konkrete gjennomgåtte varianten, med sin egen kilde-URL. Krysskildeetiketter må fortsatt ha gyldig, separat gjennomgått identitet; endrede metadata ugyldiggjør godkjenningen og scoren. En høy råvarescore gjør aldri en gammel pris fersk og overstyrer aldri allergi, særvariant eller familiens egne krav.
 

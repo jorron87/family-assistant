@@ -1,6 +1,6 @@
 // A transparent category-specific ingredient-content score, not a health rating.
 // It never approves equivalence, changes a price, or supplies missing label facts.
-export const QUALITY_MODEL_VERSION='ingredient-content-v8';
+export const QUALITY_MODEL_VERSION='ingredient-content-v9';
 const clean=v=>String(v??'').normalize('NFC').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
 const number=v=>Number(v.replace(',','.'));
 const decimal='(?<![\\d.,])(\\d{1,4}(?:[.,]\\d{1,3})?)';
@@ -54,6 +54,7 @@ function profile(groupId){
  if(['fishcakes-ordinary','fishcakes-high','fishcakes-very-high'].includes(id))return{id:'fishcakes',label:'Deklarert total fiskeandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'fisk'};
  if(id==='fishsticks-breaded')return{id:'fishsticks',label:'Deklarert fiskeandel',basis:'declared-fish-percent',unit:'%',target:100};
  if(id==='pasta-sauce-tomato-mild-herbs')return{id:'pasta-tomato',label:'Deklarert tomatandel i saus',basis:'declared-unconcentrated-tomato-percent',unit:'%',target:100};
+ if(id==='beans-white-in-tomato-sauce')return{id:'beans-in-tomato',label:'Deklarert bønneandel i tomatbønner',basis:'declared-bean-percent',unit:'%',target:100,token:'(?:utbløtte\\s+)?(?:hvite\\s+)?bønner'};
  if(/^crispbread-/.test(id))return{id:'crispbread',label:'Deklarert kostfiber per 100 g',basis:'dietary-fiber-g-per-100g',unit:'g/100 g',target:30};
  if(id==='muesli-fruit-raisin-pineapple-banana')return{id:'fruit-muesli',label:'Deklarert kostfiber per 100 g fruktmüsli',basis:'dietary-fiber-g-per-100g',unit:'g/100 g',target:15};
  if(/^(?:fruit-spread-|jam-)/.test(id)){
@@ -73,6 +74,7 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
  if(p.id==='crispbread'){base.label='Kostfiber';base.limitations=['Måler kun deklarert kostfiber per 100 g knekkebrød.','30 g per 100 g er modellens skaleringsmål, ikke en anbefalt inntaksmengde eller grenseverdi.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering, og viser ikke direkte fullkornsandel.'];}
  if(p.id==='fruit-muesli'){base.label='Kostfiber';base.limitations=['Måler kun deklarert kostfiber per 100 g spiseklar fruktmüsli.','15 g per 100 g er modellens skaleringsmål, ikke en anbefalt inntaksmengde eller grenseverdi.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering, og viser ikke direkte fullkornsandel.'];}
  if(p.id==='pasta-tomato')base.limitations=['Måler bare uttrykkelig deklarerte tomatandeler i mild ferdig pastasaus.','Tomatpuré, konsentrert juice og uoppgitte tomatandeler gjør totalen uavklart og gir ingen score.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering; sukker og salt vises separat.'];
+ if(p.id==='beans-in-tomato')base.limitations=['Måler kun deklarert bønneandel i det spiseklare helproduktet med saus.','Bønnenes vanninnhold og øvrig oppskrift kan variere; sukker og salt vises separat.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering.'];
  const cross=product?.nutritionObservation?.crossSourceLabel,primary=product?.nutritionObservation?.primaryLabel,ingredients=clean(product?.ingredients||cross?.ingredients),description=clean(product?.description),m=product?.nutrition?.basis==='g'?product.nutrition.per100:null;
  base.nutrition=m?{basis:'per 100 g',fiber:Number.isFinite(m.fiber)?m.fiber:null,sugars:Number.isFinite(m.sugars)?m.sugars:null,salt:Number.isFinite(m.salt)?m.salt:null}:null;
  let result;
@@ -83,6 +85,8 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
   result=fishsticksPercent(ingredients);
  }else if(p.id==='pasta-tomato'){
   result=pastaTomatoPercent(ingredients);
+ }else if(p.id==='beans-in-tomato'&&components(ingredients).filter(part=>/bønn|bean/i.test(part)).length>1){
+  result={fact:null,reason:'ambiguous-bean-components'};
  }else if(p.id==='ketchup'){
   result=tomatoInput(ingredients,description,clean(cross?.description),/^https:\/\/\S+$/i.test(primary?.primaryUrl??'')?clean(primary?.description):'');
   const puree=percent(ingredients,'tomatpur[eéè]|tomatpasta|tomatkonsentrat');

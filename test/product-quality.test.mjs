@@ -129,6 +129,13 @@ test('mild pasta sauce sums only complete declared tomato components and never t
  for(const s of ['Hakkede tomater 45 %, vann, tomatpuré.','Tomater (73%), tomatpuré (17%), løk.','Tomat 80 %, tomatjuice 10 %.','Tomat 80 %, daddeltomat, salt.','Tomat 80 %, tomat 30 %.','Tomat 40 %, hakkede tomater 30 %.','Tomat 40 % av tomatene er norske, vann.'])assert.equal(score(s,id).score,null,s);
  assert.equal(scoreProductQuality({ingredients:'Tomat 90 %, salt.'},{groupId:id}).status,'review-required');
 });
+
+test('beans in tomato sauce score an explicit share of the complete product',()=>{
+ const id='beans-white-in-tomato-sauce',a=score('Hvite bønner 45 %, vann, tomatpuré 3,6 %, sukker.',id),b=score('Utbløtte hvite bønner (55 %), vann, salt.',id),c=score('Bønner (51%), vann, tomatpuré (14%), sukker.',id);
+ assert.equal(a.score,45);assert.equal(b.score,55);assert.equal(c.score,51);assert.equal(a.comparisonKey,b.comparisonKey);assert.notEqual(a.comparisonKey,score('Fisk 45 %, melk.','fishcakes-ordinary').comparisonKey);
+ for(const s of ['Hvite bønner, vann, tomatpuré 40 %.','Bønneblanding (hvite bønner 50 %), vann.','Bønner 30 %, bønner 30 %, vann.','Hvite bønner 30 %, kidneybønner 20 %, vann.','Bønner 50 % av bønnene er hvite, vann.','Bønner 120 %, vann.'])assert.equal(score(s,id).score,null,s);
+ assert.equal(scoreProductQuality({ingredients:'Hvite bønner 50 %, vann.'},{groupId:id}).status,'review-required');
+});
 test('fishsticks only score an explicitly stated share of fish in the product',()=>{
  const check=s=>score(s,'fishsticks-breaded');
  assert.equal(check('Alaska pollock 65 % (fisk), kavring, olje.').score,65);
