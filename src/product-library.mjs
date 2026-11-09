@@ -2,6 +2,7 @@ import {createHash} from 'node:crypto';
 import {readFileSync,statSync} from 'node:fs';
 import {isUtf8} from 'node:buffer';
 import {scoreProductQuality} from './product-quality.mjs';
+import {scoreFamilyNutrition} from './product-nutrition.mjs';
 
 const UNITS=new Set(['kg','l','stk','m']);
 const FRESH_MS=48*3600000;
@@ -236,10 +237,12 @@ export function createProductLibrary(input,{now=new Date()}={}) {
   for(const [id,g] of groups){
    if(invalidGroups.has(id))continue;
    out.groups[id]={name:g.name,category:g.category,unit:g.canonicalUnit,fingerprint:groupMetadataFingerprint(g),inclusion:g.inclusionCriteria,exclusions:g.exclusions,qualityBasis:g.qualityBasis,comparisonBasis:g.comparisonBasis};
-   out.members[id]=(byGroup.get(id)??[]).filter(m=>products.has(m.productKey)&&!invalidProducts.has(m.productKey)&&!badFingerprints.has(m.productKey)).map(m=>{
+   const listed=(byGroup.get(id)??[]).filter(m=>products.has(m.productKey)&&!invalidProducts.has(m.productKey)&&!badFingerprints.has(m.productKey));
+   const nutrition=scoreFamilyNutrition(listed.filter(m=>m.status==='approved'&&assess(m,g,{ageless:true}).reviewCurrent).map(m=>{const p=products.get(m.productKey),per100=p.nutrition?.per100??null;return {key:m.productKey,basis:p.nutrition?.basis??null,per100:per100&&p.nutritionObservation?.fiberConflict?{...per100,fiber:null}:per100};}).filter(row=>row.per100));
+   out.members[id]=listed.map(m=>{
     const a=assess(m,g,{ageless:true}),q=a.quality;
     if(q.status==='scored')out.qualityNotes[q.comparisonKey]=q.limitations;
-    return {k:m.productKey,s:m.status,r:a.reviewCurrent,u:a.eligible?a.unitPrice:null,q:q.status==='scored'?{score:q.score,key:q.comparisonKey,label:q.label,criterion:q.criterion,value:q.measurement?.value??null,unit:q.measurement?.unit??null,evidence:short(q.measurement?.evidence?.[0]?.text,200)}:null,qs:q.status,qr:q.reasons?.[0]??null,e:short(m.equivalenceEvidence,400),qe:short(m.qualityEvidence,300)};
+    return {k:m.productKey,s:m.status,r:a.reviewCurrent,u:a.eligible?a.unitPrice:null,q:q.status==='scored'?{score:q.score,key:q.comparisonKey,label:q.label,criterion:q.criterion,value:q.measurement?.value??null,unit:q.measurement?.unit??null,evidence:short(q.measurement?.evidence?.[0]?.text,200)}:null,n:nutrition.get(m.productKey)??null,qs:q.status,qr:q.reasons?.[0]??null,e:short(m.equivalenceEvidence,400),qe:short(m.qualityEvidence,300)};
    });
   }
   for(const [key,p] of products){

@@ -425,6 +425,24 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
   const productName=(label,info)=>info.key||info.watchId?button(label,()=>productDialog(info,label),'shop-product-link'):el('strong',label);
   const LABEL_TEXT={organic:'Økologisk',lactoseFree:'Laktosefri',glutenFree:'Glutenfri',frozen:'Frysevare'};
   const NUTRIENTS=[['kcal','Energi','kcal'],['fat','Fett','g'],['carbs','Karbohydrater','g'],['sugars','Sukkerarter','g'],['fiber','Kostfiber','g'],['protein','Protein','g'],['salt','Salt','g']];
+  const NUTRITION_LEVEL={good:['god',''],medium:['middels','later'],low:['svakere','low']};
+  function pillRow(row) {
+    if(!row?.pills)return null;
+    const node=el('span',undefined,'shop-badges shop-pills'),{raw,nutrition,value}=row.pills;
+    if(raw){const tone=raw.unknown?'later':raw.score>=67?'':raw.score>=34?'later':'low',pill=el('span',raw.unknown?'Råvare: ukjent':raw.label+' '+nf(0).format(raw.score),('shop-badge '+tone).trim());pill.title=raw.unknown?'Etiketten oppgir ikke mengden som måles. Ukjent er ikke det samme som dårlig.':'Dokumentert råvareinnhold sammenlignet med varer målt på samme måte.';node.append(pill);}
+    if(nutrition){const [word,tone]=NUTRITION_LEVEL[nutrition.level];const pill=el('span','Næring: '+word,('shop-badge '+tone).trim());pill.title='Sammenlignet med andre varer i samme varefamilie. Ikke en helsevurdering.';node.append(pill);}
+    if(value){const pill=el('span','Kvalitet for pengene','shop-badge excellent');pill.title='Både høy kvalitet og lav pris i varefamilien.';node.append(pill);}
+    return node.childNodes.length?node:null;
+  }
+  const appendPills=(holder,row)=>{const node=pillRow(row);if(node)holder.append(node);};
+  const MEASURE_TEXT={sugars:'Sukkerarter',salt:'Salt',fiber:'Kostfiber',protein:'Protein'};
+  function nutritionCard(group) {
+    const box=el('section',undefined,'shop-quality'),n=group.nutrition,[word]=NUTRITION_LEVEL[n.level];
+    const head=el('div',undefined,'shop-quality-head');head.append(el('span',nf(0).format(n.score),'shop-quality-score'),el('span','av 100 · næring: '+word,'shop-sub'));box.append(head);
+    for(const m of n.measures)box.append(el('p',MEASURE_TEXT[m.key]+': '+nf(1).format(m.value)+' g, vanlig i varefamilien er '+nf(1).format(m.median)+' g'));
+    box.append(el('p','Sammenlignet med andre varer i samme varefamilie: mindre sukker og salt, mer fiber og protein gir høyere tall. Dette er ingen helsevurdering.','shop-sub'));
+    return box;
+  }
   function qualityCard(group) {
     const box=el('section',undefined,'shop-quality'),q=group.quality;
     if(!q){box.append(el('p',group.qualityStatus==='unknown'?'Kvalitetsscore mangler: etiketten oppgir ikke mengden som måles.':'Vi har ingen kvalitetsmodell for denne varetypen ennå.','shop-sub'));return box;}
@@ -443,10 +461,13 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     const p=data.product,section=(title,...nodes)=>{const node=el('section',undefined,'shop-product-section');node.append(el('h3',title),...nodes);holder.append(node);};
     const top=el('div',undefined,'shop-product-top'),text=el('div',undefined,'shop-list-text');
     text.append(el('strong',p.name),el('span',[p.brand,p.storeName,p.packAmount&&p.unit?packLabel(p.packAmount,p.unit):null,p.price.grossPackPrice!=null?price(p.price.grossPackPrice)+(p.price.fresh?'':' (eldre pris)'):null].filter(Boolean).join(' · '),'shop-sub'));
+    appendPills(text,p);
     top.append(thumb(p.image),text);holder.append(top);
     if(p.labels.length)holder.append(el('p',p.labels.map(x=>LABEL_TEXT[x]??x).join(' · '),'shop-sub'));
     const approved=data.groups.filter(g=>g.status==='approved');
     section('Kvalitet',...(approved.length?[...new Map(approved.map(g=>[g.quality?g.name:'none',g])).values()].slice(0,3).map(qualityCard):[el('p','Varen er ikke godkjent i noen varefamilie ennå.','shop-sub')]));
+    const nutritionGroup=approved.find(g=>g.nutrition);if(nutritionGroup)section('Næring i varefamilien',nutritionCard(nutritionGroup));
+    const valueGroup=approved.find(g=>g.value);if(valueGroup)section('Kvalitet for pengene',el('p','Kvalitet '+nf(0).format(valueGroup.value.quality)+' av 100 og pris '+nf(0).format(valueGroup.value.price)+' av 100, der billigst i varefamilien er 100. '+(valueGroup.value.top?'En av de beste kombinasjonene i varefamilien.':'Andre varer gir bedre kombinasjon.')));
     if(p.ingredients)section('Ingredienser',el('p',p.ingredients));
     if(p.nutrition){const table=el('dl',undefined,'shop-facts');for(const [key,label,unit] of NUTRIENTS){const value=p.nutrition.per100?.[key];if(typeof value==='number')table.append(el('dt',label),el('dd',nf(1).format(value)+' '+unit));}section('Næring per 100 '+p.nutrition.basis,table);}
     if(p.description)section('Beskrivelse',el('p',p.description,'shop-sub'));
@@ -480,6 +501,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     for(const place of item.places){
       const row=el('div',undefined,'shop-elsewhere-row'),text=el('div',undefined,'shop-list-text');
       text.append(el('strong',place.storeName+(place.online?' (+ frakt)':'')+': '+price(place.unitPrice)+'/'+context.unit),el('span',[place.name,place.offer?'tilbud':null,place.own?null:'utenfor butikkene deres'].filter(Boolean).join(' · '),'shop-sub'));
+      appendPills(text,place);
       row.append(thumb(place.image),text,button(placeAction(place),()=>addElsewhere(place,context)));
       box.append(row);
     }
@@ -496,14 +518,16 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     return details('variant:'+watchId,'Andre varianter ('+(variants.length+others.length)+')',node=>{
       for(const variant of variants){
         const row=el('div',undefined,'shop-variant'),text=el('div',undefined,'shop-list-text'),chosen=variant.productId===currentId;
-        text.append(productName(variant.name,{key:variant.productKey}),el('span',price(variant.packPrice)+' · '+price(variant.unitPrice)+'/'+unit+(variant===variants[0]?(others.length?' · billigst hos Oda':' · billigst'):'')+(variant.quality?` · ${variant.quality.label} ${nf(0).format(variant.quality.score)} av 100`:'')+(variant.library?' · annet merke':'')+(variant.maxAtOda!=null?' · maks '+variant.maxAtOda:''),'shop-sub'));
+        text.append(productName(variant.name,{key:variant.productKey}),el('span',price(variant.packPrice)+' · '+price(variant.unitPrice)+'/'+unit+(variant===variants[0]?(others.length?' · billigst hos Oda':' · billigst'):'')+(variant.library?' · annet merke':'')+(variant.maxAtOda!=null?' · maks '+variant.maxAtOda:''),'shop-sub'));
+        appendPills(text,variant);
         row.append(thumb(variant.image),text,chosen?el('span','Valgt','shop-onlist'):button('Velg',()=>{if(onPick)return onPick(variant);draftEdits.delete(watchId);act(()=>api('/list',{action:'variant',watchId,productId:variant.productId}),'Oda-variant valgt.');}));
         node.append(row);
       }
       if(others.length)node.append(el('p','Samme varefamilie hos andre kjeder','shop-sub shop-variant-head'));
       for(const other of others){
         const row=el('div',undefined,'shop-variant'),text=el('div',undefined,'shop-list-text');
-        text.append(productName(other.name,{key:other.productKey}),el('span',[other.storeName+(other.online?' (+ frakt)':''),other.packPrice!=null?price(other.packPrice):null,price(other.unitPrice)+'/'+unit,other===others[0]?'billigst':null,other.offer?'tilbud':null,other.quality?`${other.quality.label} ${nf(0).format(other.quality.score)} av 100`:null,other.own?null:'utenfor butikkene deres'].filter(Boolean).join(' · '),'shop-sub'));
+        text.append(productName(other.name,{key:other.productKey}),el('span',[other.storeName+(other.online?' (+ frakt)':''),other.packPrice!=null?price(other.packPrice):null,price(other.unitPrice)+'/'+unit,other===others[0]?'billigst':null,other.offer?'tilbud':null,other.own?null:'utenfor butikkene deres'].filter(Boolean).join(' · '),'shop-sub'));
+        appendPills(text,other);
         row.append(thumb(other.image),text);if(context&&other.storeName!==context.currentStore)row.append(button(placeAction(other),()=>addElsewhere(other,context)));node.append(row);
       }
     },'shop-variants');
@@ -516,6 +540,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     text.append(productName(qty+entry.name,{key:entry.productKey,watchId:entry.watchId}));
     const facts=[entry.cartError,entry.reason,entry.detail,entry.unitPrice?`${price(entry.unitPrice)}/${entry.unit}`:null,entry.saving?`Spar ${kr(entry.saving)}`:null,entry.cheaper&&!entry.places?.length?`Billigere nå: ${price(entry.cheaper.unitPrice)}/${entry.unit} hos ${entry.cheaper.storeName}`:null,entry.expired?'Tilbudet er over':entry.validTo?`Til ${dayLabel(entry.validTo)}`:null].filter(Boolean);
     if(facts.length)text.append(el('span',facts.join(' · '),'shop-sub'+(entry.expired?' shop-expired':'')));
+    appendPills(text,entry);
     row.append(tick,thumb(entry.image),text);
     if(entry.sourceUrl&&!isKiosk()){const source=link('Kilde ↗',entry.sourceUrl);source.className='shop-list-source';row.append(source);}
     const remove=button('×',()=>act(()=>api('/list',{action:'remove',id:entry.id})),'shop-list-remove');remove.setAttribute('aria-label',`Fjern ${entry.name}`);
@@ -562,6 +587,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     };
     step.append(button('−',()=>change(-1)),value,button('+',()=>change(1)));
     const remove=button('×',()=>change(-(cartPending.get(line.productId)?.quantity??line.quantity)),'shop-list-remove');remove.setAttribute('aria-label','Fjern '+line.name);
+    appendPills(text,line);
     row.append(thumb(line.image),text,step,remove);
     if(line.limit)row.append(el('div',line.limit,'shop-limit'));
     if(line.cheaperVariant){
@@ -623,6 +649,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
         const change=delta=>{state.packs=Math.min(item.maxAtOda??100,Math.max(1,state.packs+delta));state.userPacks=true;value.textContent=String(state.packs);armed=false;refresh();cheaper?.refresh();};
         step.append(button('−',()=>change(-1)),value,button('+',()=>change(1)));
         const status=el('span',cartState.get(item.watchId)?.text??'','shop-draft-status');
+        appendPills(text,item);
         row.append(on,thumb(item.image),text,step,status);
         const context={watchId:item.watchId,name:item.name,unit:item.unit,currentUnit:item.unitPrice,amount:()=>state.packs*item.packAmount,label:()=>state.packs+' pk i forslaget'};
         const cheaper=item.places?.length?cheaperBlock(item,context):null;

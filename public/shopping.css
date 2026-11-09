@@ -197,7 +197,7 @@ body.kiosk .main-nav button { padding-left: 13px; padding-right: 13px; }
 .shop-elsewhere-note{margin:2px 0 0;font-weight:600}
 .shop-return{flex-basis:100%;margin-top:2px}
 .shop-group-label{margin:12px 0 2px;font-size:14px;font-weight:600}
-.shop-product-link{all:unset;display:block;font-weight:700;cursor:pointer;text-decoration:underline;text-decoration-color:var(--s-line);text-underline-offset:3px;overflow-wrap:anywhere}
+.shop button.shop-product-link{display:block;min-height:0;margin:0;padding:0;border:0;border-radius:0;background:none;box-shadow:none;color:inherit;font:inherit;font-weight:700;text-align:left;cursor:pointer;text-decoration:underline;text-decoration-color:var(--s-line);text-underline-offset:3px;overflow-wrap:anywhere}
 .shop-product-link:focus-visible{outline:2px solid var(--s-green);outline-offset:2px}
 .shop-list-row.done .shop-product-link{color:var(--s-muted);text-decoration:line-through}
 .shop-product-top{display:flex;align-items:center;gap:12px;margin-bottom:8px}
@@ -211,3 +211,4 @@ body.kiosk .main-nav button { padding-left: 13px; padding-right: 13px; }
 .shop-quality-peer{display:grid;grid-template-columns:32px 1fr auto;gap:8px;font-size:14px}
 .shop-quality-peer.own{font-weight:700}
 .shop-quality-peer-score{text-align:right}
+.shop-pills{margin-top:4px}

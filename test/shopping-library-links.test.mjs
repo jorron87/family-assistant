@@ -280,3 +280,35 @@ test('the item card shares places on equal scores and hides raw label data in th
  assert.equal(info.quality.score,100);assert.equal(info.quality.rank,1,'a tie at the top is first place');
  assert.equal(info.equivalenceEvidence,'Etikett lest. Pakning i navnet.');
 });
+
+function withNutrition(f,values) {
+ values.forEach((v,i)=>{if(!v)return;const p=f.d.products[i];p.nutrition={basis:'g',per100:{kcal:100,protein:1,fat:0,carbs:20,...v},sourceUrl:p.sourceUrl,evidence:'Etikett'};p.metadataFingerprint=productMetadataFingerprint(p);f.d.memberships[i].reviewedFingerprint=p.metadataFingerprint;});f.write();
+}
+test('pills show relative nutrition and only mark products with both high quality and a low price',t=>{
+ const f=fixture(t);withNutrition(f,[{sugars:30,salt:2},{sugars:12,salt:1},{sugars:10,salt:1},{sugars:20,salt:1.8}]);f.native(f.rows[0]);f.link();
+ const row=f.shop.familyView().odaDraft.items[0],by=id=>row.variants.find(x=>x.productId===id);
+ assert.deepEqual(row.pills,{raw:{score:74,label:'Råvarekvalitet',unknown:false},nutrition:{score:0,level:'low'},value:null});
+ assert.equal(by(2).pills.nutrition.level,'good');assert.deepEqual(by(2).pills.value,{quality:73,price:100},'good quality at the lowest price');
+ assert.equal(by(3).pills.nutrition.level,'good');assert.equal(by(3).pills.value,null,'top quality at the highest price is not value for money');
+ const meny=row.others.find(x=>x.storeName==='MENY');assert.equal(meny.pills.nutrition.level,'medium');assert.equal(meny.pills.value,null);
+ const card=f.shop.productInfo({key:'kassal:ODA_NO:2'}),group=card.groups[0];
+ assert.deepEqual(card.product.pills,by(2).pills);assert.equal(group.value.top,true);assert.deepEqual(group.nutrition.measures.map(x=>x.key),['sugars','salt']);
+ f.clock.at='2026-11-12T12:00:00Z';assert.equal(f.shop.productInfo({key:'kassal:ODA_NO:2'}).product.pills.value,null,'a stale price cannot earn the value pill');
+});
+
+test('a cheap product without an ingredient measure can never be called good value',t=>{
+ const f=fixture(t);withNutrition(f,[{sugars:30,salt:2},{sugars:12,salt:1},{sugars:10,salt:1},null,null,{sugars:8,salt:.8}]);f.native(f.rows[0]);f.link();
+ const row=f.shop.familyView().odaDraft.items[0],cheapest=row.variants.find(x=>x.productId===6),scored=row.variants.find(x=>x.productId===2);
+ assert.equal(cheapest.unitPrice<scored.unitPrice,true);
+ assert.equal(cheapest.pills.nutrition.level,'good','good sugar and salt figures are still shown');
+ assert.deepEqual(cheapest.pills.raw,{score:null,label:null,unknown:true},'unknown is shown, never hidden or scored as zero');
+ assert.equal(cheapest.pills.value,null);
+ assert.ok(scored.pills.value,'the documented product at a good price keeps the pill');
+});
+
+test('a family with no ingredient measure can use nutrition alone for value',t=>{
+ const f=fixture(t);for(const i of [0,1,2]){f.d.products[i].ingredients='Tomater, eddik';f.d.products[i].metadataFingerprint=productMetadataFingerprint(f.d.products[i]);f.d.memberships[i].reviewedFingerprint=f.d.products[i].metadataFingerprint;}
+ withNutrition(f,[{sugars:30,salt:2},{sugars:12,salt:1},{sugars:10,salt:1}]);f.native(f.rows[0]);f.link();
+ const pill=f.shop.familyView().odaDraft.items[0].variants.find(x=>x.productId===2).pills;
+ assert.equal(pill.raw,null);assert.ok(pill.value);
+});

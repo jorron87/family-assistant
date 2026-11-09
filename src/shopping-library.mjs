@@ -4,7 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {dirname,join} from 'node:path';
 import {readProductLibrary,productTextHash} from './product-library.mjs';
 
-const INDEX_VERSION=2,FRESH_MS=48*3600000,RETRY_MS=60000;
+const INDEX_VERSION=3,FRESH_MS=48*3600000,RETRY_MS=60000;
 const low=value=>String(value??'').normalize('NFC').toLocaleLowerCase('nb-NO');
 const script=fileURLToPath(new URL('../scripts/product-library.mjs',import.meta.url));
 const stampOf=file=>{const info=statSync(file);return `${info.mtimeMs}:${info.size}`;};
@@ -39,6 +39,14 @@ export function createIndexReader(index) {
  }
  for(const [groupId,rows] of Object.entries(index.members))for(const row of rows){const list=memberships.get(row.k)??[];list.push({groupId,...row});memberships.set(row.k,list);}
  for(const [key,p] of Object.entries(index.products))haystacks.set(key,` ${words([p.name,p.brand,...(memberships.get(key)??[]).filter(m=>m.s==='approved').map(m=>index.groups[m.groupId]?.name)].join(' ')).join(' ')} `);
+ const valueCache=new Map(),sharedKeys=new Map();
+ // The ingredient measure a family is actually compared on, if any.
+ const sharedKeyOf=groupId=>{
+  if(sharedKeys.has(groupId))return sharedKeys.get(groupId);
+  const counts=new Map();for(const row of Object.hasOwn(index.members,groupId)?index.members[groupId]:[])if(row.s==='approved'&&row.r&&row.q)counts.set(row.q.key,(counts.get(row.q.key)??0)+1);
+  const key=[...counts].filter(([,n])=>n>=2).sort((a,b)=>b[1]-a[1])[0]?.[0]??null;
+  sharedKeys.set(groupId,key);return key;
+ };
  const match=(haystack,terms)=>terms.every(term=>haystack.includes(' '+term));
  return at=>{
   const fresh=receiptAt=>{const age=at-Date.parse(receiptAt);return age>=0&&age<=FRESH_MS;};
@@ -47,10 +55,26 @@ export function createIndexReader(index) {
    const reasons=[...q.reasons];if(!p.available)reasons.push('unavailable-product');if(q.receiptAt&&!ok)reasons.push(at<Date.parse(q.receiptAt)?'future-price-receipt':'stale-price-receipt');
    return {...q,fresh:ok,reasons};
   };
-  const rowOf=(row,groupId)=>{const product=index.products[row.k],price=priceOf(product);return {productKey:row.k,groupId,status:row.s,reviewCurrent:row.r,product,price,unitPrice:row.u,eligible:row.u!==null&&price.fresh&&!price.reasons.length,quality:row.q};};
+  const rowOf=(row,groupId)=>{const product=index.products[row.k],price=priceOf(product);return {productKey:row.k,groupId,status:row.s,reviewCurrent:row.r,product,price,unitPrice:row.u,eligible:row.u!==null&&price.fresh&&!price.reasons.length,quality:row.q,nutrition:row.n??null};};
   const own=(map,key)=>Object.hasOwn(map,key)?map[key]:null;
   const members=groupId=>(own(index.members,groupId)??[]).map(row=>rowOf(row,groupId));
   const groupsOf=key=>memberships.get(key)??[];
+  // Quality times price inside one family. Only products measured the same way,
+  // with a fresh price, take part, and both halves must be good to stand out.
+  function valueOf(groupId) {
+   const bucket=groupId+'|'+Math.floor(at/300000),hit=valueCache.get(bucket);if(hit)return hit;
+   const rows=members(groupId).filter(r=>r.status==='approved'&&r.reviewCurrent&&r.eligible),shared=sharedKeyOf(groupId),scored=[];
+   // Where a family is measured on ingredients, a product without that measure
+   // cannot be called good value: the cheapest may be the most watered down.
+   for(const r of rows){const raw=shared&&r.quality?.key===shared?r.quality.score:null,food=r.nutrition?.score??null;if(shared&&raw===null)continue;const overall=raw!==null&&food!==null?(raw+food)/2:raw??food;if(overall!==null)scored.push({key:r.productKey,overall,unitPrice:r.unitPrice});}
+   const result=new Map(),prices=[...new Set(scored.map(r=>r.unitPrice))].sort((a,b)=>a-b);
+   if(scored.length>=3&&prices.length>=2){
+    const graded=scored.map(r=>{const price=100*(1-prices.indexOf(r.unitPrice)/(prices.length-1));return {...r,price,value:r.overall*price/100};}),best=Math.max(...graded.map(r=>r.value));
+    for(const r of graded)result.set(r.key,{quality:Math.round(r.overall),price:Math.round(r.price),value:Math.round(r.value),top:r.overall>=60&&r.price>=50&&r.value>=best*.9});
+   }
+   if(valueCache.size>2000)valueCache.clear();
+   valueCache.set(bucket,result);return result;
+  }
   return {
    builtAt:index.builtAt,
    group:id=>own(index.groups,id),
@@ -59,6 +83,13 @@ export function createIndexReader(index) {
    imageUrls:()=>Object.values(index.products).map(p=>p.image).filter(Boolean),
    members,groupsOf,
    quote(key){const product=own(index.products,key);if(!product)return null;return {product,reviewCurrent:groupsOf(key).some(m=>m.s==='approved'&&m.r),price:priceOf(product)};},
+   pills(key,groupIds=null){
+    const rows=groupsOf(key).filter(m=>m.s==='approved'&&m.r&&(!groupIds||groupIds.includes(m.groupId))),m=rows.find(x=>sharedKeyOf(x.groupId)||x.n||valueOf(x.groupId).has(key))??rows[0];
+    if(!m)return null;
+    const value=valueOf(m.groupId).get(key)??null,shared=sharedKeyOf(m.groupId),raw=shared?(m.q?.key===shared?{score:m.q.score,label:m.q.label,unknown:false}:{score:null,label:null,unknown:true}):null;
+    return raw||m.n||value?.top?{raw,nutrition:m.n?{score:m.n.score,level:m.n.level}:null,value:value?.top?{quality:value.quality,price:value.price}:null}:null;
+   },
+   valueDetail:(key,groupId)=>valueOf(groupId).get(key)??null,
    byEan:value=>byEan.get(ean(value))??[],
    byOdaId:id=>byOda.get(Number(id))??null,
    quality:(key,groupIds)=>{const rows=groupsOf(key).filter(m=>m.s==='approved'&&m.q&&(!groupIds||groupIds.includes(m.groupId)));return rows[0]?.q??null;},

@@ -541,7 +541,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   function variantsOf(options,keep=null,shared=sharedQuality(options.map(o=>o.quality))) {
     const best=shared?options.filter(o=>o.quality?.key===shared).sort((a,b)=>b.quality.score-a.quality.score)[0]:null;
     const shown=[...new Set([...options.slice(0,6),best,options.find(o=>o.productId===keep),...options.slice(6,8)].filter(Boolean))].slice(0,8).sort((a,b)=>a.unitPrice-b.unitPrice);
-    return shown.map(o=>{const named=o.name.match(/maks\s+(\d+)/i);return {productKey:`kassal:${o.store}:${o.id}`,productId:o.productId,name:o.name,packAmount:o.packAmount,packPrice:o.currentPrice,unitPrice:round(o.unitPrice),maxAtOda:s.odaLimits[o.productId]?.max??(named?Number(named[1]):null),image:imageRef(o.image),library:o.origin==='library',quality:shared&&o.quality?.key===shared?{score:o.quality.score,label:o.quality.label}:null};});
+    return shown.map(o=>{const named=o.name.match(/maks\s+(\d+)/i);return {productKey:`kassal:${o.store}:${o.id}`,productId:o.productId,name:o.name,packAmount:o.packAmount,packPrice:o.currentPrice,unitPrice:round(o.unitPrice),maxAtOda:s.odaLimits[o.productId]?.max??(named?Number(named[1]):null),image:imageRef(o.image),library:o.origin==='library',pills:o.pills??null,quality:shared&&o.quality?.key===shared?{score:o.quality.score,label:o.quality.label}:null};});
   }
   // The library family a product belongs to. A declined watch has none, and a
   // linked watch has exactly its reviewed links. Until a watch is decided, the
@@ -563,18 +563,18 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   function variantBlock(w,options,keep,prices,base,currentUnit,{annual=null,excludeStore=null,odaOptions=[]}={}) {
     const reader=prices.reader,rows=new Map(),preferred=odaOptions.length?defaultOda(w,odaOptions):null;
     // A line moved to another store must still be able to come back to Oda.
-    for(const o of odaOptions)rows.set('oda|'+o.productId,{storeName:'Oda',own:true,online:false,name:o.name,packAmount:o.packAmount,packPrice:o.currentPrice,unitPrice:round(o.unitPrice),offer:false,offerId:null,maxPacks:null,image:imageRef(o.image),odaProductId:o.productId,productKey:`kassal:${o.store}:${o.id}`,pin:o===preferred,rawQuality:o.quality});
+    for(const o of odaOptions)rows.set('oda|'+o.productId,{storeName:'Oda',own:true,online:false,name:o.name,packAmount:o.packAmount,packPrice:o.currentPrice,unitPrice:round(o.unitPrice),offer:false,offerId:null,maxPacks:null,image:imageRef(o.image),odaProductId:o.productId,productKey:`kassal:${o.store}:${o.id}`,pills:o.pills??null,pin:o===preferred,rawQuality:o.quality});
     if(w)for(const q of quotesFor(w,prices)){
       if(q.store==='ODA_NO'||q.chainCode==='ODA_NO')continue;
       const key=q.kind==='offer'?'offer:'+q.offerId:q.store+'|'+q.id;
-      rows.set(key,{storeName:cleanStore(q.storeName),own:!!q.storeId,online:/nettbutikk/i.test(q.storeName),name:q.name,packAmount:q.packAmount??null,packPrice:q.price??null,unitPrice:round(q.unitPrice),offer:q.kind==='offer',offerId:q.offerId??null,maxPacks:q.maxPacks??null,image:imageRef(q.image??reader?.product(`kassal:${q.store}:${q.id}`)?.image),productKey:q.kind==='catalog'?`kassal:${q.store}:${q.id}`:null,rawQuality:q.kind==='catalog'?reader?.quality(`kassal:${q.store}:${q.id}`)??null:null});
+      rows.set(key,{storeName:cleanStore(q.storeName),own:!!q.storeId,online:/nettbutikk/i.test(q.storeName),name:q.name,packAmount:q.packAmount??null,packPrice:q.price??null,unitPrice:round(q.unitPrice),offer:q.kind==='offer',offerId:q.offerId??null,maxPacks:q.maxPacks??null,image:imageRef(q.image??reader?.product(`kassal:${q.store}:${q.id}`)?.image),productKey:q.kind==='catalog'?`kassal:${q.store}:${q.id}`:null,pills:q.kind==='catalog'?reader?.pills(`kassal:${q.store}:${q.id}`)??null:null,rawQuality:q.kind==='catalog'?reader?.quality(`kassal:${q.store}:${q.id}`)??null:null});
     }
     const family=familyMembers(w,base,prices);
     for(const m of family){
       const p=m.product,key=p.store+'|'+p.id;
       if(!m.eligible||p.store==='ODA_NO'||rows.has(key)||w&&prices.excluded.has(w.id+'|'+p.store+'|'+p.id))continue;
       const store=s.settings.stores.find(x=>x.chainCode===p.store);
-      rows.set(key,{storeName:store?cleanStore(store.name):chainName(p.store),own:!!store,online:!!store&&/nettbutikk/i.test(store.name),name:p.name,packAmount:p.pack>0?p.pack:null,packPrice:m.price.grossPackPrice??null,unitPrice:round(m.unitPrice),offer:false,offerId:null,maxPacks:null,image:imageRef(p.image),productKey:m.productKey,rawQuality:m.quality});
+      rows.set(key,{storeName:store?cleanStore(store.name):chainName(p.store),own:!!store,online:!!store&&/nettbutikk/i.test(store.name),name:p.name,packAmount:p.pack>0?p.pack:null,packPrice:m.price.grossPackPrice??null,unitPrice:round(m.unitPrice),offer:false,offerId:null,maxPacks:null,image:imageRef(p.image),productKey:m.productKey,pills:reader.pills(m.productKey),rawQuality:m.quality});
     }
     const sorted=[...rows.values()].sort((a,b)=>a.unitPrice-b.unitPrice),perChain=new Set(),cheapest=sorted.filter(x=>!perChain.has(x.storeName)&&perChain.add(x.storeName));
     const head=[...new Set([...cheapest,...sorted.filter(x=>x.pin)])],shown=[...new Set([...head,...sorted])].slice(0,Math.max(12,head.length)).sort((a,b)=>a.unitPrice-b.unitPrice);
@@ -607,7 +607,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   }
   function odaProducts(prices=currentPrices()) {
     const byWatch=new Map();
-    for(const e of prices.quotes){const id=e.kind==='catalog'&&e.store==='ODA_NO'&&e.packAmount?e.sourceUrl?.match(/\/products\/(\d+)-/)?.[1]:null;if(id){const list=byWatch.get(e.watchId)??[];list.push({...e,currentPrice:e.price,productId:Number(id),quality:prices.reader?.quality(`kassal:ODA_NO:${e.id}`)??null});byWatch.set(e.watchId,list);}}
+    for(const e of prices.quotes){const id=e.kind==='catalog'&&e.store==='ODA_NO'&&e.packAmount?e.sourceUrl?.match(/\/products\/(\d+)-/)?.[1]:null;if(id){const list=byWatch.get(e.watchId)??[];list.push({...e,currentPrice:e.price,productId:Number(id),quality:prices.reader?.quality(`kassal:ODA_NO:${e.id}`)??null,pills:prices.reader?.pills(`kassal:ODA_NO:${e.id}`)??null});byWatch.set(e.watchId,list);}}
     for(const list of byWatch.values())list.sort((x,y)=>x.unitPrice-y.unitPrice);
     // Undecided watches can still choose among their family's Oda products. These
     // rows stay out of the quotes, so they never move a price reference.
@@ -616,7 +616,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       for(const m of familyMembers(w,list.find(x=>x.productId===s.odaChoices[w.id])??list[0],prices)){
         const p=m.product,oda=p.store==='ODA_NO'?p.sourceUrl?.match(/\/products\/(\d+)-/)?.[1]:null;
         if(!oda||!m.eligible||!(p.pack>0)||prices.excluded.has(w.id+'|'+p.store+'|'+p.id)||list.some(x=>x.productId===Number(oda)))continue;
-        list.push({watchId:w.id,store:p.store,id:p.id,name:p.name,sourceUrl:p.sourceUrl,unit:w.unit,packAmount:p.pack,price:m.price.grossPackPrice??m.unitPrice*p.pack,currentPrice:m.price.grossPackPrice??m.unitPrice*p.pack,unitPrice:m.unitPrice,productId:Number(oda),quality:m.quality,origin:'library',kind:'catalog',image:p.image??null});
+        list.push({watchId:w.id,store:p.store,id:p.id,name:p.name,sourceUrl:p.sourceUrl,unit:w.unit,packAmount:p.pack,price:m.price.grossPackPrice??m.unitPrice*p.pack,currentPrice:m.price.grossPackPrice??m.unitPrice*p.pack,unitPrice:m.unitPrice,productId:Number(oda),quality:m.quality,pills:prices.reader.pills(m.productKey),origin:'library',kind:'catalog',image:p.image??null});
       }
       list.sort((x,y)=>x.unitPrice-y.unitPrice);
     }
@@ -673,7 +673,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       const cheaperVariant=cheapestVariant&&cheapestVariant.productId!==line.product.id&&cheapestVariant.unitPrice<lineUnit?{productId:cheapestVariant.productId,name:cheapestVariant.name,unitPrice:round(cheapestVariant.unitPrice),packPrice:cheapestVariant.currentPrice,packAmount:cheapestVariant.packAmount,diffPct:Math.round((lineUnit-cheapestVariant.unitPrice)/lineUnit*100)}:null;
       const knownLow=w?quotesFor(w,found.prices)[0]:null,cheapestKnown=knownLow&&knownLow.unitPrice<(cheaperVariant?.unitPrice??lineUnit)?{storeName:knownLow.storeName,unitPrice:round(knownLow.unitPrice)}:null;
       const outsideKey=hit?null:reader?.byOdaId(line.product.id),outside=outsideKey?reader.product(outsideKey):null,block=hit?variantBlock(w,products.get(hit.watchId),line.product.id,found.prices,hit.product,lineUnit,{annual:needOf(w,a).amount}):variantBlock(null,[],null,found.prices,outside?{store:outside.store,id:outside.id}:null,outside&&outside.pack>0&&outside.quote.grossPackPrice?outside.quote.grossPackPrice/outside.pack:null);
-      return {...block,productKey:hit?`kassal:ODA_NO:${hit.product.id}`:outsideKey??null,libraryAlternative:hit?null:libraryAlternative(line.product.id,reader),unitPrice:lineUnit===null?null:round(lineUnit),cheaperVariant,cheapestKnown,productId:line.product.id,name:line.product.name,quantity:line.quantity,total:line.totalGrossAmount,limit:message??over,elsewhere:better,watchId:hit?.watchId??null,unit:w?.unit??null,packAmount:hit?.product.packAmount??outside?.pack??null,image:imageRef(hit?.product.image??outside?.image)};
+      return {...block,productKey:hit?`kassal:ODA_NO:${hit.product.id}`:outsideKey??null,pills:hit?hit.product.pills??null:outsideKey?reader.pills(outsideKey):null,libraryAlternative:hit?null:libraryAlternative(line.product.id,reader),unitPrice:lineUnit===null?null:round(lineUnit),cheaperVariant,cheapestKnown,productId:line.product.id,name:line.product.name,quantity:line.quantity,total:line.totalGrossAmount,limit:message??over,elsewhere:better,watchId:hit?.watchId??null,unit:w?.unit??null,packAmount:hit?.product.packAmount??outside?.pack??null,image:imageRef(hit?.product.image??outside?.image)};
     })};
   }
   const listOpen=()=>s.shoppingList.filter(x=>!x.checkedAt);
@@ -684,7 +684,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       const cheaper=!entry.checkedAt&&best&&entry.unitPrice>best.unitPrice?{storeName:best.storeName,unitPrice:round(best.unitPrice),sourceUrl:best.sourceUrl}:null;
       const reference=!entry.checkedAt&&w&&o?comparisonReference(w,a,{kind:'offer',offerId:o.id,chainCode:s.settings.stores.find(x=>x.id===o.storeId)?.chainCode,unitPrice:o.price/o.packAmount},priceContext):null;
       const saving=!entry.checkedAt&&o?reference===null?null:round(Math.max(0,reference-o.price/o.packAmount)*entry.packs*o.packAmount):entry.saving;
-      return {...entry,productKey:entry.productKey??(entry.odaProductId?priceContext.reader?.byOdaId(entry.odaProductId)??null:null),saving,cheaper,image:imageUrl?imageRef(imageUrl):entry.watchId?watchImage(entry.watchId,entry.storeName,byWatch):null,...(()=>{const options=products.get(entry.watchId)??[],oda=entry.storeName==='Oda';return !entry.checkedAt&&w&&(oda?entry.unitPrice:true)?variantBlock(w,oda?options:[],entry.odaProductId,priceContext,options.find(x=>x.productId===entry.odaProductId)??options[0]??null,entry.unitPrice,{annual:needOf(w,a).amount,excludeStore:oda?null:entry.storeName,odaOptions:oda||entry.need==='now'?[]:options}):{variants:[],others:[],places:[],savings:null,odaReturn:null};})(),expired:!!o&&o.validTo<today,sourceUrl:o?.sourceUrl??null,validTo:o?.validTo??null};};
+      const productKey=entry.productKey??(entry.odaProductId?priceContext.reader?.byOdaId(entry.odaProductId)??null:null);
+      return {...entry,productKey,pills:productKey?priceContext.reader?.pills(productKey)??null:null,saving,cheaper,image:imageUrl?imageRef(imageUrl):entry.watchId?watchImage(entry.watchId,entry.storeName,byWatch):null,...(()=>{const options=products.get(entry.watchId)??[],oda=entry.storeName==='Oda';return !entry.checkedAt&&w&&(oda?entry.unitPrice:true)?variantBlock(w,oda?options:[],entry.odaProductId,priceContext,options.find(x=>x.productId===entry.odaProductId)??options[0]??null,entry.unitPrice,{annual:needOf(w,a).amount,excludeStore:oda?null:entry.storeName,odaOptions:oda||entry.need==='now'?[]:options}):{variants:[],others:[],places:[],savings:null,odaReturn:null};})(),expired:!!o&&o.validTo<today,sourceUrl:o?.sourceUrl??null,validTo:o?.validTo??null};};
     return {open:listOpen().map(decorate),done:s.shoppingList.filter(x=>x.checkedAt).sort((x,y)=>y.checkedAt.localeCompare(x.checkedAt)).slice(0,20).map(decorate)};
   }
   function listAdd(input) {
@@ -898,7 +899,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       if(needed<=0){covered++;continue;}
       const wanted=packsFor(needed,{packAmount:best.packAmount,bundlePacks:1,cap:100}),limit=s.odaLimits[best.productId]??null,nameLimit=best.name.match(/maks\s+(\d+)/i),max=limit?.max??(nameLimit?Number(nameLimit[1]):null),packs=max!=null?Math.min(max,wanted):wanted;
       const elsewhere=betterThanOda(w,best.unitPrice,Math.max(wanted*best.packAmount,need.amount/12*Math.min(shelf,gapMonths)),found,at);
-      items.push({...variantBlock(w,options,best.productId,found.prices,best,best.unitPrice,{annual:need.amount}),image:imageRef(best.image),productKey:`kassal:${best.store}:${best.id}`,watchId:w.id,name:w.name,productId:best.productId,productName:best.name,packAmount:best.packAmount,unit:w.unit,packs,wanted,maxAtOda:max,limitChecked:limit?.checkedAt??null,elsewhere,entryIds:[],packPrice:best.currentPrice,unitPrice:round(best.unitPrice),cost:round(best.currentPrice*packs),tier,stockKnown:stock.known,storage:w.storage});
+      items.push({...variantBlock(w,options,best.productId,found.prices,best,best.unitPrice,{annual:need.amount}),image:imageRef(best.image),pills:best.pills??null,productKey:`kassal:${best.store}:${best.id}`,watchId:w.id,name:w.name,productId:best.productId,productName:best.name,packAmount:best.packAmount,unit:w.unit,packs,wanted,maxAtOda:max,limitChecked:limit?.checkedAt??null,elsewhere,entryIds:[],packPrice:best.currentPrice,unitPrice:round(best.unitPrice),cost:round(best.currentPrice*packs),tier,stockKnown:stock.known,storage:w.storage});
     }
     for(const e of fromList){
       const row=items.find(x=>(e.watchId&&x.watchId===e.watchId)||x.productId===e.odaProductId),count=e.packs??1;
@@ -1020,8 +1021,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       return {rank:mine?ranked.filter(x=>x.score>mine.score).length+1:null,of:ranked.length,peers:[...new Set([...ranked.slice(0,6),...ranked.filter(x=>x.own)])]};
     };
     const readable=value=>value?value.replace(/\s*Kildens per100-verdier:\s*\{[^}]*\}?\.?/g,'').trim():null;
-    const groups=reader.groupsOf(key).map(m=>{const g=reader.group(m.groupId);return {name:g.name,category:g.category,status:m.s,inclusion:g.inclusion,comparisonBasis:g.comparisonBasis,qualityBasis:g.qualityBasis,equivalenceEvidence:readable(m.e),qualityEvidence:m.qe,quality:m.q?{score:m.q.score,label:m.q.label,criterion:m.q.criterion,value:m.q.value,unit:m.q.unit,evidence:m.q.evidence,limitations:reader.qualityNote(m.q.key),...peersOf(m)}:null,qualityStatus:m.qs,qualityReason:m.qr};}).sort((a,b)=>Number(b.status==='approved')-Number(a.status==='approved')||Number(!!b.quality)-Number(!!a.quality));
-    return {available:true,watchName:w?.name??null,product:{key,name:p.name,brand:p.brand,ean:p.ean,storeName:p.store==='ODA_NO'?'Oda':store?cleanStore(store.name):chainName(p.store),packAmount:p.pack,unit:p.unit,packEvidence:p.packEvidence,ingredients:p.ingredients,description:p.description,labels:Object.entries(p.attributes??{}).filter(([,value])=>value===true).map(([name])=>name),nutrition:p.nutrition,sourceUrl:/^https:\/\//.test(p.sourceUrl??'')?p.sourceUrl:null,image:imageRef(p.image),price:{grossPackPrice:price.grossPackPrice,fresh:price.fresh,receiptAt:price.receiptAt}},groups};
+    const groups=reader.groupsOf(key).map(m=>{const g=reader.group(m.groupId);return {name:g.name,category:g.category,status:m.s,inclusion:g.inclusion,comparisonBasis:g.comparisonBasis,qualityBasis:g.qualityBasis,equivalenceEvidence:readable(m.e),qualityEvidence:m.qe,quality:m.q?{score:m.q.score,label:m.q.label,criterion:m.q.criterion,value:m.q.value,unit:m.q.unit,evidence:m.q.evidence,limitations:reader.qualityNote(m.q.key),...peersOf(m)}:null,nutrition:m.n??null,value:reader.valueDetail(key,m.groupId),qualityStatus:m.qs,qualityReason:m.qr};}).sort((a,b)=>Number(b.status==='approved')-Number(a.status==='approved')||Number(!!b.quality)-Number(!!a.quality));
+    return {available:true,watchName:w?.name??null,product:{key,name:p.name,brand:p.brand,ean:p.ean,storeName:p.store==='ODA_NO'?'Oda':store?cleanStore(store.name):chainName(p.store),packAmount:p.pack,unit:p.unit,packEvidence:p.packEvidence,ingredients:p.ingredients,description:p.description,labels:Object.entries(p.attributes??{}).filter(([,value])=>value===true).map(([name])=>name),nutrition:p.nutrition,sourceUrl:/^https:\/\//.test(p.sourceUrl??'')?p.sourceUrl:null,image:imageRef(p.image),pills:reader.pills(key),price:{grossPackPrice:price.grossPackPrice,fresh:price.fresh,receiptAt:price.receiptAt}},groups};
   }
   function librarySearch(query,limit=30) {
     const reader=libReader();if(!reader)throw Error('Produktbiblioteket er ikke tilgjengelig.');
