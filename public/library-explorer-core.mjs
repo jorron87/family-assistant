@@ -46,7 +46,7 @@ function percentile(values,p) {
 
 export function prepareExplorer(data) {
   const keys=data.nutrients;
-  const model={built:data.built,freshMs:data.freshHours*3600000,shelves:data.shelves,families:data.families.map((f,i)=>({...f,index:i,items:[]})),stores:data.stores,qualityKeys:data.qualityKeys,items:[],byId:new Map(),byPost:new Map(),ingredientHits:new Map(),domains:{}};
+  const model={built:data.built,freshMs:data.freshHours*3600000,horizonDays:data.horizonDays??null,shelves:data.shelves,families:data.families.map((f,i)=>({...f,index:i,items:[]})),stores:data.stores,qualityKeys:data.qualityKeys,items:[],byId:new Map(),byPost:new Map(),ingredientHits:new Map(),domains:{}};
   data.items.forEach((row,index)=>{
     const nutrition=row.v?Object.fromEntries(keys.map((key,i)=>[key,row.v[i]])):null;
     const posts=row.p.map(p=>({key:p[0],store:p[1],packPrice:p[2],unitPrice:p[3],priceUnit:p[4],pack:p[5],unit:p[6],at:p[7]===null?null:p[7]*1000,held:!!(p[8]&1),gone:!!(p[8]&2)}));

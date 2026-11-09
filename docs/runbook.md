@@ -119,6 +119,12 @@ Fanen `Varer` på dashbordet og knappen `Utforsk alle varene` under Handel på m
 
 Rader med samme strekkode vises som ett varekort, men det er bare visning. Hver kjedes pakning, pris, næring og etikett beholdes, ulike pakninger vises aldri som én, og et merke som økologisk eller laktosefri må gjelde alle kjedepostene. Enhetspris krever gjeldende godkjent medlemskap, og prisalder vurderes i nettleseren ved visning. Ukjente tall oppfyller aldri en grense og regnes aldri som null. Motstridende kostfiber holdes utenfor. Råvarescore kan bare sorteres når ett målegrunnlag er valgt. «Uten» en ingrediens krever kjent, ikke avkuttet ingrediensliste og er ingen allergenvurdering. Hyllene er en visningsgruppering av bibliotekets kategorier (`shelfOf` i `src/library-explorer.mjs`).
 
+### Parkerte varer med gamle priser
+
+En vare er parkert når nyeste faktiske priskvittering er eldre enn 183 dager, eller `priceHorizonDays` i `config/shopping-library.json`. Parkerte varer vises ikke i Varer, i varefamilier eller i sammenligninger, og de skaper ikke `shopping-product-review`, `shopping-library-link` eller `shopping-library-audit`. Ikke bruk tid på å gjennomgå eller researche dem. Biblioteket beholder varen, vurderingene og prisene, så en nyere kvittering henter den tilbake uten ny godkjenning. Gjennomgangsstatus endres aldri av at en vare parkeres.
+
+En rad som nettopp er observert uten pris, er ikke parkert og går til vanlig gjennomgang. Strekkodeskanning, kobling av Oda-ordre, `shopping-library-search` og prisleseren ser fortsatt parkerte varer, fordi varen da finnes i husholdningen eller bare slås opp. Aktuelle priser krever fortsatt kvittering innen 48 timer. Horisonten gjør ingen gammel pris brukbar. En kjedepost som er parkert, kan fortsatt holde tilbake et merke eller et motstridende tall på varekortet.
+
 ## Dokumentert råvarekvalitet i produktbiblioteket
 
 `compare` returnerer `rows[].quality` fra `src/product-quality.mjs` når produktets gjennomgang fortsatt er gyldig. Modellen `ingredient-content-v9` gir en forklarbar score 0–100 for dokumentert råvareinnhold eller en eksplisitt ernæringsdimensjon innen bestemte varetyper. Den godkjenner ingen ekvivalens, påvirker ingen pris eller watch og er ingen samlet helse-, smaks- eller produksjonsvurdering. Ukjente data gir `score:null`, aldri null poeng eller et merke-/prisbasert anslag.

@@ -5,6 +5,14 @@ import {dirname,join} from 'node:path';
 import {readProductLibrary,productTextHash} from './product-library.mjs';
 
 const INDEX_VERSION=4,FRESH_MS=48*3600000,RETRY_MS=60000;
+// A product whose newest price receipt is older than this is parked: kept in the
+// library with its reviews, but out of the views and out of agent work queues.
+// It returns by itself when a newer receipt arrives. Nothing is deleted.
+export const PRICE_HORIZON_DAYS=183;
+export function withinPriceHorizon(receiptAt,at,days=PRICE_HORIZON_DAYS) {
+ const time=Date.parse(receiptAt??'');
+ return Number.isFinite(time)&&at-time<=days*86400000;
+}
 const low=value=>String(value??'').normalize('NFC').toLocaleLowerCase('nb-NO');
 const script=fileURLToPath(new URL('../scripts/product-library.mjs',import.meta.url));
 const stampOf=file=>{const info=statSync(file);return `${info.mtimeMs}:${info.size}`;};
@@ -29,7 +37,7 @@ export function writeShoppingIndex(file,output) {
 
 // Reader over one compiled index. Lookups are built once; price age is judged at
 // each use, so a stale receipt stops counting without loading anything again.
-export function createIndexReader(index) {
+export function createIndexReader(index,{horizonDays=PRICE_HORIZON_DAYS}={}) {
  const byEan=new Map(),byOda=new Map(),memberships=new Map(),haystacks=new Map();
  const ean=value=>String(value??'').replace(/^0+/,'');
  for(const [key,p] of Object.entries(index.products)){
@@ -57,7 +65,10 @@ export function createIndexReader(index) {
   };
   const rowOf=(row,groupId)=>{const product=index.products[row.k],price=priceOf(product);return {productKey:row.k,groupId,status:row.s,reviewCurrent:row.r,product,price,unitPrice:row.u,eligible:row.u!==null&&price.fresh&&!price.reasons.length,quality:row.q,nutrition:row.n??null};};
   const own=(map,key)=>Object.hasOwn(map,key)?map[key]:null;
-  const members=groupId=>(own(index.members,groupId)??[]).map(row=>rowOf(row,groupId));
+  const active=key=>withinPriceHorizon(own(index.products,key)?.quote.receiptAt,at,horizonDays);
+  // Identity lookups below stay complete: a parked product can still be scanned,
+  // matched to an order or priced. Only family listings leave it out.
+  const members=(groupId,{all=false}={})=>(own(index.members,groupId)??[]).filter(row=>all||active(row.k)).map(row=>rowOf(row,groupId));
   const groupsOf=key=>memberships.get(key)??[];
   // Quality times price inside one family. Only products measured the same way,
   // with a fresh price, take part, and both halves must be good to stand out.
@@ -77,6 +88,7 @@ export function createIndexReader(index) {
   }
   return {
    builtAt:index.builtAt,
+   horizonDays,active,
    index:()=>index,
    group:id=>own(index.groups,id),
    product:key=>own(index.products,key),
@@ -116,17 +128,17 @@ function backgroundBuild(file,indexFile,done) {
 // A general library class never approves a family watch. Only an already
 // approved native watch/SKU with identical reviewed metadata may reuse a price.
 // With indexFile set, the server reads a compact index built in a child process.
-export function libraryPriceProvider(file,{now=()=>new Date(),indexFile=null,build=backgroundBuild}={}) {
+export function libraryPriceProvider(file,{now=()=>new Date(),indexFile=null,build=backgroundBuild,horizonDays=PRICE_HORIZON_DAYS}={}) {
  let reader=null,stamp=null,indexStamp=null,builtFrom=null,building=false,retryAt=0,status='missing';
  const hashes=new Map();
  function loadDirect() {
   const next=sourceStamp(file);
-  if(!reader||next!==stamp){reader=createIndexReader({builtAt:now().toISOString(),...withImages(readProductLibrary(file,{now:now()}).shoppingIndex(),file)});stamp=next;}
+  if(!reader||next!==stamp){reader=createIndexReader({builtAt:now().toISOString(),...withImages(readProductLibrary(file,{now:now()}).shoppingIndex(),file)},{horizonDays});stamp=next;}
   status='ready';return reader;
  }
  function loadIndexed() {
   const want=sourceStamp(file);
-  try{const next=stampOf(indexFile);if(next!==indexStamp){const parsed=JSON.parse(readFileSync(indexFile,'utf8'));if(parsed.version===INDEX_VERSION){reader=createIndexReader(parsed);builtFrom=parsed.source;}indexStamp=next;}}catch(error){if(error.code!=='ENOENT')throw error;}
+  try{const next=stampOf(indexFile);if(next!==indexStamp){const parsed=JSON.parse(readFileSync(indexFile,'utf8'));if(parsed.version===INDEX_VERSION){reader=createIndexReader(parsed,{horizonDays});builtFrom=parsed.source;}indexStamp=next;}}catch(error){if(error.code!=='ENOENT')throw error;}
   if(builtFrom!==want&&!building&&Date.now()>=retryAt){building=true;build(file,indexFile,ok=>{building=false;if(!ok)retryAt=Date.now()+RETRY_MS;});}
   // Receipts in a slightly older index still expire on their own 48 hours.
   status=reader?'ready':'building';return reader;
@@ -153,6 +165,7 @@ export function libraryPriceProvider(file,{now=()=>new Date(),indexFile=null,bui
   }
   return {status:'ready',quotes:result};
  }
+ provide.horizonDays=horizonDays;
  provide.reader=readerNow;
  provide.status=()=>status;
  return provide;

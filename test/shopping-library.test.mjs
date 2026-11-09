@@ -29,6 +29,30 @@ test('a library classification alone never approves a family watch; a matching n
  view=f.shop.familyView();assert.equal(view.items[0].prices.current,null,'new unknown actual receipt blocks older catalogue price');assert.equal(view.odaDraft.items.length,0);
 });
 
+test('a price older than the horizon parks work for the agent but never a scan in the family\'s hands',t=>{
+ const f=fixture(t),old='2025-01-01T08:00:00Z';
+ f.shop.settings({monitoringEnabled:true,stores:[]});
+ f.shop.catalogObserve({watchId:f.w.id,products:[
+  {id:'50',store:'COOP_NO',name:'Gammel pris',currentPrice:30,lastChecked:old},
+  {id:'51',store:'MENY_NO',name:'Fersk pris',currentPrice:30,lastChecked:RECEIPT},
+  {id:'52',store:'MENY_NO',name:'Uten pris'}
+ ]});
+ const reviews=()=>f.shop.queue().filter(x=>x.do==='shopping-product-review').map(x=>x.productId).sort();
+ assert.deepEqual(reviews(),['1','51','52'],'only a known old receipt parks a review');
+ f.shop.catalogObserve({watchId:f.w.id,products:[{id:'50',store:'COOP_NO',name:'Gammel pris',currentPrice:31,lastChecked:RECEIPT}]});
+ assert.ok(reviews().includes('50'),'a newer receipt brings the review back');
+ f.approve();
+ assert.equal(f.shop.libraryLinkCandidates(f.w.id)[0].candidates.length,1);
+ const linkWork=()=>f.shop.queue().filter(x=>x.do==='shopping-library-link').length;
+ assert.equal(linkWork(),1);
+ const g=f.provider.reader().group(f.g.id);
+ f.d.prices[0].receiptAt=old;f.p.ean='7038010000001';f.p.metadataFingerprint=productMetadataFingerprint(f.p);f.d.memberships[0].reviewedFingerprint=f.p.metadataFingerprint;f.write();
+ assert.equal(f.shop.libraryLinkCandidates(f.w.id)[0].candidates.length,0,'a family with only old prices is no link candidate');
+ assert.equal(linkWork(),0);
+ f.shop.libraryLink({watchId:f.w.id,evidence:'Samme bruk',links:[{groupId:f.g.id,groupFingerprint:g.fingerprint,evidence:'Gruppen passer'}]});
+ assert.equal(f.shop.stockScan({ean:'7038010000001'}).options.length,1,'scanning still recognises the product');
+});
+
 test('changed composition, package, review or group rules cannot lend a library price to a watch',t=>{
  const f=fixture(t);f.approve();
  f.p.ingredients='Ground beans';f.p.metadataFingerprint=productMetadataFingerprint(f.p);f.d.memberships[0].reviewedFingerprint=f.p.metadataFingerprint;f.write();assert.equal(f.shop.familyView().items[0].prices.current,60);

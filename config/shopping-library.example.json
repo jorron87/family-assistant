@@ -1,4 +1,5 @@
 {
   "enabled": false,
-  "file": "../.local/product-library/library.json"
+  "file": "../.local/product-library/library.json",
+  "priceHorizonDays": 183
 }

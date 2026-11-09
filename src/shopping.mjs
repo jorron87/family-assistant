@@ -4,6 +4,7 @@ import {calibrateMarket} from './shopping-market.mjs';
 import {createMarketCatalog} from './shopping-catalog.mjs';
 import {createStockIntake} from './shopping-stock.mjs';
 import {createLibraryExplorer} from './library-explorer.mjs';
+import {withinPriceHorizon} from './shopping-library.mjs';
 import {annualNeed,chainName,commonPacks,dealScore,packsFor,dealTier,defaultShelfLifeMonths,estimateStock,packBreakdown,planQuantities,shelfLifeMonths,shelfWithDate} from './shopping-planning.mjs';
 
 const hash=value=>createHash('sha256').update(value).digest('hex').slice(0,24);
@@ -121,11 +122,11 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   // short-dated and wholesale web shops stay out of everyday comparisons.
   const linkChains=()=>new Set(['ODA_NO',...s.settings.stores.filter(x=>x.chainCode&&!/nettbutikk/i.test(x.name)).map(x=>x.chainCode)]);
   const linkStates=(w,reader)=>(w.libraryLinks??[]).map(link=>{const group=reader?.group(link.groupId)??null;return {...link,group,state:!reader?'unavailable':!group?'missing':group.fingerprint!==link.groupFingerprint?'changed':group.unit!==w.unit?'unit':'ok'};});
-  function linkedMembers(w,reader,{allChains=false}={}) {
+  function linkedMembers(w,reader,{allChains=false,includeParked=false}={}) {
     const found=new Map(),chains=linkChains();
     for(const link of linkStates(w,reader)){
       if(link.state!=='ok')continue;
-      for(const m of reader.members(link.groupId)){
+      for(const m of reader.members(link.groupId,{all:includeParked})){
         if(m.status!=='approved'||!m.reviewCurrent||!allChains&&!chains.has(m.product.store)||found.has(m.productKey)||link.excludeProductKeys?.includes(m.productKey))continue;
         if(link.brands?.length&&!link.brands.some(b=>normalized(m.product.brand).includes(normalized(b))))continue;
         if((link.requires??[]).some(key=>m.product.attributes?.[key]!==true))continue;
@@ -327,6 +328,9 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const opportunities=candidates.filter(worthTrip).sort((x,y)=>dealScore(y)-dealScore(x));
     return {opportunities,belowTrip:candidates.filter(o=>!worthTrip(o)).sort((x,y)=>dealScore(y)-dealScore(x)),covered,held,prices};
   }
+  // A row just observed without any price stays reviewable; only a receipt that
+  // is known to be old parks it, and a newer receipt brings it back.
+  const priceTooOld=entry=>entry.lastChecked!=null&&!withinPriceHorizon(entry.lastChecked,now().getTime(),libraryPrices?.horizonDays);
   const listRouteWork=()=>s.shoppingList.filter(e=>!e.checkedAt&&e.routing==='pending');
   function unlinkedOrderLines() {
     const linked=new Set(Object.values(s.watches).flatMap(w=>w.productKeys)),found=new Map(),reader=libReader();
@@ -361,7 +365,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const stock=stockIntake.work().map(x=>({do:'shopping-stock-review',id:x.id,text:x.text,location:x.location,images:x.images.length,submittedAt:x.submittedAt,retryAt:x.retryAt}));
     if(!s.settings.monitoringEnabled)return [...stock,...routes];
     const today=shoppingDay(now());
-    return [...stock,...catalog.pending().filter(p=>s.watches[p.watchId]?.enabled!==false).map(p=>({do:'shopping-product-review',watchId:p.watchId,watchName:s.watches[p.watchId]?.name,productId:p.id,store:p.store,name:p.name,fingerprint:p.fingerprint,sourceUrl:p.sourceUrl})),...feedWork(),...s.settings.stores.filter(x=>!x.facebookGroup&&(!s.reviews[x.id]||s.reviews[x.id].nextCheck<=today)).map(x=>({do:'shopping-review',storeId:x.id,name:x.name,url:x.url,lastReview:s.reviews[x.id]??null})),...marketRefreshDue(today),...libraryWork(),...unlinkedOrderLines(),...routes];
+    return [...stock,...catalog.pending().filter(p=>s.watches[p.watchId]?.enabled!==false&&!priceTooOld(p)).map(p=>({do:'shopping-product-review',watchId:p.watchId,watchName:s.watches[p.watchId]?.name,productId:p.id,store:p.store,name:p.name,fingerprint:p.fingerprint,sourceUrl:p.sourceUrl})),...feedWork(),...s.settings.stores.filter(x=>!x.facebookGroup&&(!s.reviews[x.id]||s.reviews[x.id].nextCheck<=today)).map(x=>({do:'shopping-review',storeId:x.id,name:x.name,url:x.url,lastReview:s.reviews[x.id]??null})),...marketRefreshDue(today),...libraryWork(),...unlinkedOrderLines(),...routes];
   }
   function completion() {
     const work=queue(),blockedStores=s.settings.monitoringEnabled?s.settings.stores.filter(x=>s.reviews[x.id]?.status==='blocked').map(x=>({storeId:x.id,name:x.name,evidence:s.reviews[x.id].evidence})):[];
@@ -939,7 +943,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   function linkCandidates(w,reader,rows=catalog.entries(w.id)) {
     const votes=new Map();
     for(const e of rows)if(e.status==='approved')for(const m of reader.groupsOf(`kassal:${e.store}:${e.id}`))if(m.s==='approved'&&m.r)votes.set(m.groupId,(votes.get(m.groupId)??0)+1);
-    return [...votes].sort((a,b)=>b[1]-a[1]).map(([groupId,count])=>{const g=reader.group(groupId);return {groupId,name:g.name,category:g.category,unit:g.unit,fingerprint:g.fingerprint,inclusion:g.inclusion,exclusions:g.exclusions,matchingApproved:count,members:reader.members(groupId).filter(m=>m.status==='approved').length};});
+    return [...votes].sort((a,b)=>b[1]-a[1]).flatMap(([groupId,count])=>{const members=reader.members(groupId).filter(m=>m.status==='approved').length;if(!members)return [];const g=reader.group(groupId);return [{groupId,name:g.name,category:g.category,unit:g.unit,fingerprint:g.fingerprint,inclusion:g.inclusion,exclusions:g.exclusions,matchingApproved:count,members}];});
   }
   const groupRows=entries=>{const map=new Map();for(const e of entries){const list=map.get(e.watchId)??[];list.push(e);map.set(e.watchId,list);}return map;};
   function libraryAudit() {
@@ -949,9 +953,11 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const add=(kind,e,detail,signature)=>{const id=hash(JSON.stringify([kind,e.watchId,e.store,e.id,e.fingerprint,signature]));if(!s.libraryAcks[id])findings.push({id,kind,watchId:e.watchId,watchName:s.watches[e.watchId]?.name,store:e.store,productId:e.id,name:e.name,fingerprint:e.fingerprint,...detail});};
     for(const e of entries){
       if(e.status!=='approved'||s.watches[e.watchId]?.enabled===false)continue;
+      const key=`kassal:${e.store}:${e.id}`,inLibrary=reader.active(key);
+      if(priceTooOld(e)&&!inLibrary)continue;
       const named=namedPackConflict(e.name,e.packAmount,e.unit);
       if(named!==null)add('name-pack-conflict',e,{reviewedPack:e.packAmount,namedPack:named,unit:e.unit},named);
-      const key=`kassal:${e.store}:${e.id}`,p=reader.product(key);if(!p)continue;
+      const p=reader.product(key);if(!p||!inLibrary)continue;
       const rows=reader.groupsOf(key);
       if(rows.length&&!rows.some(m=>m.s==='approved'&&m.r))add('library-not-approved',e,{libraryStatus:rows.map(m=>({groupId:m.groupId,group:reader.group(m.groupId)?.name,status:m.s}))},rows.map(m=>m.groupId+':'+m.s).sort());
       else if(p.pack>0&&(p.unit!==e.unit||Math.abs(p.pack-e.packAmount)>p.pack*.01))add('library-pack-conflict',e,{reviewedPack:e.packAmount,reviewedUnit:e.unit,libraryPack:p.pack,libraryUnit:p.unit},[p.pack,p.unit]);
@@ -1041,7 +1047,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     if(reader)for(const key of reader.byEan(ean)){
       const p=reader.product(key);known??=p.name;
       if(variablePack(p.name))continue;
-      for(const w of Object.values(s.watches))if(linkedMembers(w,reader).has(key)&&p.unit===w.unit)add(w,p.pack,p.name);
+      // A scanned product is in the family's hands; an old price says nothing about that.
+      for(const w of Object.values(s.watches))if(linkedMembers(w,reader,{includeParked:true}).has(key)&&p.unit===w.unit)add(w,p.pack,p.name);
     }
     return {ean,options:[...found.values()],knownProduct:known};
   }

@@ -29,7 +29,7 @@ import {createKassal} from './kassal.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 let libraryPrices;
-try{const config=readConfig('shopping-library.json');if(config.enabled===true&&typeof config.file==='string'){const file=resolve(dirname(configPath('shopping-library.json')),config.file);libraryPrices=libraryPriceProvider(file,{indexFile:join(dirname(file),'shopping-index.json')});}}catch(error){if(error.code!=='ENOENT')throw error;}
+try{const config=readConfig('shopping-library.json');if(config.enabled===true&&typeof config.file==='string'){const file=resolve(dirname(configPath('shopping-library.json')),config.file);libraryPrices=libraryPriceProvider(file,{indexFile:join(dirname(file),'shopping-index.json'),horizonDays:config.priceHorizonDays});}}catch(error){if(error.code!=='ENOENT')throw error;}
 const store = createStore(DATA_DIR,{libraryPrices});
 const resources = createResources({dataDir:DATA_DIR,store});
 const googlePublisher=createGooglePublisher({store,dataDir:DATA_DIR,config:readConfig('sources.json')});

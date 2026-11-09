@@ -115,7 +115,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     root.append(buildHero());
     const shell=el('div',undefined,'lx-shell');
     shell.append(buildRail(),buildMain());
-    root.append(shell,buildTray(),el('p','Viser kjedepriser og gjennomgåtte varefamilier, ikke lokal lagerstatus eller butikkens tilbud. Varer med samme strekkode er slått sammen for visning, og hver kjedes egne tall vises på varen. Tomme tall betyr at opplysningen mangler, ikke null.','lx-foot'));
+    root.append(shell,buildTray(),el('p',`Viser kjedepriser og gjennomgåtte varefamilier, ikke lokal lagerstatus eller butikkens tilbud. Varer med samme strekkode er slått sammen for visning, og hver kjedes egne tall vises på varen. Tomme tall betyr at opplysningen mangler, ikke null.${model.horizonDays?` Kjedeposter uten pris fra de siste ${Math.round(model.horizonDays/30.4)} månedene vises ikke.`:''}`,'lx-foot'));
     panel.replaceChildren(root);
   }
 

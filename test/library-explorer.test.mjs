@@ -6,7 +6,7 @@ import {buildExplorerData,createLibraryExplorer,familyDetail,ingredientMatches,s
 import {createIndexReader} from '../src/shopping-library.mjs';
 import {axisDomain,emptyFilters,explore,familySummaries,inRange,isPristine,prepareExplorer,priceView,proteinPerKrone,scatterPoints,sortItems,tokenScore} from '../public/library-explorer-core.mjs';
 
-const NOW=Date.parse('2026-11-09T12:00:00Z'),FRESH='2026-11-09T08:00:00Z',OLD='2024-01-01T08:00:00Z';
+const NOW=Date.parse('2026-11-09T12:00:00Z'),FRESH='2026-11-09T08:00:00Z',OLD='2026-10-01T08:00:00Z',PARKED='2024-01-01T08:00:00Z';
 const quote=(price,receiptAt=FRESH,reasons=[])=>({grossPackPrice:price,grossUnitPrice:null,unit:null,directUnitVerified:false,receiptAt,reasons,sourceUrl:'https://example.test/p'});
 const product=(store,id,fields)=>({store,id,name:'Vare '+id,ean:null,brand:null,ingredients:null,description:null,packEvidence:'Etikett',pack:.5,packKnown:true,unit:'kg',rawPack:null,sourceUrl:'https://example.test/p',attributes:{organic:false,lactoseFree:false,glutenFree:false,frozen:false},available:true,nutrition:null,quote:quote(20),...fields});
 const label=(fields,extra={})=>({basis:'g',per100:{kcal:100,fat:1,carbs:20,sugars:18,fiber:2,protein:1,salt:2,...fields},sourceUrl:'https://example.test/p',...extra});
@@ -177,6 +177,33 @@ test('the bundle is compressed once, revalidates and reports a missing library',
  assert.equal(cached.status,304);assert.equal(cached.body,undefined);
  assert.deepEqual((await explorer.ingredients('eddik')).items.length,1);
  assert.throws(()=>explorer.family('finnes-ikke'),/Fant ikke/);
+});
+
+test('products without a price inside the horizon leave the listings but stay known',()=>{
+ const source=index();
+ Object.assign(source.products['kassal:SPAR_NO:2'],{quote:quote(25,PARKED)});
+ Object.assign(source.products['kassal:COOP_NO:4'],{quote:quote(12,PARKED)});
+ source.products['kassal:MENY_NO:1'].attributes.organic=true;
+ source.products['kassal:SPAR_NO:2'].attributes.organic=false;
+ const read=createIndexReader(source)(NOW);
+ assert.equal(read.active('kassal:MENY_NO:1'),true);assert.equal(read.active('kassal:SPAR_NO:2'),false);assert.equal(read.active('finnes-ikke'),false);
+ assert.deepEqual(read.members('ketchup').map(m=>m.productKey),['kassal:MENY_NO:1','kassal:KIWI:3']);
+ assert.equal(read.members('ketchup',{all:true}).length,4);
+ assert.equal(read.quote('kassal:SPAR_NO:2').product.name,'Tomatketchup','scans, orders and prices still find it');
+ assert.equal(familyDetail(read,'ketchup',options).members.length,2);
+ const {data}=buildExplorerData(source,{...options,active:read.active,horizonDays:183});
+ assert.equal(data.horizonDays,183);
+ assert.equal(data.stores.some(s=>s.name==='SPAR'||s.name==='Coop'),false,'a chain with only old prices is gone');
+ const card=data.items.find(i=>i.id==='e7038010000');
+ assert.equal(card.p.length,1);
+ assert.equal(card.a,undefined,'a parked post can still veto a label');
+ assert.equal(card.v[data.nutrients.indexOf('fiber')],null,'and a conflicting figure');
+ assert.equal(data.items.some(i=>i.n==='Peanøttsaus'),false);
+ source.products['kassal:SPAR_NO:2'].quote=quote(25,FRESH);
+ assert.equal(createIndexReader(source)(NOW).active('kassal:SPAR_NO:2'),true,'a newer receipt brings it back');
+ assert.equal(createIndexReader(source,{horizonDays:10})(NOW).active('kassal:MENY_NO:1'),true);
+ const shortHorizon=index();shortHorizon.products['kassal:MENY_NO:1'].quote=quote(20,OLD);
+ assert.equal(createIndexReader(shortHorizon,{horizonDays:10})(NOW).active('kassal:MENY_NO:1'),false,'the horizon is configurable');
 });
 
 test('both apps serve every explorer file',()=>{

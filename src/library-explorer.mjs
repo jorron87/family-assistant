@@ -38,7 +38,7 @@ function differs(a,b) {
 const qualityTitle=(key,q)=>{const part=key.split(':');return part[1]==='fruit-spread'&&FRUIT[part[2]]?`${q.criterion} (${FRUIT[part[2]]})`:q.criterion;};
 
 /** Pure compilation; the same index and store list always give the same document. */
-export function buildExplorerData(index,{imageRef,chainName,ownStores=[]}) {
+export function buildExplorerData(index,{imageRef,chainName,ownStores=[],active=()=>true,horizonDays=null}) {
  const shelves=[],shelfIndex=new Map(),families=[],familyIndex=new Map(),stores=[],storeIndex=new Map(),qualityKeys=[],qualityIndex=new Map(),links=new Map();
  const shelfId=category=>{const shelf=shelfOf(category);if(!shelfIndex.has(shelf.name)){shelfIndex.set(shelf.name,shelves.length);shelves.push(shelf);}return shelfIndex.get(shelf.name);};
  const storeId=code=>{if(!storeIndex.has(code)){storeIndex.set(code,stores.length);stores.push({code,name:chainName(code)});}return storeIndex.get(code);};
@@ -47,12 +47,15 @@ export function buildExplorerData(index,{imageRef,chainName,ownStores=[]}) {
  const buckets=new Map();
  for(const [key,product] of Object.entries(index.products)){const code=barcode(product.ean),id=code?'e'+code:key;if(!buckets.has(id))buckets.set(id,[]);buckets.get(id).push([key,product]);}
  const items=[],texts=[];
- for(const [id,rows] of buckets){
+ for(const [id,every] of buckets){
+  // A parked chain post is not shown, but it can still veto a label or a figure.
+  const rows=every.filter(([key])=>active(key));
+  if(!rows.length)continue;
   const weight=([,p])=>(p.nutrition?2:0)+(p.image?1:0)+(p.ingredients?1:0);
   rows.sort((a,b)=>weight(b)-weight(a)||a[1].name.localeCompare(b[1].name,'nb')||(a[0]<b[0]?-1:1));
   const rep=rows[0][1],approved=new Set(),shelfSet=new Set(),scores=new Map(),seen=rows.map(([,p])=>p.nutrition).filter(n=>n?.per100);
   let level=null,labels=0;
-  for(const [flag,bit] of LABELS)if(rows.every(([,p])=>p.attributes?.[flag]===true))labels|=bit; // A held or conflicting post must not inherit a label from its siblings.
+  for(const [flag,bit] of LABELS)if(every.every(([,p])=>p.attributes?.[flag]===true))labels|=bit; // A held or conflicting post must not inherit a label from its siblings.
   const posts=rows.map(([key,p])=>{
    let unitPrice=null;
    for(const m of links.get(key)??[]){
@@ -73,16 +76,16 @@ export function buildExplorerData(index,{imageRef,chainName,ownStores=[]}) {
    return [key,storeId(p.store),held?null:q.grossPackPrice,held||!unitPrice?null:unitPrice[0],unitPrice?.[1]??null,p.pack,p.unit,q.receiptAt?Math.round(Date.parse(q.receiptAt)/1000):null,(held?1:0)|(p.available?0:2)];
   });
   for(const [slot] of scores)qualityKeys[slot].items++;
-  const conflict=seen.some(n=>n.fiberConflict);
+  const conflict=every.some(([,p])=>p.nutrition?.fiberConflict),image=rep.image??every.find(([,p])=>p.image)?.[1].image;
   const facts=rep.nutrition?.per100?NUTRIENT_KEYS.map(k=>k==='fiber'&&conflict?null:number(rep.nutrition.per100[k])):null;
   const varies=seen.length>1&&NUTRIENT_KEYS.some(k=>seen.some((a,i)=>seen.slice(i+1).some(b=>differs(number(a.per100[k]),number(b.per100[k])))));
   const lists=rows.map(([,p])=>p.ingredients).filter(Boolean),complete=lists.length>0&&lists.every(t=>t.length<INGREDIENT_LIMIT);
   texts.push(low(lists.join(' | ')));
-  items.push({id,n:rep.name,...(rep.brand?{b:rep.brand}:{}),...(barcode(rep.ean)?{e:rep.ean}:{}),...(rep.image?{i:imageRef(rep.image)}:{}),s:[...shelfSet],f:[...approved],...(labels?{a:labels}:{}),...(facts?{v:facts,g:rep.nutrition.basis==='ml'?1:0}:{}),...(varies?{d:1}:{}),...(level!==null?{l:level}:{}),...(scores.size?{q:[...scores.values()]}:{}),...(lists.length?{t:complete?1:2}:{}),p:posts});
+  items.push({id,n:rep.name,...(rep.brand?{b:rep.brand}:{}),...(barcode(rep.ean)?{e:rep.ean}:{}),...(image?{i:imageRef(image)}:{}),s:[...shelfSet],f:[...approved],...(labels?{a:labels}:{}),...(facts?{v:facts,g:rep.nutrition.basis==='ml'?1:0}:{}),...(varies?{d:1}:{}),...(level!==null?{l:level}:{}),...(scores.size?{q:[...scores.values()]}:{}),...(lists.length?{t:complete?1:2}:{}),p:posts});
  }
  const own=new Set(ownStores);
  for(const store of stores)store.own=own.has(store.code);
- return {data:{version:EXPLORER_VERSION,built:index.builtAt,nutrients:NUTRIENT_KEYS,freshHours:48,shelves,families,stores,qualityKeys,items},texts};
+ return {data:{version:EXPLORER_VERSION,built:index.builtAt,nutrients:NUTRIENT_KEYS,freshHours:48,horizonDays,shelves,families,stores,qualityKeys,items},texts};
 }
 
 export function ingredientMatches(texts,term) {
@@ -111,14 +114,14 @@ export function familyDetail(read,id,{imageRef,chainName}) {
 export function createLibraryExplorer({reader,imageRef,chainName,ownStores=()=>[],status=()=>'disabled'}) {
  let cached=null,pending=null;
  async function compile(read,key) {
-  const {data,texts}=buildExplorerData(read.index(),{imageRef,chainName,ownStores:ownStores()});
+  const {data,texts}=buildExplorerData(read.index(),{imageRef,chainName,ownStores:ownStores(),active:read.active,horizonDays:read.horizonDays});
   const json=Buffer.from(JSON.stringify(data));
   const zipped=await compress(json);
   return {key,status:'ready',built:data.built,texts,json,gzip:zipped,etag:'"'+createHash('sha256').update(json).digest('hex').slice(0,32)+'"'};
  }
  async function bundle() {
   const read=reader();if(!read)return {status:status()};
-  const key=read.builtAt+'|'+[...new Set(ownStores())].sort().join(',');
+  const key=read.builtAt+'|'+Math.floor(Date.now()/86400000)+'|'+[...new Set(ownStores())].sort().join(','); // Products pass the price horizon as days go by.
   if(cached?.key===key)return cached;
   if(pending?.key===key)return pending.work;
   const work=compile(read,key).then(done=>{cached=done;return done;}).finally(()=>{if(pending?.work===work)pending=null;});
