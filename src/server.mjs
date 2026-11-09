@@ -1,8 +1,9 @@
-import {readConfig} from './config.mjs';
+import {readConfig,configPath} from './config.mjs';
+import {libraryPriceProvider} from './shopping-library.mjs';
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createStore, DATA_DIR } from "./store.mjs";
 import { refreshWaste } from './waste.mjs';
@@ -26,7 +27,9 @@ import {createOda} from './oda.mjs';
 import {createKassal} from './kassal.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const store = createStore();
+let libraryPrices;
+try{const config=readConfig('shopping-library.json');if(config.enabled===true&&typeof config.file==='string')libraryPrices=libraryPriceProvider(resolve(dirname(configPath('shopping-library.json')),config.file));}catch(error){if(error.code!=='ENOENT')throw error;}
+const store = createStore(DATA_DIR,{libraryPrices});
 const resources = createResources({dataDir:DATA_DIR,store});
 const googlePublisher=createGooglePublisher({store,dataDir:DATA_DIR,config:readConfig('sources.json')});
 const homeAssistant=createHomeAssistant({config:process.env.FAMILIEN_HOME_ASSISTANT_CONFIG?JSON.parse(readFileSync(process.env.FAMILIEN_HOME_ASSISTANT_CONFIG,'utf8')):readConfig('home-assistant.json'),dataDir:DATA_DIR});

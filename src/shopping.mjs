@@ -85,7 +85,7 @@ export function normalizeOdaOrder(input) {
   return {orderNumber:safeId(input.orderNumber,'Ordrenummer'),deliveryDate:day(input.deliveryDate),currency:'NOK',grossAmount:positive(input.grossAmount,'ordretotal',true),productAmount:round(products.reduce((s,p)=>s+p.total,0)),fees:null,discounts:null,unallocatedDiscount:null,source:'oda-mcp',products};
 }
 
-export function shoppingStore(state,{save,now=()=>new Date(),files}={}) {
+export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices}={}) {
   state.shopping??={orders:{},watches:{},offers:{},reviews:{},cartReceipts:{},settings:{monitoringEnabled:false,historyFrom:null,stores:[],storageNote:'',stockUpDays:60}};
   const s=state.shopping;
   s.nutrition??={};
@@ -101,6 +101,51 @@ export function shoppingStore(state,{save,now=()=>new Date(),files}={}) {
   s.odaChoices??={};
   const catalog=createMarketCatalog(s.marketCatalog,{save,now});
   const orders=()=>Object.values(s.orders);
+  const freshPrice=(time,at=now().getTime())=>Number.isFinite(Date.parse(time))&&at-Date.parse(time)>=0&&at-Date.parse(time)<=48*3600000;
+  const variablePack=name=>/(?:^|\s)ca\.?\s*\d|cirka|omtrent|vektvare|\b(?:pr|per)\.?\s*kg\b/i.test(name??'');
+  function currentPrices() {
+    const at=now().getTime(),today=shoppingDay(now()),entries=catalog.entries(),native=new Map(),library=libraryPrices?.(entries)??{status:'disabled',quotes:[]};
+    const key=p=>`${p.watchId}|${p.store}|${p.id}`;
+    // Catalogue metadata decisions supersede a historical calibration, even
+    // when the newest decision/receipt is pending, excluded or price unknown.
+    for(const w of Object.values(s.watches))if(w.marketCalibration?.status==='ready')for(const p of w.marketCalibration.products??[])native.set(key({...p,watchId:w.id}),{...p,watchId:w.id,lastChecked:p.lastChecked,price:p.currentUnitPrice*p.packAmount,unitPrice:p.currentUnitPrice,approved:!w.catalogManaged});
+    for(const e of entries){const k=key(e),old=native.get(k),newer=old&&Date.parse(old.lastChecked)>Date.parse(e.lastChecked??0),variable=variablePack(e.name);native.set(k,{...e,approved:e.status==='approved'&&e.unit===s.watches[e.watchId]?.unit,packAmount:variable?null:e.packAmount,price:variable?null:newer?old.price:e.currentPrice,unitPrice:variable?null:newer?old.unitPrice:e.currentPrice/e.packAmount,lastChecked:newer?old.lastChecked:e.lastChecked});}
+    for(const p of library.quotes){
+      const k=key(p),e=native.get(k);if(!e||Date.parse(p.receiptAt)<Date.parse(e.lastChecked??0))continue;
+      const packAmount=p.canonicalPackAmount??null;
+      const unitPrice=p.grossPackPrice!=null&&packAmount>0?p.grossPackPrice/packAmount:p.directUnitVerified&&p.unit===e.unit?p.grossUnitPrice:null;
+      const conflict=Date.parse(p.receiptAt)===Date.parse(e.lastChecked)&&e.unitPrice>0&&unitPrice>0&&Math.abs(e.unitPrice-unitPrice)>1e-8;
+      const valid=p.fresh&&!p.reasons.length&&!conflict;
+      native.set(k,{...e,packAmount,price:valid&&packAmount>0?p.grossPackPrice??unitPrice*packAmount:null,unitPrice:valid?unitPrice:null,lastChecked:p.receiptAt,priceSource:'library'});
+    }
+    const quotes=[];
+    for(const p of native.values())if(p.approved&&(!variablePack(p.name)||p.priceSource==='library')&&p.unitPrice>0&&Number.isFinite(p.unitPrice)&&freshPrice(p.lastChecked,at)){
+      const store=s.settings.stores.find(x=>x.chainCode===p.store);
+      quotes.push({...p,storeId:store?.id??null,storeName:p.store==='ODA_NO'?'Oda':store?.name.replace(/\s*[–-]\s*Kassal.*$/,'')??chainName(p.store),chainCode:p.store,sourceUrl:p.sourceUrl??null,kind:'catalog'});
+    }
+    for(const o of Object.values(s.offers)){
+      const store=s.settings.stores.find(x=>x.id===o.storeId),w=s.watches[o.watchId];
+      if(!store||!w||o.unit!==w.unit||!o.comparable||o.validFrom>today||o.validTo<today||o.bestBefore&&o.bestBefore<today||!freshPrice(o.observedAt,at)||o.memberOnly&&!store.memberEligible)continue;
+      quotes.push({...o,offerId:o.id,storeName:store.name,chainCode:store.chainCode??null,unitPrice:o.price/o.packAmount,lastChecked:o.observedAt,kind:'offer'});
+    }
+    return {entries:[...native.values()],quotes,libraryStatus:library.status};
+  }
+  const quotesFor=(w,prices=currentPrices())=>prices.quotes.filter(p=>p.watchId===w.id&&p.unit===w.unit).sort((a,b)=>a.unitPrice-b.unitPrice||String(a.storeName).localeCompare(String(b.storeName)));
+  function comparisonReference(w,a,candidate,prices=currentPrices()) {
+    const paid=needRows(w,a).filter(p=>p.baselineAmount>0).map(p=>p.baselineTotal/p.baselineAmount);
+    const history=w.marketCalibration?.status==='ready'?w.marketCalibration.referencePrice:w.priceGuide?.referencePrice;
+    const alternatives=quotesFor(w,prices).filter(p=>{
+      if(candidate.kind==='offer'&&p.kind==='offer'&&p.offerId===candidate.offerId)return false;
+      if(candidate.kind!=='offer'&&p.kind==='catalog'&&p.store===candidate.store&&String(p.id)===String(candidate.id))return false;
+      // A campaign's own chain price is no independent savings baseline. A
+      // genuinely cheaper same-chain variant still caps a dearer campaign.
+      if(candidate.chainCode&&p.chainCode===candidate.chainCode)return p.unitPrice<candidate.unitPrice;
+      return true;
+    }).map(p=>p.unitPrice);
+    const ceiling=freshPrice(w.referenceCeiling?.checkedAt)?w.referenceCeiling.price:null;
+    const values=[history,...paid,ceiling,...alternatives].filter(x=>Number.isFinite(x)&&x>0);
+    return values.length?Math.min(...values):null;
+  }
   const update=fn=>{const result=fn();save();return structuredClone(result);};
   const needRows=(w,a)=>a.products.filter(p=>w.productKeys.includes(p.productKey)&&p.unit===w.unit);
   const needOf=(w,a)=>annualNeed(w,needRows(w,a),a.days,s.settings.odaShare??1);
@@ -188,9 +233,9 @@ export function shoppingStore(state,{save,now=()=>new Date(),files}={}) {
   }
   const offerFingerprint=o=>`${o.price}|${o.packAmount}|${o.validTo}`;
   function deals(a=analysis()) {
-    const at=now().getTime(),today=shoppingDay(now()),horizon=shoppingDay(new Date(at+7*86400000)),result=[],covered=[],held=[];
+    const at=now().getTime(),today=shoppingDay(now()),horizon=shoppingDay(new Date(at+7*86400000)),result=[],covered=[],held=[],prices=currentPrices();
     const approvedWatches=new Set(catalog.entries().filter(p=>p.status==='approved').map(p=>p.watchId));
-    const fresh=time=>at-Date.parse(time)<=48*3600000;
+    const fresh=time=>freshPrice(time,at);
     for(const o of Object.values(s.offers)) {
       const w=s.watches[o.watchId],store=s.settings.stores.find(x=>x.id===o.storeId);
       if(!w||w.enabled===false||!store||!o.comparable||o.validFrom>horizon||o.validTo<today||o.bestBefore&&o.bestBefore<today||!fresh(o.observedAt))continue;
@@ -204,23 +249,21 @@ export function shoppingStore(state,{save,now=()=>new Date(),files}={}) {
       const amount=rows.reduce((n,p)=>n+p.baselineAmount,0);
       const market=w.marketCalibration?.status==='ready'?w.marketCalibration:null;
       // One stale SKU must not hide a group; a wholly stale group is reported.
-      const freshProducts=market?.products.filter(p=>fresh(p.lastChecked))??[];
-      if(market&&!freshProducts.length){hold('stale-prices');continue;}
+      if(market&&!quotesFor(w,prices).some(p=>p.kind==='catalog')){hold('stale-prices');continue;}
       const ceiling=w.referenceCeiling;
       if(ceiling&&!fresh(ceiling.checkedAt)){hold('stale-prices');continue;}
       const paidReference=amount>0?Math.min(...rows.map(p=>p.baselineTotal/p.baselineAmount)):null;
       // Compare a campaign with other chains, so its own current price does not
       // erase the saving. Without a reviewed chain mapping, use all alternatives.
-      const alternatives=freshProducts.filter(p=>!store.chainCode||p.store!==store.chainCode).map(p=>p.currentUnitPrice).filter(p=>Number.isFinite(p)&&p>0);
-      const marketReference=market?Math.min(market.referencePrice,paidReference??Infinity,...alternatives):null;
-      const reference=marketReference!==null?Math.min(marketReference,ceiling?.price??Infinity):ceiling?Math.min(paidReference??Infinity,ceiling.price):paidReference??w.targetPrice;if(!reference)continue;
+      const globalReference=comparisonReference(w,a,{kind:'offer',offerId:o.id,chainCode:store.chainCode,unitPrice:o.price/o.packAmount},prices);
+      const reference=globalReference??paidReference??w.targetPrice;if(!reference)continue;
       const alternative=!!ceiling&&(paidReference===null||ceiling.price<paidReference);
       const unitPrice=o.price/o.packAmount,discountPct=(reference-unitPrice)/reference*100;
       if(discountPct<w.minDiscountPct||(w.targetPrice!==null&&unitPrice>w.targetPrice))continue;
-      const referenceType=market?'market':alternative?'alternative':amount>0?'paid':'target';
+      const referenceType=market?'market':alternative||globalReference!==null&&amount===0?'alternative':amount>0?'paid':'target';
       const need=needOf(w,a),stock=estimateStock(w,rateOf(need),at),shelfMonths=shelfWithDate(shelfLifeMonths(w),o.bestBefore,at);
-      const tier=dealTier({unitPrice,excellentPrice:w.excellentPrice,discountPct,referenceType});
-      const hasSaving=amount>0||alternative||!!market;
+      const tier=discountPct<8&&referenceType!=='target'?'small':dealTier({unitPrice,excellentPrice:w.excellentPrice,discountPct,referenceType});
+      const hasSaving=amount>0||alternative||!!market||globalReference!==null;
       if(hasSaving&&reference<=unitPrice)continue;
       const plan=planQuantities({tier,need,shelfMonths,stock,offer:o,caps:[w.maxPacks,o.maxPacks],unitSaving:Math.max(0,reference-unitPrice)});
       const history=Object.values(s.priceHistory[w.id]??{});
@@ -235,7 +278,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files}={}) {
     const totals=new Map();for(const o of candidates)totals.set(o.storeId,(totals.get(o.storeId)??0)+(o.saving??0));
     const worthTrip=o=>o.referenceType==='target'||totals.get(o.storeId)>=s.settings.stores.find(x=>x.id===o.storeId).minSavings;
     const opportunities=candidates.filter(worthTrip).sort((x,y)=>dealScore(y)-dealScore(x));
-    return {opportunities,belowTrip:candidates.filter(o=>!worthTrip(o)).sort((x,y)=>dealScore(y)-dealScore(x)),covered,held};
+    return {opportunities,belowTrip:candidates.filter(o=>!worthTrip(o)).sort((x,y)=>dealScore(y)-dealScore(x)),covered,held,prices};
   }
   const listRouteWork=()=>s.shoppingList.filter(e=>!e.checkedAt&&e.routing==='pending');
   function unlinkedOrderLines() {
@@ -347,18 +390,18 @@ export function shoppingStore(state,{save,now=()=>new Date(),files}={}) {
     for(const e of catalog.entries())if(e.status==='approved'&&e.packAmount){const sizes=byWatch.get(e.watchId)??new Map();sizes.set(e.packAmount,(sizes.get(e.packAmount)??0)+1);byWatch.set(e.watchId,sizes);}
     return new Map([...byWatch].map(([id,sizes])=>[id,[...sizes].sort((x,y)=>y[1]-x[1]).map(([size])=>size)]));
   }
-  function itemView(w,a,at,catalogPacks=new Map(),offerLow=new Map()) {
+  function itemView(w,a,at,catalogPacks=new Map(),offerLow=new Map(),priceContext=currentPrices()) {
     const need=needOf(w,a),rate=rateOf(need),stock=estimateStock(w,rate,at),market=w.marketCalibration,rows=needRows(w,a);
-    const normal=w.priceGuide?.referencePrice??null,freshProducts=market?.status==='ready'?market.products.filter(p=>at-Date.parse(p.lastChecked)<=48*3600000):[];
-    const cheapest=[...freshProducts].sort((x,y)=>x.currentUnitPrice-y.currentUnitPrice)[0]??null;
-    const history=Object.values(s.priceHistory[w.id]??{}),offer=offerLow.get(w.id);
-    const offerWins=!!offer&&(!cheapest||offer.unitPrice<cheapest.currentUnitPrice);
+    const normal=w.priceGuide?.referencePrice??null;
+    const history=Object.values(s.priceHistory[w.id]??{});
+    const best=quotesFor(w,priceContext)[0]??null;
+    const evaluationReference=comparisonReference(w,a,{kind:'input',unitPrice:Infinity},priceContext);
     // "Good" must be a real step below normal, or the guide just repeats itself.
-    const good=normal&&w.targetPrice?round(Math.min(w.targetPrice,normal*.92)):w.targetPrice;
+    const good=normal&&w.targetPrice?round(Math.min(w.targetPrice,normal*.92,evaluationReference??Infinity)):w.targetPrice;
     const chains=market?.coverage?.chainCount;
     const basis=market?.status==='ready'?market.coverage.observedDays+' dager med priser fra '+chains+(chains===1?' kjede':' kjeder'):market?.status==='needs-review'?'En vare er endret og sjekkes på nytt':w.priceGuide?'Foreløpig, ut fra det dere har betalt':w.targetPrice?'Egen prisgrense':'For lite prisdata ennå';
     const sizes=commonPacks(rows,catalogPacks.get(w.id)??[],Object.keys(w.stockPacks??{}).map(Number));
-    return {packs:packBreakdown(sizes,stock.known?w.stockPacks??null:null,stock.amount),id:w.id,name:w.name,unit:w.unit,storage:w.storage,enabled:w.enabled!==false,manualLimits:w.manualLimits===true,annualAmount:need.amount===null?null:round(need.amount),annualBasis:need.basis,shelfLifeMonths:shelfLifeMonths(w),shelfCustom:w.shelfLifeMonths!=null,shelfDefault:defaultShelfLifeMonths(w),stock,spent:round(rows.reduce((n,p)=>n+p.spent,0)),prices:{normal,good,excellent:w.excellentPrice,targetPrice:w.targetPrice,current:offerWins?offer.unitPrice:cheapest?.currentUnitPrice??null,currentChain:offerWins?offer.storeName.replace(/\s*\(nettbutikk\)$/i,' (+ frakt)'):cheapest?chainName(cheapest.store):null,lowestSeen:history.length>=30?Math.min(...history):null,historyDays:history.length,basis}};
+    return {packs:packBreakdown(sizes,stock.known?w.stockPacks??null:null,stock.amount),id:w.id,name:w.name,unit:w.unit,storage:w.storage,enabled:w.enabled!==false,manualLimits:w.manualLimits===true,annualAmount:need.amount===null?null:round(need.amount),annualBasis:need.basis,shelfLifeMonths:shelfLifeMonths(w),shelfCustom:w.shelfLifeMonths!=null,shelfDefault:defaultShelfLifeMonths(w),stock,spent:round(rows.reduce((n,p)=>n+p.spent,0)),prices:{normal,evaluationReference,good,excellent:w.excellentPrice,targetPrice:w.targetPrice,current:best?round(best.unitPrice):null,currentChain:best?.storeName.replace(/\s*\(nettbutikk\)$/i,' (+ frakt)')??null,currentSourceUrl:best?.sourceUrl??null,currentCheckedAt:best?.lastChecked??null,lowestSeen:history.length>=30?Math.min(...history):null,historyDays:history.length,basis}};
   }
   const summaryOf=(main,steady=[])=>({dealCount:main.length+steady.length,excellentCount:main.filter(d=>d.tier==='excellent').length,potential:round([...main,...steady].reduce((n,d)=>n+(d.saving??0),0)),top:main[0]?.watchName??steady[0]?.name??null});
   function familyView() {
@@ -369,7 +412,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files}={}) {
     const primary=[...byWatch.values()].map(list=>({...pick(list[0]),alsoAt:list.slice(1).map(x=>({storeName:x.storeName,unitPrice:x.unitPrice}))}));
     const main=primary.filter(d=>d.tier!=='small'),small=primary.filter(d=>d.tier==='small');
     const offerLow=new Map();for(const d of [...found.opportunities,...found.belowTrip,...found.covered])if(d.validFrom<=today&&(!offerLow.has(d.watchId)||d.unitPrice<offerLow.get(d.watchId).unitPrice))offerLow.set(d.watchId,d);
-    const catalogPacks=catalogPackMap(),items=Object.values(s.watches).map(w=>itemView(w,a,at,catalogPacks,offerLow)).sort((x,y)=>y.spent-x.spent);
+    const catalogPacks=catalogPackMap(),items=Object.values(s.watches).map(w=>itemView(w,a,at,catalogPacks,offerLow,found.prices)).sort((x,y)=>y.spent-x.spent);
     const reviews=Object.values(s.reviews);
     const stores=s.settings.stores.map(x=>{const r=reviews.find(y=>y.storeId===x.id);return {id:x.id,name:x.name,status:r?.status??'unchecked',checkedAt:r?.checkedAt??null};});
     const n=purchaseNutrition(orders().filter(o=>o.deliveryDate>=a.from&&o.deliveryDate<=a.to),s.nutrition);
@@ -447,13 +490,11 @@ export function shoppingStore(state,{save,now=()=>new Date(),files}={}) {
   function localBest(w,amount,found,at) {
     const normal=w.priceGuide?.referencePrice??null;
     if(!normal)return null;
-    const today=shoppingDay(new Date(at)),nearby=x=>x.chainCode&&!/nettbutikk/i.test(x.name),candidates=[];
-    for(const d of [...found.opportunities,...found.belowTrip,...found.covered]){const store=s.settings.stores.find(x=>x.id===d.storeId);if(d.watchId===w.id&&d.validFrom<=today&&d.validTo>=today&&store&&nearby(store))candidates.push({storeName:d.storeName,unitPrice:d.unitPrice});}
-    const market=w.marketCalibration?.status==='ready'?w.marketCalibration:null;
-    for(const p of market?.products??[]){if(p.store==='ODA_NO'||at-Date.parse(p.lastChecked)>48*3600000)continue;const store=s.settings.stores.find(x=>x.chainCode===p.store);if(store&&nearby(store))candidates.push({storeName:store.name.replace(/\s*[–-]\s*Kassal.*$/,''),unitPrice:p.currentUnitPrice});}
+    const candidates=quotesFor(w,found.prices).filter(p=>p.store!=='ODA_NO'&&p.chainCode&&!/nettbutikk/i.test(p.storeName));
     const best=candidates.sort((x,y)=>x.unitPrice-y.unitPrice)[0];
     if(!best)return null;
-    const diffPct=(normal-best.unitPrice)/normal*100,saving=(normal-best.unitPrice)*amount;
+    const reference=comparisonReference(w,analysis(),best,found.prices)??normal;
+    const diffPct=(reference-best.unitPrice)/reference*100,saving=(reference-best.unitPrice)*amount;
     return diffPct>=MOVE_MIN_PCT&&saving>=MOVE_MIN_KR?{storeName:best.storeName,unitPrice:round(best.unitPrice),diffPct:Math.round(diffPct),saving:round(saving)}:null;
   }
   function watchImage(watchId,storeName,byWatch) {
@@ -462,23 +503,15 @@ export function shoppingStore(state,{save,now=()=>new Date(),files}={}) {
     const code=storeName==='Oda'?'ODA_NO':s.settings.stores.find(x=>storeName&&x.name.startsWith(storeName))?.chainCode;
     return imageRef((list.find(e=>e.store===code)??list[0]).image);
   }
-  function odaProducts() {
+  function odaProducts(prices=currentPrices()) {
     const byWatch=new Map();
-    for(const e of catalog.entries()){const id=e.status==='approved'&&e.store==='ODA_NO'&&e.priceFresh&&e.packAmount?e.sourceUrl?.match(/\/products\/(\d+)-/)?.[1]:null;if(id){const list=byWatch.get(e.watchId)??[];list.push({...e,productId:Number(id),unitPrice:e.currentPrice/e.packAmount});byWatch.set(e.watchId,list);}}
+    for(const e of prices.quotes){const id=e.kind==='catalog'&&e.store==='ODA_NO'&&e.packAmount?e.sourceUrl?.match(/\/products\/(\d+)-/)?.[1]:null;if(id){const list=byWatch.get(e.watchId)??[];list.push({...e,currentPrice:e.price,productId:Number(id)});byWatch.set(e.watchId,list);}}
     for(const list of byWatch.values())list.sort((x,y)=>x.unitPrice-y.unitPrice);
     return byWatch;
   }
   // Another place only wins when the difference is worth acting on.
   function offersElsewhere(w,found,at) {
-    const today=shoppingDay(new Date(at)),candidates=[],isOnline=name=>/nettbutikk/i.test(name);
-    for(const d of [...found.opportunities,...found.belowTrip,...found.covered])if(d.watchId===w.id&&d.validFrom<=today&&d.validTo>=today)candidates.push({storeName:d.storeName,unitPrice:d.unitPrice,offerId:d.id,packAmount:d.packAmount,maxPacks:d.maxPacks,online:isOnline(d.storeName),minSavings:s.settings.stores.find(x=>x.id===d.storeId)?.minSavings??0});
-    const market=w.marketCalibration?.status==='ready'?w.marketCalibration:null;
-    for(const p of market?.products??[]){
-      if(p.store==='ODA_NO'||at-Date.parse(p.lastChecked)>48*3600000)continue;
-      const store=s.settings.stores.find(x=>x.chainCode===p.store);
-      if(store&&!isOnline(store.name))candidates.push({storeName:store.name.replace(/\s*[–-]\s*Kassal.*$/,''),unitPrice:p.currentUnitPrice,offerId:null,online:false,minSavings:0});
-    }
-    return candidates.sort((x,y)=>x.unitPrice-y.unitPrice);
+    return quotesFor(w,found.prices).filter(p=>p.store!=='ODA_NO').map(p=>({...p,offerId:p.offerId??null,online:/nettbutikk/i.test(p.storeName),minSavings:s.settings.stores.find(x=>x.id===p.storeId)?.minSavings??0}));
   }
   function betterThanOda(w,odaUnit,amount,found,at) {
     const best=offersElsewhere(w,found,at)[0];
@@ -518,8 +551,12 @@ export function shoppingStore(state,{save,now=()=>new Date(),files}={}) {
   const listOpen=()=>s.shoppingList.filter(x=>!x.checkedAt);
   function listView(today) {
     const byWatch=new Map();for(const e of catalog.entries())if(e.status==='approved'&&e.image){const list=byWatch.get(e.watchId)??[];list.push(e);byWatch.set(e.watchId,list);}
-    const products=odaProducts();
-    const decorate=({undoStock,boughtOffer,imageUrl,...entry})=>{const o=entry.offerId?s.offers[entry.offerId]:null;return {...entry,image:imageUrl?imageRef(imageUrl):entry.watchId?watchImage(entry.watchId,entry.storeName,byWatch):null,variants:entry.storeName==='Oda'&&entry.watchId&&products.has(entry.watchId)?variantsOf(products.get(entry.watchId)):[],expired:!!o&&o.validTo<today,sourceUrl:o?.sourceUrl??null,validTo:o?.validTo??null};};
+    const priceContext=currentPrices(),products=odaProducts(priceContext);
+    const decorate=({undoStock,boughtOffer,imageUrl,...entry})=>{const o=entry.offerId?s.offers[entry.offerId]:null,w=s.watches[entry.watchId],best=w?quotesFor(w,priceContext)[0]:null;
+      const cheaper=!entry.checkedAt&&best&&entry.unitPrice>best.unitPrice?{storeName:best.storeName,unitPrice:round(best.unitPrice),sourceUrl:best.sourceUrl}:null;
+      const reference=!entry.checkedAt&&w&&o?comparisonReference(w,analysis(),{kind:'offer',offerId:o.id,chainCode:s.settings.stores.find(x=>x.id===o.storeId)?.chainCode,unitPrice:o.price/o.packAmount},priceContext):null;
+      const saving=!entry.checkedAt&&o?reference===null?null:round(Math.max(0,reference-o.price/o.packAmount)*entry.packs*o.packAmount):entry.saving;
+      return {...entry,saving,cheaper,image:imageUrl?imageRef(imageUrl):entry.watchId?watchImage(entry.watchId,entry.storeName,byWatch):null,variants:entry.storeName==='Oda'&&entry.watchId&&products.has(entry.watchId)?variantsOf(products.get(entry.watchId)):[],expired:!!o&&o.validTo<today,sourceUrl:o?.sourceUrl??null,validTo:o?.validTo??null};};
     return {open:listOpen().map(decorate),done:s.shoppingList.filter(x=>x.checkedAt).sort((x,y)=>y.checkedAt.localeCompare(x.checkedAt)).slice(0,20).map(decorate)};
   }
   function listAdd(input) {
@@ -623,14 +660,15 @@ export function shoppingStore(state,{save,now=()=>new Date(),files}={}) {
       const market=w.marketCalibration?.status==='ready'?w.marketCalibration:null;
       if(w.enabled===false||!market||campaign.has(w.id)||listed.has(w.id))continue;
       const cheapest=new Map();
-      for(const p of market.products)if(p.currentUnitPrice>0&&at-Date.parse(p.lastChecked)<=FRESH&&(!cheapest.has(p.store)||p.currentUnitPrice<cheapest.get(p.store).currentUnitPrice))cheapest.set(p.store,p);
+      for(const p of quotesFor(w,found.prices))if(!cheapest.has(p.chainCode??p.storeId))cheapest.set(p.chainCode??p.storeId,{...p,currentUnitPrice:p.unitPrice});
       if(cheapest.size<2)continue;
       const prices=[...cheapest.values()],best=prices.sort((x,y)=>x.currentUnitPrice-y.currentUnitPrice)[0];
       const store=s.settings.stores.find(x=>x.chainCode===best.store);
-      if(!store||/nettbutikk/i.test(store.name))continue;
+      if(!store||/nettbutikk/i.test(store.name)||best.kind!=='catalog'||!(best.packAmount>0))continue;
       if(w.referenceCeiling&&at-Date.parse(w.referenceCeiling.checkedAt)>FRESH)continue;
       const paid=needRows(w,a).filter(p=>p.baselineAmount>0).map(p=>p.baselineTotal/p.baselineAmount);
-      const referencePrice=Math.min(market.referencePrice,...paid,...prices.filter(p=>p.store!==best.store).map(p=>p.currentUnitPrice),w.referenceCeiling?.price??Infinity);
+      const referencePrice=comparisonReference(w,a,best,found.prices);
+      if(referencePrice===null)continue;
       const diffPct=(referencePrice-best.currentUnitPrice)/referencePrice*100;
       if(diffPct<20)continue;
       const need=needOf(w,a);if(need.amount===null)continue;
@@ -653,15 +691,15 @@ export function shoppingStore(state,{save,now=()=>new Date(),files}={}) {
     const estimated=dates.length?shoppingDay(new Date(Date.parse(dates.at(-1))+gapDays*86400000)):today;
     const fromList=listOpen().filter(e=>e.storeName==='Oda'&&e.odaProductId);
     const listed=new Map();for(const e of listOpen())if(e.watchId&&e.packAmount&&!(e.storeName==='Oda'&&e.odaProductId))listed.set(e.watchId,(listed.get(e.watchId)??0)+e.packs*e.packAmount);
-    const odaItems=odaProducts();
+    const odaItems=odaProducts(found.prices);
     const items=[],missing=[];let covered=0;
     for(const w of Object.values(s.watches)){
       if(w.enabled===false)continue;
       const need=needOf(w,a);if(need.amount===null)continue;
       const options=odaItems.get(w.id);if(!options){missing.push(w.name);continue;}
-      const best=options.find(x=>x.productId===s.odaChoices[w.id])??options[0],normal=w.priceGuide?.referencePrice??null,discountPct=normal?(normal-best.unitPrice)/normal*100:0;
-      const dear=!!normal&&best.unitPrice>normal*1.05,tier=dear?'dear':normal?dealTier({unitPrice:best.unitPrice,excellentPrice:w.excellentPrice,discountPct,referenceType:'market'}):'small';
-      const shelf=shelfLifeMonths(w),months=Math.min(shelf,dear?Math.min(1,gapMonths):tier==='excellent'?12:tier==='good'?Math.max(3,gapMonths):gapMonths);
+      const best=options.find(x=>x.productId===s.odaChoices[w.id])??options[0],normal=w.priceGuide?.referencePrice??null,reference=comparisonReference(w,a,best,found.prices),discountPct=reference?(reference-best.unitPrice)/reference*100:0;
+      const dear=!!normal&&best.unitPrice>normal*1.05,tier=dear?'dear':reference&&discountPct>=8?dealTier({unitPrice:best.unitPrice,excellentPrice:w.excellentPrice,discountPct,referenceType:'market'}):'small';
+      const shelf=shelfLifeMonths(w),months=Math.min(shelf,dear?Math.min(1,gapMonths):tier==='excellent'?12:tier==='good'?3:Math.min(1,gapMonths));
       const stock=estimateStock(w,rateOf(need),at),needed=need.amount/12*months-(stock.amount??0)-(listed.get(w.id)??0);
       if(needed<=0){covered++;continue;}
       const wanted=packsFor(needed,{packAmount:best.packAmount,bundlePacks:1,cap:100}),limit=s.odaLimits[best.productId]??null,nameLimit=best.name.match(/maks\s+(\d+)/i),max=limit?.max??(nameLimit?Number(nameLimit[1]):null),packs=max!=null?Math.min(max,wanted):wanted;

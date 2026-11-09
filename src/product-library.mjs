@@ -211,5 +211,13 @@ export function createProductLibrary(input,{now=new Date()}={}) {
   const errors=issues.filter(i=>i.severity==='error'),warnings=issues.filter(i=>i.severity==='warning'),ordered=[...errors,...warnings];
   return {ok:errors.length===0,errors:errors.length,warnings:warnings.length,totalIssues:issues.length,issues:structuredClone(ordered.slice(0,limit)),moreIssues:Math.max(0,issues.length-limit),coverage:summary().actualCoverage};
  }
- return {summary,search,compare,audit};
+ function productQuote(productKey) {
+  const p=products.get(productKey);
+  if(!p||invalidProducts.has(productKey)||badFingerprints.has(productKey))return null;
+  const reviewed=(byProduct.get(productKey)??[]).some(m=>m.status==='approved'&&!membershipReasons(m).length);
+  const price=priceOf(productKey);
+  if(p.available===false||p.delisted===true)price.reasons.push('unavailable-product');
+  return {product:productView(p),reviewCurrent:reviewed,price};
+ }
+ return {summary,search,compare,audit,productQuote};
 }

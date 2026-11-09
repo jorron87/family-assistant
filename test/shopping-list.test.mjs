@@ -40,14 +40,14 @@ test('free items and low-stock items work, and an expired offer is flagged',()=>
  clock.at='2026-11-20T12:00:00Z';assert.equal(shop.familyView().list.open.find(x=>x.offerId===id).expired,true);
  assert.throws(()=>shop.list({action:'add',name:' '}),/Varenavn/);assert.throws(()=>shop.list({action:'nope'}),/Ukjent/);
 });
-test('the Oda draft covers the usual gap, subtracts stock and listed items, and extends on good prices',()=>{
+test('the Oda draft shows the usual date but limits ordinary purchases to the next trip',()=>{
  const {shop}=setup();orders(shop);const w=flour(shop);odaItem(shop,w.id);
  const none=flour(shop,{name:'Annen vare'});
  let draft=shop.familyView().odaDraft;
  assert.equal(draft.nextAround,'2027-01-17');assert.deepEqual(draft.missing,['Annen vare']);assert.notEqual(none.id,w.id);
- assert.equal(draft.items[0].productId,555);assert.equal(draft.items[0].packs,3);assert.equal(draft.items[0].cost,60);assert.equal(draft.items[0].stockKnown,false);
- shop.pantry({watchId:w.id,amount:1});assert.equal(shop.familyView().odaDraft.items[0].packs,2);
- shop.pantry({watchId:w.id,amount:null});shop.list({action:'add',watchId:w.id,packAmount:1});const merged=shop.familyView().odaDraft.items[0];assert.equal(merged.packs,3);assert.equal(merged.entryIds.length,1);
+ assert.equal(draft.items[0].productId,555);assert.equal(draft.items[0].packs,1);assert.equal(draft.items[0].cost,20);assert.equal(draft.items[0].stockKnown,false);
+ shop.pantry({watchId:w.id,amount:1});assert.equal(shop.familyView().odaDraft.items.length,0);
+ shop.pantry({watchId:w.id,amount:null});shop.list({action:'add',watchId:w.id,packAmount:1});const merged=shop.familyView().odaDraft.items[0];assert.equal(merged.packs,1);assert.equal(merged.entryIds.length,1);
 });
 test('price level changes the Oda quantity, and full stock leaves the draft',()=>{
  const make=price=>{const {shop}=setup();orders(shop);const w=flour(shop,{priceGuide:{referencePrice:100,checkedAt:'2026-11-08T10:00:00Z',evidence:'Grunnlag'},excellentPrice:70});odaItem(shop,w.id,{price});return {shop,w};};
@@ -81,7 +81,7 @@ test('routing only moves away from Oda on a meaningful difference',()=>{
  const big=run(5).list({action:'add',name:'mel'});assert.equal(big.storeName,'Nærbutikk');assert.match(big.reason,/billigere enn Oda/);
 });
 test('Oda limits cap the draft and are read from validation messages',()=>{
- const {shop}=setup();const w=flour(shop);odaItem(shop,w.id,{productId:64921});
+ const {shop}=setup();const w=flour(shop,{purchaseAmount:36});odaItem(shop,w.id,{productId:64921});
  shop.importOrders({orders:[{orderNumber:'a',deliveryDate:'2026-03-01',currency:'NOK',grossAmount:1,products:[{product:{id:1,name:'x',description:'1 kg'},quantity:1,totalGrossAmount:'1.00'}]},{orderNumber:'b',deliveryDate:'2026-06-07',currency:'NOK',grossAmount:1,products:[{product:{id:1,name:'x',description:'1 kg'},quantity:1,totalGrossAmount:'1.00'}]},{orderNumber:'c',deliveryDate:'2026-09-13',currency:'NOK',grossAmount:1,products:[{product:{id:1,name:'x',description:'1 kg'},quantity:1,totalGrossAmount:'1.00'}]}]});
  const limit=shop.recordOdaLimit({productId:64921,validationMessages:['Dessverre tilbyr vi maks 2 stk Hvetemel per person.'],line:{product:{name:'Vår Hvetemel 1 kg'}}});assert.equal(limit.max,2);
  const row=shop.familyView().odaDraft.items[0];assert.equal(row.packs,2);assert.equal(row.wanted,3);assert.equal(row.maxAtOda,2);
@@ -106,7 +106,7 @@ test('the cheapest Oda variant is the default and a chosen variant is remembered
 test('urgent items only move between nearby stores when the gain is clear',()=>{
  const make=price=>{const {shop}=setup();const w=flour(shop,{purchaseAmount:60});withChain(shop,w,price);shop.watch({...shop.view().watches[0],priceGuide:{referencePrice:100,checkedAt:'2026-11-08T10:00:00Z',evidence:'Grunnlag'}});return shop;};
  assert.equal(make(95).list({action:'add',name:'mel',need:'now'}).storeName,'Nærmeste butikk');
- const moved=make(50).list({action:'add',name:'mel',need:'now'});assert.equal(moved.storeName,'Nærbutikk');assert.match(moved.reason,/under vanlig pris/);assert.equal(moved.routing,null);
+ const moved=make(50).list({action:'add',name:'mel',need:'now'});assert.equal(moved.storeName,'Nærmeste butikk');assert.equal(moved.routing,null,'a flat historical market low is not a special trip saving');
  const unknown=make(50).list({action:'add',name:'Brokkoli',need:'now'});assert.equal(unknown.storeName,'Nærmeste butikk');assert.equal(unknown.routing,'pending');
 });
 test('product photos never reopen a review and are only served from stored addresses',()=>{

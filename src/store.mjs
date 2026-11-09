@@ -52,7 +52,7 @@ const validDate = (value, field, nullable = false) => {
   return value;
 };
 
-export function createStore(dataDir = DATA_DIR) {
+export function createStore(dataDir = DATA_DIR,{libraryPrices}={}) {
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(join(dataDir, "attachments"), { recursive: true });
   const runDir = join(dataDir, "runs");
@@ -1616,7 +1616,7 @@ export function createStore(dataDir = DATA_DIR) {
     save();
   }
   const phone=phoneStore(state,{save,upsertRaw,addAttachment});
-  const shopping=shoppingStore(state,{save,files:{write:(id,bytes)=>writeFileSync(join(dataDir,'attachments',`${id}.enc`),encrypt(bytes,key)),read:id=>decrypt(readFileSync(join(dataDir,'attachments',`${id}.enc`)),key)}});
+  const shopping=shoppingStore(state,{save,libraryPrices,files:{write:(id,bytes)=>writeFileSync(join(dataDir,'attachments',`${id}.enc`),encrypt(bytes,key)),read:id=>decrypt(readFileSync(join(dataDir,'attachments',`${id}.enc`)),key)}});
   if(reconcileSourceReviews(state.sourceStatus,state.runs))save();
   return { shopping, repairText, backupArchive, eventHistory, event, mergeEvents, splitHomework, activityFacebook, changeCompletion, collectedItems, collectedList, sourceItems, editProfile, phone, calendarActions, calendarAction, setEventVisibility, upsertActivity, activityReaction, activityPlan, activitySource, snapshot, runHistory, profile: () => profileView(state.profile), profileFact, reviewProfile, documentStatus, reviewDocument, checkTask, upsertRaw, upsertFinding, updateSource, observeListing, markReviewed, updateSurface, reviewQueue, completionReport, addAttachment, getAttachment, linkDrive, linkCalendar, updateProfile, recordRun, beginRun, renewRun, endRun, collectorIngest, collectorConfig, collectorStatus, collectorRefresh, collectorFacebookSweep, collectedItem, activityFeedHsia, activityFeedCandidates, activityFeedNeedsDetail, activityFeedDetail, activityFeedPage, activityFeedError, activityFeedPageText, activityFeedStatus };
 }

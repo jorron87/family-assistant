@@ -228,8 +228,8 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
   // Same horizons as the server's deal planning: quantities, never durations.
   function priceAdvice(item,unitPrice,size) {
     const {normal,good,excellent,targetPrice,current,currentChain}=item.prices,unit=item.unit,goodLine=good??targetPrice;
-    const discount=normal?(1-unitPrice/normal)*100:0;
-    const tier=(excellent!=null&&unitPrice<=excellent)||discount>=25?'excellent':goodLine!=null&&unitPrice<=goodLine?'good':normal==null||unitPrice<=normal?'normal':'dear';
+    const reference=item.prices.evaluationReference??normal,discount=reference?(1-unitPrice/reference)*100:0;
+    const tier=discount>=8&&((excellent!=null&&unitPrice<=excellent)||discount>=25)?'excellent':discount>=8&&goodLine!=null&&unitPrice<=goodLine?'good':normal==null||unitPrice<=normal?'normal':'dear';
     const title={excellent:'Svært bra pris',good:'Bra pris',normal:'Vanlig pris',dear:'Dyrt'}[tier];
     const months={excellent:Math.min(12,item.shelfLifeMonths),good:Math.min(3,item.shelfLifeMonths),normal:Math.min(1,item.shelfLifeMonths)}[tier];
     let action;
@@ -421,7 +421,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     tick.onchange=()=>act(()=>api('/list',{action:tick.checked?'check':'uncheck',id:entry.id}),tick.checked&&entry.watchId?'Lagt på lager.':null);
     const text=el('div',undefined,'shop-list-text'),qty=entry.packs&&entry.packAmount?`${entry.packs} × ${packLabel(entry.packAmount,entry.unit)} `:'';
     text.append(el('strong',qty+entry.name));
-    const facts=[entry.cartError,entry.reason,entry.detail,entry.unitPrice?`${price(entry.unitPrice)}/${entry.unit}`:null,entry.saving?`Spar ${kr(entry.saving)}`:null,entry.expired?'Tilbudet er over':entry.validTo?`Til ${dayLabel(entry.validTo)}`:null].filter(Boolean);
+    const facts=[entry.cartError,entry.reason,entry.detail,entry.unitPrice?`${price(entry.unitPrice)}/${entry.unit}`:null,entry.saving?`Spar ${kr(entry.saving)}`:null,entry.cheaper?`Billigere nå: ${price(entry.cheaper.unitPrice)}/${entry.unit} hos ${entry.cheaper.storeName}`:null,entry.expired?'Tilbudet er over':entry.validTo?`Til ${dayLabel(entry.validTo)}`:null].filter(Boolean);
     if(facts.length)text.append(el('span',facts.join(' · '),'shop-sub'+(entry.expired?' shop-expired':'')));
     row.append(tick,thumb(entry.image),text);
     if(entry.sourceUrl&&!isKiosk()){const source=link('Kilde ↗',entry.sourceUrl);source.className='shop-list-source';row.append(source);}
@@ -505,7 +505,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
         const on=el('input');on.type='checkbox';on.checked=state.on;on.setAttribute('aria-label',`Ta med ${item.name}`);
         on.onchange=()=>{state.on=on.checked;armed=false;refresh();};
         const text=el('div',undefined,'shop-list-text'),note={excellent:'Svært bra pris nå',good:'Bra pris nå',dear:'Dyrere enn vanlig, derfor lite'}[item.tier];
-        text.append(el('strong',item.name),el('span',[item.productName,`${price(item.packPrice)}`,note,draft.items.some(x=>x.stockKnown)&&!item.stockKnown?'Lager ikke talt':null].filter(Boolean).join(' · '),'shop-sub'));
+        text.append(el('strong',item.name),el('span',[item.productName,`${price(item.packPrice)} per pakke · ${price(item.unitPrice)}/${item.unit}`,note,draft.items.some(x=>x.stockKnown)&&!item.stockKnown?'Lager ikke talt':null].filter(Boolean).join(' · '),'shop-sub'));
         const value=el('span',String(state.packs),'shop-step-value'),step=el('div',undefined,'shop-step');
         const change=delta=>{state.packs=Math.min(item.maxAtOda??100,Math.max(1,state.packs+delta));value.textContent=String(state.packs);armed=false;refresh();};
         step.append(button('−',()=>change(-1)),value,button('+',()=>change(1)));
