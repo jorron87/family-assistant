@@ -33,13 +33,13 @@ test('a library group lends nothing until the watch has an explicit link, and ex
  let view=f.shop.familyView();assert.equal(view.items[0].prices.current,60);
  assert.deepEqual(view.odaDraft.items[0].variants.map(x=>x.productId),[2,1,3],'an undecided family is shown for comparison');
  assert.equal(view.odaDraft.items[0].productId,1);
- assert.ok(f.shop.queue().some(x=>x.do==='shopping-library-link'&&x.reason==='undecided'));
+ assert.ok(f.shop.queue().some(x=>x.do==='shopping-family-build'&&x.reason==='undecided'));
  f.link();view=f.shop.familyView();
  assert.equal(view.items[0].prices.current,20,'cheapest linked product at an allowed chain');
  const ids=view.odaDraft.items[0].variants.map(x=>x.productId);
  assert.ok(ids.includes(2)&&ids.includes(3));assert.ok(!ids.includes(6),'a family exclusion wins over the group');
  assert.equal(view.odaDraft.items[0].productId,1,'a cheaper brand is offered, never swapped in');
- assert.ok(!f.shop.queue().some(x=>x.do==='shopping-library-link'));
+ assert.ok(!f.shop.queue().some(x=>x.do==='shopping-family-build'));
 });
 
 test('quality is compared only between the same measurement, and only linked brands and attributes pass',t=>{
@@ -57,9 +57,9 @@ test('a changed library group stops lending and asks for a new review; a decline
  assert.throws(()=>f.shop.libraryLink({watchId:f.w.id,evidence:'x',links:[{groupId:f.g.id,groupFingerprint:'0'.repeat(64),evidence:'y'}]}),/endret/);
  f.g.inclusionCriteria='Strengere regel';for(const m of f.d.memberships)m.reviewedGroupFingerprint=groupMetadataFingerprint(f.g);f.write();
  assert.equal(f.shop.familyView().items[0].prices.current,60);
- assert.equal(f.shop.queue().find(x=>x.do==='shopping-library-link').reason,'group-changed');
+ assert.equal(f.shop.queue().find(x=>x.do==='shopping-family-build').reason,'group-changed');
  f.shop.libraryLink({watchId:f.w.id,evidence:'Familien krever eksakt variant',links:[]});
- assert.ok(!f.shop.queue().some(x=>x.do==='shopping-library-link'));assert.equal(f.shop.familyView().items[0].prices.current,60);
+ assert.ok(!f.shop.queue().some(x=>x.do==='shopping-family-build'));assert.equal(f.shop.familyView().items[0].prices.current,60);
 });
 
 test('fresh prices expire on their own without reloading, and links never cross units',t=>{

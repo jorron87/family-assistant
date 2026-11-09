@@ -17,9 +17,9 @@ const BINS=24,UNIT_ORDER=['kg','l','stk','m'];
 const low=value=>String(value??'').normalize('NFC').toLocaleLowerCase('nb-NO');
 const wordChar=ch=>ch!==undefined&&/[\p{L}\p{N}]/u.test(ch);
 export function emptyFilters() {
-  return {q:'',shelves:[],food:true,stores:[],labels:[],status:[],hideGone:true,ranges:{},include:[],exclude:[],qualityKey:null,offersOnly:false};
+  return {q:'',shelves:[],food:true,stores:[],labels:[],status:[],hideGone:true,ranges:{},include:[],exclude:[],qualityKey:null,offersOnly:false,followedOnly:false};
 }
-export const isPristine=f=>!f.offersOnly&&!f.q.trim()&&!f.shelves.length&&f.food&&!f.stores.length&&!f.labels.length&&!f.status.length&&f.hideGone&&!Object.keys(f.ranges).length&&!f.include.length&&!f.exclude.length&&!f.qualityKey;
+export const isPristine=f=>!f.offersOnly&&!f.followedOnly&&!f.q.trim()&&!f.shelves.length&&f.food&&!f.stores.length&&!f.labels.length&&!f.status.length&&f.hideGone&&!Object.keys(f.ranges).length&&!f.include.length&&!f.exclude.length&&!f.qualityKey;
 
 // A compound ends in what it is, so "ketchup" should find tomatketchup before
 // it finds a word that merely contains the letters.
@@ -60,6 +60,9 @@ export function prepareExplorer(data) {
     for(const post of posts)model.byPost.set(post.key,item);
     for(const family of item.families)model.families[family].items.push(item);
   });
+  model.baseFamilies=model.families.length;
+  for(const family of model.families)family.baseItems=family.items;
+  for(const item of model.items){item.baseFamilies=item.families;item.baseFamilyLow=item.familyLow;}
   for(const {key} of NUTRIENTS){
     const values=model.items.map(i=>i.nutrition?.[key]).filter(v=>typeof v==='number');
     model.domains[key]=nice(percentile(values,.99));
@@ -67,6 +70,32 @@ export function prepareExplorer(data) {
   const prices=model.items.flatMap(i=>i.posts).filter(p=>p.unitPrice!==null&&p.priceUnit==='kg').map(p=>p.unitPrice);
   model.domains.price=nice(percentile(prices,.97));
   return model;
+}
+
+/** Household numbers join their family. Several variants become one family. Safe to repeat. */
+export function applyFollowed(model,followed) {
+  model.families.length=model.baseFamilies;
+  for(const family of model.families){family.items=family.baseItems;family.followed=null;family.mergedInto=null;}
+  for(const item of model.items){item.families=item.baseFamilies;item.familyLow=item.baseFamilyLow;}
+  const byId=new Map(model.families.map(f=>[f.id,f]));
+  for(const fam of followed){
+    const groups=fam.groups.map(id=>byId.get(id)).filter(Boolean);
+    if(groups.length===1){
+      groups[0].followed=fam;
+      for(const item of groups[0].items)if(!item.familyLow.includes(low(fam.name)))item.familyLow+=' '+low(fam.name);
+      continue;
+    }
+    const items=[...new Set([...groups.flatMap(g=>g.items),...fam.members.map(key=>model.byPost.get(key)).filter(Boolean)])];
+    let shelf=groups[0]?.shelf??items.find(i=>i.shelves.length)?.shelves[0];
+    if(shelf===undefined){shelf=model.shelves.findIndex(s=>s.name==='Deres egne');if(shelf<0){shelf=model.shelves.length;model.shelves.push({name:'Deres egne',food:true});}}
+    const index=model.families.length,family={id:'followed:'+fam.id,name:fam.name,shelf,unit:fam.unit,index,items,baseItems:items,followed:fam,mergedInto:null,variants:groups.map(g=>g.name)};
+    model.families.push(family);
+    for(const g of groups)g.mergedInto=index;
+    for(const item of items){
+      item.families=[...new Set([...item.families.map(i=>model.families[i].mergedInto??i),index])];
+      item.familyLow+=' '+low(fam.name);
+    }
+  }
 }
 
 /** Current flyer offers, placed in families. A chain with only offers still gets a store. */
@@ -79,8 +108,9 @@ export function applyCampaigns(model,campaigns) {
     const entry={...campaign,storeIndex};
     model.campaigns.push(entry);
     for(const id of campaign.groups){
-      const family=families.get(id);
-      if(!family||family.unit!==campaign.unit)continue;
+      let family=families.get(id);
+      if(family?.mergedInto!==null&&family?.mergedInto!==undefined)family=model.families[family.mergedInto];
+      if(!family||family.unit!==campaign.unit||model.campaignsByFamily.get(family.index)?.includes(entry))continue;
       if(!model.campaignsByFamily.has(family.index))model.campaignsByFamily.set(family.index,[]);
       model.campaignsByFamily.get(family.index).push(entry);
     }
@@ -133,8 +163,9 @@ export function explore(model,f,now=Date.now()) {
     }
     scores[item.index]=total;return true;
   }]);
+  if(f.followedOnly)dims.push(['followed',item=>item.families.some(family=>model.families[family].followed)]);
   if(f.offersOnly)dims.push(['offers',item=>item.families.some(family=>model.campaignsByFamily.has(family))]);
-  if(f.food)dims.push(['food',item=>!item.shelves.length||item.shelves.some(s=>model.shelves[s].food)]);
+  if(f.food&&!f.followedOnly)dims.push(['food',item=>!item.shelves.length||item.shelves.some(s=>model.shelves[s].food)]);
   if(f.hideGone)dims.push(['gone',item=>!item.gone]);
   if(shelfSet)dims.push(['shelves',item=>item.shelves.some(s=>shelfSet.has(s))]);
   if(storeSet)dims.push(['stores',item=>views[item.index].chains>0]);
@@ -216,14 +247,16 @@ export function familySummaries(model,result) {
   // Every library row of a family can be parked while a flyer still has it on offer.
   // Filters on label facts cannot speak for an offer, so those leave it out.
   const offerOnly=!f.labels.length&&!f.status.length&&!Object.keys(f.ranges).length&&!f.include.length&&!f.exclude.length&&f.qualityKey===null;
-  if(offerOnly)for(const [index,list] of model.campaignsByFamily){
-    const family=model.families[index],shelf=model.shelves[family.shelf],text=low(family.name+' '+list.map(c=>c.name).join(' '));
-    if(buckets.has(index)||!list.some(inScope)||f.food&&!shelf.food||f.shelves.length&&!f.shelves.includes(family.shelf)||!result.terms.every(term=>tokenScore(text,term)))continue;
+  if(offerOnly)for(const family of model.families){
+    if(family.mergedInto!==null&&family.mergedInto!==undefined)continue;
+    const index=family.index,list=model.campaignsByFamily.get(index)??[],shelf=model.shelves[family.shelf],text=low(family.name+' '+list.map(c=>c.name).join(' '));
+    if(buckets.has(index)||!(list.some(inScope)||family.followed&&!result.storeSet)||f.followedOnly&&!family.followed||f.food&&!f.followedOnly&&!shelf.food||f.shelves.length&&!f.shelves.includes(family.shelf)||!result.terms.every(term=>tokenScore(text,term)))continue;
     buckets.set(index,[]);
   }
   return [...buckets].flatMap(([index,items])=>{
     const family=model.families[index],stores=new Set(),brands=new Set(),offers=[],campaigns=(model.campaignsByFamily.get(index)??[]).filter(inScope);
     if(f.offersOnly&&!campaigns.length)return [];
+    if(f.followedOnly&&!family.followed)return [];
     for(const item of items){
       const view=result.views[item.index];
       for(const post of item.posts)if(!result.storeSet||result.storeSet.has(post.store))stores.add(model.stores[post.store].name);
@@ -235,7 +268,7 @@ export function familySummaries(model,result) {
     const label=o=>o.item?.name??o.campaign.name;
     offers.sort((a,b)=>a.price-b.price||label(a).localeCompare(label(b),'nb'));
     const prices=offers.map(o=>o.price),min=prices[0]??null,max=prices[prices.length-1]??null;
-    return [{family,items,count:items.length,chains:stores.size,brands:brands.size,offers,campaigns,regularMin:regular===Infinity?null:regular,prices,min,max,spread:min&&max&&prices.length>1?max/min:null}];
+    return [{family,followed:family.followed??null,variants:family.variants??[],items,count:items.length,chains:stores.size,brands:brands.size,offers,campaigns,regularMin:regular===Infinity?null:regular,prices,min,max,spread:min&&max&&prices.length>1?max/min:null}];
   });
 }
 export const familyReach=row=>row.offers.length>=2?row.brands*row.chains:0;

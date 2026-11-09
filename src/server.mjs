@@ -124,6 +124,7 @@ async function handle(req, res) {
       const stockUpload=/^\/api\/shopping\/stock-intake\/([a-f0-9-]{36})\/files\/(\d)$/.exec(path);
       if(stockUpload)return send(res,200,store.shopping.stockIntake.upload(stockUpload[1],Number(stockUpload[2]),{bytes:await body(req,10*1024*1024),fileName:decodeURIComponent(req.headers['x-file-name']??'lagerbilde')}));
       const input=await json(req);
+      if(input&&typeof input==='object'&&input.familyId!==undefined&&input.watchId===undefined)input.watchId=input.familyId; // One concept outward, one stored key.
       if(path==='/api/shopping/stock-intake')return send(res,200,store.shopping.stockIntake.begin(input));
       const stockSubmit=/^\/api\/shopping\/stock-intake\/([a-f0-9-]{36})\/submit$/.exec(path);
       if(stockSubmit){const result=store.shopping.stockIntake.submit(stockSubmit[1]);send(res,200,result);queueMicrotask(dispatchTick);return;}

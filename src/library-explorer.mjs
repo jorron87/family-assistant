@@ -111,7 +111,7 @@ export function familyDetail(read,id,{imageRef,chainName}) {
  return {id,name:group.name,category:group.category,unit:group.unit,inclusion:group.inclusion,exclusions:group.exclusions,qualityBasis:group.qualityBasis,comparisonBasis:group.comparisonBasis,sharedKey,qualityNote:sharedKey?read.qualityNote(sharedKey):[],members};
 }
 
-export function createLibraryExplorer({reader,imageRef,chainName,ownStores=()=>[],status=()=>'disabled',activeOffers=()=>[]}) {
+export function createLibraryExplorer({reader,imageRef,chainName,ownStores=()=>[],status=()=>'disabled',activeOffers=()=>[],followed=()=>[],followedFamily=()=>null}) {
  let cached=null,pending=null;
  async function compile(read,key) {
   const {data,texts}=buildExplorerData(read.index(),{imageRef,chainName,ownStores:ownStores(),active:read.active,horizonDays:read.horizonDays});
@@ -137,12 +137,13 @@ export function createLibraryExplorer({reader,imageRef,chainName,ownStores=()=>[
   },
   family(id) {
    const read=reader();if(!read)return {status:status()};
+   if(String(id??'').startsWith('followed:')){const own=followedFamily(String(id));if(!own)throw Error('Fant ikke varefamilien.');return {status:'ready',family:own};}
    const family=familyDetail(read,String(id??''),{imageRef,chainName});
    if(!family)throw Error('Fant ikke varefamilien.');
    return {status:'ready',family:{...family,offers:activeOffers().filter(o=>o.groups.includes(family.id))}};
   },
   // Offers change whenever a flyer is reviewed, so they stay out of the cached bundle.
-  offers:()=>({status:reader()?'ready':status(),offers:reader()?activeOffers():[]})
+  offers:()=>({status:reader()?'ready':status(),offers:reader()?activeOffers():[],followed:reader()?followed():[]})
  };
 }
 

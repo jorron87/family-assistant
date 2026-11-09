@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import {gunzipSync} from 'node:zlib';
 import {buildExplorerData,createLibraryExplorer,familyDetail,ingredientMatches,sendExplorerBundle,shelfOf} from '../src/library-explorer.mjs';
 import {createIndexReader} from '../src/shopping-library.mjs';
-import {applyCampaigns,axisDomain,emptyFilters,explore,familyGrid,familySummaries,featuredFamilies,sortFamilies,inRange,isPristine,prepareExplorer,priceView,proteinPerKrone,scatterPoints,sortItems,tokenScore} from '../public/library-explorer-core.mjs';
+import {applyCampaigns,applyFollowed,axisDomain,emptyFilters,explore,familyGrid,familySummaries,featuredFamilies,sortFamilies,inRange,isPristine,prepareExplorer,priceView,proteinPerKrone,scatterPoints,sortItems,tokenScore} from '../public/library-explorer-core.mjs';
 
 const NOW=Date.parse('2026-11-09T12:00:00Z'),FRESH='2026-11-09T08:00:00Z',OLD='2026-10-01T08:00:00Z',PARKED='2024-01-01T08:00:00Z';
 const quote=(price,receiptAt=FRESH,reasons=[])=>({grossPackPrice:price,grossUnitPrice:null,unit:null,directUnitVerified:false,receiptAt,reasons,sourceUrl:'https://example.test/p'});
@@ -199,6 +199,36 @@ test('a flyer offer brings a parked chain back inside the families it belongs to
  const grid=familyGrid([{key:'kassal:MENY_NO:1',store:'MENY',brand:'Merke',image:null,pack:.5,unit:'kg',fresh:true,unitPrice:40,oldUnitPrice:null,quality:null,receiptAt:FRESH}],model.byPost,{campaigns:[{...campaign}]});
  assert.equal(grid.top,20);assert.equal(grid.rows[0].id,'offer:o1');
  assert.equal(grid.columns.find(c=>c.store==='REMA 1000').wins,0);
+});
+
+test('a followed family carries household numbers, merges its variants and can repeat safely',()=>{
+ const built=buildExplorerData(index(),options),model=prepareExplorer(built.data),ketchup=model.families.find(f=>f.id==='ketchup'),soap=model.families.find(f=>f.id==='soap');
+ const stock={known:true,amount:2,months:3},prices={good:30,excellent:20,normal:40,current:25,currentChain:'MENY'};
+ const followed=[{id:'merged',name:'Saus og såpe',unit:'kg',kind:'library',groups:['ketchup','soap'],members:[],stock,annualAmount:12,prices},{id:'one',name:'Min egen',unit:'kg',kind:'own',groups:[],members:['kassal:KIWI:3'],stock:{known:false},annualAmount:null,prices}];
+ for(let run=0;run<2;run++){
+  applyFollowed(model,followed);
+  const merged=model.families.find(f=>f.id==='followed:merged'),own=model.families.find(f=>f.id==='followed:one');
+  assert.equal(model.families.length,4,'repeating adds nothing');
+  assert.equal(ketchup.mergedInto,merged.index);assert.equal(soap.mergedInto,merged.index);
+  assert.deepEqual(merged.variants,['Ketchup','Håndsåpe']);
+  assert.equal(byName(model,'Såpe').families.includes(soap.index),false,'one card, not one per variant');
+  assert.equal(byName(model,'Såpe').families.includes(merged.index),true);
+  assert.deepEqual(own.items.map(i=>i.name),['Sennep']);
+  assert.equal(byName(model,'Sennep').familyLow.includes('min egen'),true);
+ }
+ applyCampaigns(model,[{id:'o',name:'Tilbud',storeName:'MENY',price:5,packAmount:.5,unit:'kg',unitPrice:10,validTo:'2026-11-15',groups:['ketchup','soap']}]);
+ const merged=model.families.find(f=>f.id==='followed:merged');
+ assert.equal(model.campaignsByFamily.get(merged.index).length,1,'an offer on two variants counts once');
+ const food=emptyFilters();food.food=false;
+ const rows=familySummaries(model,explore(model,food,NOW));
+ assert.equal(rows.find(r=>r.family===merged).followed.annualAmount,12);
+ assert.equal(rows.some(r=>r.family===ketchup),false);
+ assert.equal(isPristine({...emptyFilters(),followedOnly:true}),false);
+ const only=familySummaries(model,explore(model,{...food,followedOnly:true},NOW));
+ assert.equal(only.every(r=>r.followed),true);assert.equal(only.length,2);
+ assert.equal(familySummaries(model,explore(model,{...emptyFilters(),followedOnly:true},NOW)).length,2,'what the family follows is shown even when it is not food');
+ applyFollowed(model,[]);
+ assert.equal(model.families.length,2);assert.equal(ketchup.mergedInto,null);assert.equal(byName(model,'Såpe').families.includes(soap.index),true);
 });
 
 test('family detail keeps reasons for held-out products and reads without changing the index',()=>{

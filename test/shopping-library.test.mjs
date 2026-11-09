@@ -43,12 +43,12 @@ test('a price older than the horizon parks work for the agent but never a scan i
  assert.ok(reviews().includes('50'),'a newer receipt brings the review back');
  f.approve();
  assert.equal(f.shop.libraryLinkCandidates(f.w.id)[0].candidates.length,1);
- const linkWork=()=>f.shop.queue().filter(x=>x.do==='shopping-library-link').length;
+ const linkWork=()=>f.shop.queue().filter(x=>x.do==='shopping-family-build').length;
  assert.equal(linkWork(),1);
  const g=f.provider.reader().group(f.g.id);
  f.d.prices[0].receiptAt=old;f.p.ean='7038010000001';f.p.metadataFingerprint=productMetadataFingerprint(f.p);f.d.memberships[0].reviewedFingerprint=f.p.metadataFingerprint;f.write();
  assert.equal(f.shop.libraryLinkCandidates(f.w.id)[0].candidates.length,0,'a family with only old prices is no link candidate');
- assert.equal(linkWork(),0);
+ assert.deepEqual(f.shop.queue().find(x=>x.do==='shopping-family-build').groups,[],'an undecided family still needs building, just without that candidate');
  f.shop.libraryLink({watchId:f.w.id,evidence:'Samme bruk',links:[{groupId:f.g.id,groupFingerprint:g.fingerprint,evidence:'Gruppen passer'}]});
  assert.equal(f.shop.stockScan({ean:'7038010000001'}).options.length,1,'scanning still recognises the product');
 });
@@ -69,6 +69,40 @@ test('a current flyer offer stays in the system for a chain whose library prices
  assert.deepEqual(f.shop.explorer.offers().offers.map(o=>[o.storeName,o.unitPrice,o.groups]),[['REMA 1000',80,[f.g.id]]],'only a current comparable offer, under the chain name');
  const detail=f.shop.explorer.family(f.g.id).family;
  assert.equal(detail.members.length,0);assert.equal(detail.offers.length,1);
+});
+
+test('a product already approved in a followed family needs no second review and can be priced',t=>{
+ const f=fixture(t);
+ f.shop.settings({monitoringEnabled:true,stores:[]});
+ const reviews=()=>f.shop.queue().filter(x=>x.do==='shopping-product-review').map(x=>x.productId);
+ assert.deepEqual(reviews(),['1']);
+ assert.equal(f.shop.familyView().items[0].prices.current,null);
+ const g=f.provider.reader().group(f.g.id);
+ const set=f.shop.libraryLink({familyId:f.w.id,evidence:'Samme bruk',variants:[{groupId:f.g.id,groupFingerprint:g.fingerprint,evidence:'Gruppen passer'}]});
+ assert.equal(set.familyId,f.w.id);assert.equal(set.decision.kind,'library');
+ assert.deepEqual(reviews(),[],'the family review settles it');
+ assert.equal(f.shop.familyView().items[0].prices.current,40);
+ f.shop.catalogReview({watchId:f.w.id,id:'1',store:'ODA_NO',fingerprint:f.shop.catalogEntries(f.w.id)[0].fingerprint,status:'excluded',equivalenceEvidence:'Familien vil ikke ha denne'});
+ assert.equal(f.shop.familyView().items[0].prices.current,null,'a concrete exclusion still wins');
+});
+
+test('old links migrate onto the family once, and a family without variants becomes its own',()=>{
+ const state={shopping:{orders:{},offers:{},reviews:{},cartReceipts:{},settings:{monitoringEnabled:false,historyFrom:null,stores:[],storageNote:'',stockUpDays:60},watches:{
+  linked:{id:'linked',name:'A',unit:'kg',libraryLinks:[{groupId:'g',groupFingerprint:'x'}],libraryDecision:{status:'linked',evidence:'E1',at:'T1'}},
+  declined:{id:'declined',name:'B',unit:'kg',libraryLinks:[],libraryDecision:{status:'none',evidence:'E2',at:'T2'}},
+  open:{id:'open',name:'C',unit:'kg',libraryLinks:[]},
+  fresh:{id:'fresh',name:'D',unit:'kg'}
+ }}};
+ shoppingStore(state,{save(){},now:()=>new Date(NOW)});
+ const w=state.shopping.watches;
+ assert.deepEqual(w.linked.variants,[{groupId:'g',groupFingerprint:'x'}]);assert.deepEqual(w.linked.family,{kind:'library',evidence:'E1',at:'T1'});
+ assert.deepEqual(w.declined.variants,[]);assert.equal(w.declined.family.kind,'own');
+ assert.deepEqual(w.open.variants,[]);assert.equal(w.open.family,undefined);
+ assert.equal(w.linked.libraryLinks,undefined);assert.equal(w.linked.libraryDecision,undefined);
+ assert.deepEqual(state.shopping.familyMigration.before.declined.libraryDecision.status,'none','the old values are kept for rollback');
+ const before=structuredClone(state.shopping);
+ shoppingStore(state,{save(){},now:()=>new Date(NOW)});
+ assert.deepEqual(state.shopping,before,'running again changes nothing');
 });
 
 test('a free-text list line stays on the agent queue until it belongs to a reviewed family',t=>{

@@ -139,6 +139,8 @@ body.kiosk .lx-pick { opacity: 1; }
 .lx-family:hover { transform: translateY(-3px); box-shadow: var(--lx-shadow); }
 .lx-family-head { display: grid; gap: 3px; }
 .lx-family-name { font: 400 20px/1.22 var(--lx-serif); }
+.lx-followed { justify-self: start; margin-top: 3px; padding: 2px 8px; border-radius: 7px; background: var(--lx-green); color: #fff; font-size: 12px; font-weight: 600; }
+.lx-household { gap: 8px; }
 .lx-podium { display: grid; gap: 4px; }
 .lx-podium-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 3px 7px 3px 3px; border-radius: 10px; }
 .lx-podium-row.first { background: var(--lx-soft); }
@@ -298,11 +300,11 @@ body.kiosk .lx-stage canvas { touch-action: none; }
 
 body.kiosk #explore .lx-rail { top: 0; max-height: calc(100vh - 170px); }
 body[data-theme="night"] .lx { --lx-ink: #e8e3d6; --lx-muted: #a1b2a4; --lx-line: #33443a; --lx-card: #17211c; --lx-paper: #101814; --lx-soft: #25382d; --lx-green: #9fc7ab; --lx-gold: #e5c07a; --lx-gold-soft: #3b3220; --lx-dot: #9fc7ab; --lx-faint: #46574c; }
-body[data-theme="night"] .lx-primary, body[data-theme="night"] .lx-surprise, body[data-theme="night"] .lx-chip.on, body[data-theme="night"] .lx-badge.strong, body[data-theme="night"] .lx-cell.top { color: #101814 !important; }
+body[data-theme="night"] .lx-followed, body.lx-compact .lx-followed-dark, body[data-theme="night"] .lx-primary, body[data-theme="night"] .lx-surprise, body[data-theme="night"] .lx-chip.on, body[data-theme="night"] .lx-badge.strong, body[data-theme="night"] .lx-cell.top { color: #101814 !important; }
 body.lx-wide main { max-width: 1560px; }
 @media (prefers-color-scheme: dark) {
   body.lx-compact .lx { --lx-ink: #e2ddd2; --lx-muted: #93a096; --lx-line: #26312b; --lx-card: #151d19; --lx-paper: #0e1411; --lx-soft: #1b2922; --lx-green: #93bca0; --lx-gold: #e5c07a; --lx-gold-soft: #3b3220; --lx-dot: #93bca0; --lx-faint: #3b4a41; }
-  body.lx-compact .lx-primary, body.lx-compact .lx-surprise, body.lx-compact .lx-chip.on, body.lx-compact .lx-badge.strong, body.lx-compact .lx-cell.top, body.lx-compact .lx-apply, body.lx-compact .lx-pick.on { color: #0e1411 !important; }
+  body.lx-compact .lx-followed, body.lx-compact .lx-primary, body.lx-compact .lx-surprise, body.lx-compact .lx-chip.on, body.lx-compact .lx-badge.strong, body.lx-compact .lx-cell.top, body.lx-compact .lx-apply, body.lx-compact .lx-pick.on { color: #0e1411 !important; }
 }
 
 @media (max-width: 960px) {
