@@ -198,13 +198,16 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
       job.retryHistory=[...(job.retryHistory??[]),{requestedAt,evidence,previousStatus:job.status,previousAttempts:job.attempts,previousError:job.error??null,previousErrors:job.errors??[],previousCompletedAt:job.completedAt??null}].slice(-20);
       job.status='pending';job.attempts=0;job.deliveredUntil=null;job.retryAt=null;job.error=null;job.errors=[];job.completedAt=null;
     }
+    run.repairPriority=unique([...selected.map(job=>job.id),...(run.repairPriority??[])]);
+    run.scheduler={...run.scheduler,repairNormalSlots:0};
     run.status='collecting';run.finishedAt=null;save();
     return {runId:run.id,retried:selected.map(job=>job.id),count:selected.length,pauseUntil:state.pauseUntil??null};
   }
   function fairSelection(run,ready){
-    const scheduler={nextKind:'product',searchAfterFamilyId:null,productAfterFamilyId:null,...run.scheduler},selected=[],used=new Set();
+    const scheduler={nextKind:'product',searchAfterFamilyId:null,productAfterFamilyId:null,repairNormalSlots:0,...run.scheduler},selected=[],used=new Set();
+    const priority=unique(run.repairPriority??[]).filter(id=>run.jobs[id]?.status==='pending'),priorityIds=new Set(priority),readyById=new Map(ready.map(job=>[job.id,job]));
     const familyIds=run.families.map(f=>f.familyId),byKind={search:new Map(),product:new Map()};
-    for(const job of ready)for(const familyId of job.familyIds){const list=byKind[job.kind].get(familyId)??[];list.push(job);byKind[job.kind].set(familyId,list);}
+    for(const job of ready)if(!priorityIds.has(job.id))for(const familyId of job.familyIds){const list=byKind[job.kind].get(familyId)??[];list.push(job);byKind[job.kind].set(familyId,list);}
     function choose(kind){
       const start=familyIds.indexOf(scheduler[kind+'AfterFamilyId']);
       for(let step=1;step<=familyIds.length;step++){
@@ -213,9 +216,15 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
       }
       return null;
     }
+    const chooseRepair=()=>priority.map(id=>readyById.get(id)).find(job=>job&&!used.has(job.id))??null;
     for(let slot=0;slot<cycleCalls;slot++){
-      const job=choose(scheduler.nextKind)??choose(scheduler.nextKind==='product'?'search':'product');
-      if(!job)break;selected.push(job);used.add(job.id);scheduler.nextKind=job.kind==='product'?'search':'product';
+      let repair=false,job=null;
+      if(scheduler.repairNormalSlots<=0){job=chooseRepair();repair=!!job;}
+      if(!job)job=choose(scheduler.nextKind)??choose(scheduler.nextKind==='product'?'search':'product');
+      if(!job){job=chooseRepair();repair=!!job;}
+      if(!job)break;selected.push(job);used.add(job.id);
+      if(repair)scheduler.repairNormalSlots=3;
+      else{scheduler.repairNormalSlots=Math.max(0,scheduler.repairNormalSlots-1);scheduler.nextKind=job.kind==='product'?'search':'product';}
     }
     return {selected,scheduler};
   }
@@ -229,6 +238,7 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
     return {enabled:true,runId:run.id,jobs:jobs.map(({id,kind,url,familyIds})=>({id,kind,url,familyIds})),limits:{minSpacingMs,cycleCalls}};
   }
   function finish(run){
+    if(run.repairPriority)run.repairPriority=run.repairPriority.filter(id=>run.jobs[id]?.status==='pending');
     const jobs=Object.values(run.jobs);
     if(jobs.every(j=>j.status!=='pending')){const proven=run.families.every(f=>!(f.queryPlan??[]).some(p=>p.unsearchableTerms.length)&&f.queries.every(q=>jobs.some(j=>j.kind==='search'&&j.familyIds.includes(f.familyId)&&new URL(j.url).searchParams.get('q')===q&&j.endReached===true)));run.status=jobs.some(j=>j.status!=='complete')||!proven?'partial':'complete';run.finishedAt=now().toISOString();}
   }

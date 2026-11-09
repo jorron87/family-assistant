@@ -133,6 +133,35 @@ test('only a selected schema-failed product is retried after a fix; every comple
   assert.equal(f.client.status().status,'complete');assert.equal(f.client.status().jobCountsByKind.search.complete,2);assert.equal(f.received.length,1);assert.deepEqual(f.client.catalog().items[0].product.nonEanCodes,['4073']);
 });
 
+test('explicit repair jobs get one early slot per four while peek preserves priority and normal family progress',async t=>{
+  const f=fixture(t,{familyCount:12,cycleCalls:4}),initial=f.client.work(),repairIds=initial.jobs.map(job=>job.id);
+  for(const job of initial.jobs)await f.client.receive(response(initial,job,{ok:false,kind:'search',sourceUrl:job.url,errors:['schema_changed']},'partial'));
+  f.client.retry({jobIds:repairIds,evidence:'Verified parser repair; check these exact jobs.'});
+  const peek=f.client.work({peek:true});assert.equal(peek.jobs[0].id,repairIds[0]);assert.equal(peek.jobs.filter(job=>repairIds.includes(job.id)).length,1);assert.equal(peek.jobs.length,4);
+  assert.deepEqual(f.client.work({peek:true}).jobs.map(job=>job.id),peek.jobs.map(job=>job.id));
+  const work=f.client.work();assert.deepEqual(work.jobs.map(job=>job.id),peek.jobs.map(job=>job.id));
+  const path=join(f.dataDir,'sesum-collector.json.enc'),claimed=JSON.parse(decrypt(readFileSync(path),f.options.encryptionKey));assert.ok(claimed.run.repairPriority.includes(repairIds[0]),'delivery alone is not a successful repair receipt');
+  await f.client.receive(response(work,work.jobs[0],search(work.jobs[0])));
+  const acknowledged=JSON.parse(decrypt(readFileSync(path),f.options.encryptionKey));assert.ok(!acknowledged.run.repairPriority.includes(repairIds[0]));assert.equal(f.client.status().familyCount,12);
+});
+
+test('repair priority persists but a one-job budget still gives three normal jobs between repairs',async t=>{
+  const f=fixture(t,{familyCount:10,cycleCalls:1}),repairIds=[];
+  for(let i=0;i<4;i++){const work=f.client.work(),job=work.jobs[0];repairIds.push(job.id);await f.client.receive(response(work,job,{ok:false,kind:'search',sourceUrl:job.url,errors:['schema_changed']},'partial'));}
+  f.client.retry({jobIds:repairIds,evidence:'Targeted parser fix verification.'});
+  const restored=createSesumCollector(f.options),picked=[];
+  for(let i=0;i<5;i++){const work=restored.work(),job=work.jobs[0];assert.equal(work.jobs.length,1);picked.push(repairIds.includes(job.id));await restored.receive(response(work,job,search(job)));}
+  assert.deepEqual(picked,[true,false,false,false,true]);assert.equal(restored.status().runId,f.client.status().runId);
+});
+
+test('a repair with no receipt stays eligible after its reservation expires',async t=>{
+  const f=fixture(t,{familyCount:2,cycleCalls:1});let work=f.client.work(),repair=work.jobs[0];
+  await f.client.receive(response(work,repair,{ok:false,kind:'search',sourceUrl:repair.url,errors:['schema_changed']},'partial'));
+  f.client.retry({jobIds:[repair.id],evidence:'Retry this repaired parser path.'});work=f.client.work();assert.equal(work.jobs[0].id,repair.id);
+  const ordinary=f.client.work();assert.notEqual(ordinary.jobs[0].id,repair.id);await f.client.receive(response(ordinary,ordinary.jobs[0],search(ordinary.jobs[0])));
+  f.advance(5*60000+1);const restored=createSesumCollector(f.options);assert.equal(restored.work().jobs[0].id,repair.id);
+});
+
 test('retrying selected blocked work cannot clear an authentication pause and needs explicit evidence',async t=>{
   const f=fixture(t);let work=f.client.work(),job=work.jobs[0];
   for(let attempt=0;attempt<3;attempt++){
