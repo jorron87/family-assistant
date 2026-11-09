@@ -1,6 +1,6 @@
 // A transparent category-specific ingredient-content score, not a health rating.
 // It never approves equivalence, changes a price, or supplies missing label facts.
-export const QUALITY_MODEL_VERSION='ingredient-content-v3';
+export const QUALITY_MODEL_VERSION='ingredient-content-v4';
 const clean=v=>String(v??'').normalize('NFC').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
 const number=v=>Number(v.replace(',','.'));
 const decimal='(?<![\\d.,])(\\d{1,4}(?:[.,]\\d{1,3})?)';
@@ -62,7 +62,8 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
   }
   if(!result.fact&&result.reason==='missing-declared-amount'&&p.single?.test(ingredients))result={fact:{value:100,evidence:[{text:ingredients,field:'ingredients',interpretation:'Hele ingrediensdeklarasjonen består av én råvare.'}]},reason:null};
   if(p.id==='fruit-spread'&&!result.fact&&result.reason==='missing-declared-amount'){
-   const re=new RegExp('(?:fremstilt|framstilt|laget)\\s+av\\s*'+decimal+'\\s*g\\s*(?:frukt(?:\\s+og\\s+bær)?|bær|'+p.fruit+')\\s*(?:per|pr\\.?)\\s*100\\s*g','gi'),found=[...ingredients.matchAll(re)].map(x=>({value:number(x[1]),text:x[0],field:'ingredients'}));
+   const re=new RegExp('(?:fremstilt|framstilt|laget)\\s+av\\s*'+decimal+'\\s*g\\s*(?:frukt(?:\\s+og\\s+bær)?|bær|'+p.fruit+')\\s*(?:per|pr\\.?)\\s*100\\s*g','gi'),found=[];
+   for(const[field,text]of [['ingredients',ingredients],['primaryLabel.description',/^https:\/\/\S+$/i.test(primary?.primaryUrl??'')?clean(primary?.description):'']])for(const x of text.matchAll(re))found.push({value:number(x[1]),text:x[0],field});
    result=uniqueFact(found,1000);if(result.fact){p.basis='fruit-input-g-per-100g';p.unit='g/100 g';p.label='Frukt-/bærmengde brukt per 100 g';}
   }
  }

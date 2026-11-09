@@ -94,3 +94,9 @@ test('a reviewed primary supplier statement carries its own source and preserves
  assert.equal(score('Peanøtter*','peanut-butter-100').score,100);
  assert.equal(score('Peanøtter*, havsalt.','peanut-butter-100').score,null);
 });
+test('supplier fruit input remains distinct from declared fruit percentage',()=>{
+ const p={ingredients:'Solbær, sukker, vann, pektin.',nutritionObservation:{primaryLabel:{primaryUrl:'https://supplier.example/jam',description:'Framstilt av 60 g solbær per 100 g ferdig produkt.'}}};
+ const q=scoreProductQuality(p,{groupId:'fruit-spread-blackcurrant',reviewCurrent:true});assert.equal(q.score,60);assert.equal(q.measurement.basis,'fruit-input-g-per-100g');assert.equal(q.measurement.evidence[0].sourceUrl,'https://supplier.example/jam');
+ assert.notEqual(q.comparisonKey,score('Solbær 60 %, sukker.','fruit-spread-blackcurrant').comparisonKey);
+ p.ingredients='Solbær, sukker. Fremstilt av 40 g solbær per 100 g.';assert.equal(scoreProductQuality(p,{groupId:'fruit-spread-blackcurrant',reviewCurrent:true}).score,null);
+});
