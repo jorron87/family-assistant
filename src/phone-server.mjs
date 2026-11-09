@@ -17,6 +17,7 @@ export function phoneHandler({odaCart=null,productImages=null,oda=null,store,roo
         assets['/send/celebrate.mjs']=['celebrate.mjs','text/javascript; charset=utf-8'];
         assets['/send/home-tasks.mjs']=['home-tasks.mjs','text/javascript; charset=utf-8'];
         assets['/send/shopping-view.mjs']=['shopping-view.mjs','text/javascript; charset=utf-8'];
+        assets['/send/pantry-groups.mjs']=['pantry-groups.mjs','text/javascript; charset=utf-8'];
         assets['/send/shopping.css']=['shopping.css','text/css; charset=utf-8'];
         assets['/send/phone-boot.js']=['phone-boot.js','text/javascript; charset=utf-8'];
         if(path==='/'||path==='/send') {res.writeHead(302,{Location:'/send/'});return res.end();}

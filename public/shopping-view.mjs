@@ -1,5 +1,6 @@
 // Family-facing shopping page, shared by the dashboard and the phone app.
 // Polling only touches the banner, so reading and typing are never interrupted.
+import {PANTRY_GROUPS,pantryGroup} from './pantry-groups.mjs';
 const nf=(digits)=>new Intl.NumberFormat('nb-NO',{maximumFractionDigits:digits});
 const kr=value=>`${nf(0).format(value)} kr`;
 const price=value=>`${nf(2).format(value)} kr`;
@@ -567,20 +568,6 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
   }
 
   // ---- Lager ----
-  const PANTRY_GROUPS=[
-    ['Grønnsaker',/grønnsak|brokkoli|blomkål|rosenkål|spinat|avokado|tomater|mais(korn)?|gulrot|løk|hvitløk|ingefær|potet/i],
-    ['Frukt og bær',/bær|jordbær|bringebær|ananas|mango|banan|eple|appelsin|frukt|rosin|syltetøy/i],
-    ['Kjøtt og kylling',/kylling|kalkun|kjøtt|storfe|svin|biff|bacon|pølse|skinke|karbonade/i],
-    ['Fisk og sjømat',/laks|torsk|fisk|ørret|makrell|reke|sjømat|tunfisk/i],
-    ['Meieri og egg',/melk|fløte|rømme|yoghurt|ost|smør|bremykt|margarin|egg|grana|parmesan/i],
-    ['Brød og bakst',/brød|rundstykk|knekkebrød|baguett|polarbrød|tortilla|lompe/i],
-    ['Tørrvarer og baking',/mel|pasta|ris\b|havre|sukker|salt|gjær|kakao|sjokolade|nøtt|cashew|valnøtt|stivelse/i],
-    ['Olje, sauser og hermetikk',/olje|eddik|saus|sennep|ketchup|kokos|peanøtt|honning/i],
-    ['Drikke og kaffe',/kaffe|te\b|juice|saft|brus|drikke/i],
-    ['Hjem og hygiene',/såpe|spray|papir|bleie|tann|solidox|vask|rengjør|pose/i],
-    ['Til dyrene',/katt|hund|litter|ever clean|dyrefôr/i]
-  ];
-  const pantryGroup=item=>PANTRY_GROUPS.find(([,pattern])=>pattern.test(item.name))?.[0]??'Andre varer';
   function resetStockDraft(){for(const url of stockPreviews.values())URL.revokeObjectURL(url);stockPreviews.clear();Object.assign(stockDraft,{text:'',location:'',mode:'minimum',files:[],intakeId:null,clientId:crypto.randomUUID()});}
   function stockIntakeCard() {
     const card=el('section',undefined,'shop-card shop-stock-intake'),form=el('form'),description=el('textarea');
@@ -640,7 +627,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     const needle=search.toLocaleLowerCase('nb-NO');
     const items=data.items.filter(x=>(location==='all'||x.storage===location)&&x.name.toLocaleLowerCase('nb-NO').includes(needle));
     holder.replaceChildren();
-    for(const group of [...PANTRY_GROUPS.map(([name])=>name),'Andre varer']){const members=items.filter(x=>pantryGroup(x)===group).sort((a,b)=>a.name.localeCompare(b.name,'nb'));if(!members.length)continue;const section=el('section',undefined,'shop-pantry-group'),head=el('div',undefined,'shop-store-head');head.append(el('h3',group),el('span',members.filter(x=>x.stock.known).length+' av '+members.length+' telt','shop-sub'));section.append(head,...members.map(pantryRow));holder.append(section);}
+    for(const group of PANTRY_GROUPS){const members=items.filter(x=>pantryGroup(x)===group).sort((a,b)=>a.name.localeCompare(b.name,'nb'));if(!members.length)continue;const section=el('section',undefined,'shop-pantry-group'),head=el('div',undefined,'shop-store-head');head.append(el('h3',group),el('span',members.filter(x=>x.stock.known).length+' av '+members.length+' telt','shop-sub'));section.append(head,...members.map(pantryRow));holder.append(section);}
     if(!items.length)holder.append(el('p','Ingen varer her.','shop-sub'));
   }
   function renderPantry(root) {

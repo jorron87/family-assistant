@@ -53,6 +53,7 @@ const odaCart=createOdaCart({oda,shopping:store.shopping});
 const kassal=createKassal({dataDir:DATA_DIR});
 PUBLIC_FILES.set('shopping-view.mjs','text/javascript; charset=utf-8');
 PUBLIC_FILES.set('shopping.css','text/css; charset=utf-8');
+PUBLIC_FILES.set('pantry-groups.mjs','text/javascript; charset=utf-8');
 const sessionMaintenance = createSessionMaintenance({dataDir:DATA_DIR});
 
 function send(res, status, value, type = "application/json; charset=utf-8") {
