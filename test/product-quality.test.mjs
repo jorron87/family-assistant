@@ -100,3 +100,14 @@ test('supplier fruit input remains distinct from declared fruit percentage',()=>
  assert.notEqual(q.comparisonKey,score('Solbær 60 %, sukker.','fruit-spread-blackcurrant').comparisonKey);
  p.ingredients='Solbær, sukker. Fremstilt av 40 g solbær per 100 g.';assert.equal(scoreProductQuality(p,{groupId:'fruit-spread-blackcurrant',reviewCurrent:true}).score,null);
 });
+test('crispbread fiber score uses only a sourced per-100g nutrition fact',()=>{
+ const product={ingredients:'Fullkornsrugmel, gjær, salt.',sourceUrl:'https://store.example/bread',nutrition:{basis:'g',sourceUrl:'https://supplier.example/label',per100:{fiber:15,sugars:1,salt:1}}};
+ const options={groupId:'crispbread-rye',reviewCurrent:true},q=scoreProductQuality(product,options);
+ assert.equal(q.score,50);assert.equal(q.label,'Kostfiber');assert.equal(q.measurement.value,15);assert.equal(q.measurement.basis,'dietary-fiber-g-per-100g');assert.equal(q.measurement.evidence[0].sourceUrl,'https://supplier.example/label');
+ assert.equal(q.nutrition.salt,1);assert.equal(q.nutrition.sugars,1);assert.equal(q.nutrition.fiber,15);
+ for(const fiber of [undefined,-1,101,NaN])assert.equal(scoreProductQuality({...product,nutrition:{...product.nutrition,per100:{fiber}}},options).score,null);
+ assert.equal(scoreProductQuality({...product,nutrition:{...product.nutrition,basis:'ml'}},options).score,null);
+ assert.equal(scoreProductQuality({...product,nutrition:{...product.nutrition,sourceUrl:null}},options).score,null);
+ assert.equal(scoreProductQuality(product,{groupId:'crispbread-rye'}).status,'review-required');
+ assert.equal(scoreProductQuality(product,{groupId:'bread-white',reviewCurrent:true}).status,'not-applicable');
+});
