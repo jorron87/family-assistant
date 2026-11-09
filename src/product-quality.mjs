@@ -27,7 +27,7 @@ function profile(groupId){
  if(/^ketchup-(?:standard|no-sugar)$/.test(id))return{id:'ketchup',label:'Tomater brukt per 100 g ketchup',basis:'tomato-input-g-per-100g',unit:'g/100 g',target:200};
  if(/^peanut-butter-(?:100|near-pure|standard)$/.test(id))return{id:'peanut-butter',label:'Deklarert peanøttandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'peanøtter|peanøttkjerner|peanuts',single:/^(?:økologiske?\s+|ristede\s+)?(?:peanøtter|peanuts)(?:\s*\(100\s*%\))?\.?$/i};
  if(id==='hazelnut-chocolate-spread')return{id:'hazelnut-spread',label:'Deklarert hasselnøttandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'(?:hasselnøtt(?:er|kjerner|masse)?|hasselnötter)(?:\\s*/\\s*hasselnøddekerner)?'};
- if(id==='fishcakes-high')return{id:'fishcakes',label:'Deklarert total fiskeandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'fisk'};
+ if(['fishcakes-ordinary','fishcakes-high','fishcakes-very-high'].includes(id))return{id:'fishcakes',label:'Deklarert total fiskeandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:'fisk'};
  if(/^(?:fruit-spread-|jam-)/.test(id)){
   const fruit=[['blueberry','(?:vill)?blåbær'],['blackcurrant','solbær'],['apricot','aprikos(?:er)?'],['orange','appelsin(?:er)?'],['raspberry','bringebær'],['strawberry','jordbær']].find(([word])=>id.includes(word));
   if(fruit)return{id:'fruit-spread',subtype:fruit[0],label:'Deklarert frukt-/bærandel',basis:'declared-ingredient-percent',unit:'%',target:100,token:fruit[1]+'|frukt|bær',fruit:fruit[1]};

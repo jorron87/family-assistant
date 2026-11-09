@@ -33,6 +33,17 @@ test('fish quantity is total fish, not an arbitrary nested species percentage',(
  assert.equal(score('Fisk 60 %, fisk 80 %, melk.','fishcakes-high').score,null);
 });
 
+test('fishcake content uses one explicit total-share basis across researched fish tiers',()=>{
+ const ordinary=score('Fisk 52 % [torsk, hyse, sei], vann.','fishcakes-ordinary');
+ const high=score('Fisk 80 % [torsk 60 %, hyse 40 %], vann.','fishcakes-very-high--burger');
+ assert.equal(ordinary.score,52);assert.equal(high.score,80);
+ assert.equal(ordinary.comparisonKey,high.comparisonKey);
+ assert.equal(score('Fisk (hyse 80 %, sei 20 %), vann.','fishcakes-very-high').score,null);
+ assert.equal(score('Fisk 52 %, fisk 80 %, vann.','fishcakes-ordinary').score,null);
+ assert.equal(score('Fisk 50 % (hvitlaks, surimi), melk.','fishcakes-surimi-ordinary').status,'not-applicable');
+ assert.equal(score('Fisk 65 %, hvetemel.','fishsticks-breaded').status,'not-applicable');
+});
+
 test('explicit label syntax preserves quantity without borrowing nested or relative percentages',()=>{
  assert.equal(score('100% Peanøtter','peanut-butter-100').score,100);
  assert.equal(score('Ristede og malte økologiske peanøtter 99,4% (Norge), havsalt.','peanut-butter-near-pure').score,99.4);
