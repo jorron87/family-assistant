@@ -56,6 +56,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
   const compare=new Map(),refs={},stack=[];
   const isKiosk=()=>document.body.classList.contains('kiosk');
   panel.classList.add('lx');
+  if(compact)document.body.classList.add('lx-compact');
 
   async function api(path) {
     const response=await fetch(base+path,{credentials:'same-origin',signal:AbortSignal.timeout(45000)});

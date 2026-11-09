@@ -64,7 +64,7 @@ async function load() {
  try {
   const [inbox,data]=await Promise.all([api('/inbox'),api('/family')]);const first=!paired;
   $('#pair').hidden=true;$('#mobile-nav').hidden=false;$('#receipts').hidden=false;logout.hidden=false;
-  receipts(inbox);family.update(data);weather();if(first)family.setView('home');paired=true;$('#startup').hidden=true;
+  receipts(inbox);family.update(data);weather();if(first)family.setView(openVarer?'explore':'home');paired=true;$('#startup').hidden=true;
  } catch(error) {if(error.status===401)disconnect();else {status('Kunne ikke oppdatere. Prøver igjen.',true);if(!paired){$('#startup').hidden=false;$('#startup-message').textContent='Kunne ikke hente familien. Prøver igjen.';}}}
  finally{polling=false;}
 }
@@ -82,7 +82,7 @@ $('#send-form').onsubmit=async event=>{
  finally {busy=false;$('#submit').disabled=false;showFiles();}
 };
 window.addEventListener('beforeunload',event=>{if(files.length||draft||$('#message').value.trim()){event.preventDefault();event.returnValue='';}});
-const invitation=new URLSearchParams(location.hash.slice(1)).get('pair');
-if(invitation) {history.replaceState(null,'',location.pathname);try{await post('/pair',{code:invitation,name:'Familietelefon'});}catch(error){status(error.message,true);}}
+const linkOptions=new URLSearchParams(location.hash.slice(1)),invitation=linkOptions.get('pair'),openVarer=linkOptions.has('varer');
+if(invitation) {history.replaceState(null,'',location.pathname+(openVarer?'#varer':''));try{await post('/pair',{code:invitation,name:'Familietelefon'});}catch(error){status(error.message,true);}}
 await load();setInterval(()=>{if(!busy&&!document.hidden)load();},15000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!busy)load();});
