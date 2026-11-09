@@ -1,6 +1,6 @@
 // A transparent category-specific ingredient-content score, not a health rating.
 // It never approves equivalence, changes a price, or supplies missing label facts.
-export const QUALITY_MODEL_VERSION='ingredient-content-v1';
+export const QUALITY_MODEL_VERSION='ingredient-content-v2';
 const clean=v=>String(v??'').normalize('NFC').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
 const number=v=>Number(v.replace(',','.'));
 const decimal='(?<![\\d.,])(\\d{1,4}(?:[.,]\\d{1,3})?)';
@@ -11,7 +11,7 @@ function percent(ingredients,token,{allowSpeciesList=false}={}){
  const qualifiers='(?:(?:øko(?:logisk(?:e)?)?|ristede?|malte?|organic|roasted|ground|og)\\s+)*';
  const patterns=[
   new RegExp('^'+qualifiers+'(?:'+token+')\\s*\\*?\\s*(?:\\(\\s*)?'+decimal+'\\s*%(?!\\s*av\\b)','i'),
-  new RegExp('^'+decimal+'\\s*%\\s*'+qualifiers+'(?:'+token+')(?![\\p{L}\\p{N}_])','iu')
+  new RegExp('^'+decimal+'\\s*%\\s*'+qualifiers+'(?:'+token+')(?![\\p{L}\\p{N}_]|\\s+av\\b)','iu')
  ];
  if(allowSpeciesList)patterns.push(new RegExp('^(?:'+token+')\\s*\\[[^\\[\\]]+\\]\\s*'+decimal+'\\s*%(?!\\s*av\\b)','i'));
  const found=[];for(const part of components(ingredients))for(const re of patterns){const m=part.match(re);if(m)found.push({value:number(m[1]),text:m[0],field:'ingredients'});}return uniqueFact(found,100);
@@ -52,6 +52,13 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
   if(puree.fact)base.context.push({name:'Deklarert tomatpuré/-konsentrat',value:puree.fact.value,unit:'%',evidence:puree.fact.evidence,note:'Konsentrasjon/tørrstoff er ukjent. Prosenten omregnes ikke til ferske tomater.'});
  }else{
   result=percent(ingredients,'(?:'+p.token+')',{allowSpeciesList:p.id==='fishcakes'});
+  if(p.id==='fishcakes'&&!result.fact&&result.reason==='missing-declared-amount'){
+   const fillet=percent(ingredients,'(?:fersk(?:e)?\\s+)?(?:fiske|hyse)filet');
+   const trimmed=percent(ingredients,'renskåret\\s+(?:hvit\\s*[- ]?\\s*)?fisk');
+   if(fillet.fact&&!trimmed.fact&&trimmed.reason==='missing-declared-amount'){result=fillet;p.basis='declared-fish-fillet-percent';p.label='Deklarert fiskefiletandel';}
+   else if(trimmed.fact&&!fillet.fact&&fillet.reason==='missing-declared-amount'){result=trimmed;p.basis='declared-trimmed-fish-percent';p.label='Deklarert andel renskåret fisk';}
+   else if(fillet.fact||trimmed.fact||fillet.reason!=='missing-declared-amount'||trimmed.reason!=='missing-declared-amount')result={fact:null,reason:'ambiguous-fish-content-basis'};
+  }
   if(!result.fact&&result.reason==='missing-declared-amount'&&p.single?.test(ingredients))result={fact:{value:100,evidence:[{text:ingredients,field:'ingredients',interpretation:'Hele ingrediensdeklarasjonen består av én råvare.'}]},reason:null};
   if(p.id==='fruit-spread'&&!result.fact&&result.reason==='missing-declared-amount'){
    const re=new RegExp('(?:fremstilt|framstilt|laget)\\s+av\\s*'+decimal+'\\s*g\\s*(?:frukt(?:\\s+og\\s+bær)?|bær|'+p.fruit+')\\s*(?:per|pr\\.?)\\s*100\\s*g','gi'),found=[...ingredients.matchAll(re)].map(x=>({value:number(x[1]),text:x[0],field:'ingredients'}));

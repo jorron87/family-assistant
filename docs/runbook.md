@@ -115,11 +115,13 @@ Dagens billigste krever approved gjeldende metadata og en dokumentert aktuell br
 
 ## Dokumentert råvarekvalitet i produktbiblioteket
 
-`compare` returnerer `rows[].quality` fra `src/product-quality.mjs` når produktets gjennomgang fortsatt er gyldig. Modellen `ingredient-content-v1` gir en forklarbar score 0–100 for dokumentert råvareinnhold innen bestemte varetyper. Den godkjenner ingen ekvivalens, påvirker ingen pris eller watch og er ingen samlet helse-, smaks- eller produksjonsvurdering. Ukjente data gir `score:null`, aldri null poeng eller et merke-/prisbasert anslag.
+`compare` returnerer `rows[].quality` fra `src/product-quality.mjs` når produktets gjennomgang fortsatt er gyldig. Modellen `ingredient-content-v2` gir en forklarbar score 0–100 for dokumentert råvareinnhold innen bestemte varetyper. Den godkjenner ingen ekvivalens, påvirker ingen pris eller watch og er ingen samlet helse-, smaks- eller produksjonsvurdering. Ukjente data gir `score:null`, aldri null poeng eller et merke-/prisbasert anslag.
 
 For ketchup brukes dokumenterte gram tomater brukt per 100 g ketchup, med 200 g som modellens uttrykkelige målverdi: `min(100, gram / 200 × 100)`. Det er en synlig prioriteringsregel, ikke en ernæringsmessig grenseverdi. 148 g gir 74 poeng, 200 g gir 100. Tomatpuré-/konsentratprosent vises som egen opplysning; uten dokumentert konsentrasjon eller råvareekvivalent blir den aldri omregnet til ferske tomater. Modellen ser ikke på merke, pris, økologisk merking eller antall tilsetningsstoffer som helsebevis.
 
 For peanøttsmør, hasselnøttpålegg, fiskekaker og støttede rene fruktpålegg brukes eksplisitt deklarert andel av hovedråvaren. Deklarerte prosentandeler og fruktmengde brukt per ferdig 100 g beholder forskjellige `comparisonKey`-verdier. Samme tall fra forskjellige målegrunnlag eller varetyper skal ikke rangeres mot hverandre. Ingrediensrekkefølge, underingrediensers prosent eller andre produkters oppskrift fyller aldri et manglende tall. Sukkerarter og salt beholdes som separate, dokumenterte per-100-g-fakta; de er ikke skjulte vekter i denne modellen. Mer sammensatte kvalitetsprofiler krever nye, uttrykkelige modellversjoner og eget kildegrunnlag.
+
+For fiskekaker behandles eksplisitt andel fiskefilet og renskåret fisk som egne målegrunnlag, med separate `comparisonKey`-verdier fra hverandre og fra total fiskeandel. En delmengde utgis ikke for å være totalandelen fisk. Motstrid eller en relativ prosentandel som «av fisken» gir ingen score.
 
 `measurement` viser verdi, enhet, målegrunnlag og konkret tekst-/kildebelegg. Motstridende deklarerte mengder gir ukjent score. Krysskildeetiketter må fortsatt ha gyldig, separat gjennomgått identitet; endrede metadata ugyldiggjør godkjenningen og scoren. En høy råvarescore gjør aldri en gammel pris fersk og overstyrer aldri allergi, særvariant eller familiens egne krav.
 

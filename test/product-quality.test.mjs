@@ -50,6 +50,17 @@ test('fishcake content uses one explicit total-share basis across researched fis
  assert.equal(score('Fisk 65 %, hvetemel.','fishsticks-breaded').status,'not-applicable');
 });
 
+test('fish fillet and trimmed fish are separate documented quality dimensions',()=>{
+ const fillet=score('Fiskefilet (41%), melk, salt.','fishcakes-ordinary');
+ const trimmed=score('Renskåret hvit- fisk (51%), melk, salt.','fishcakes-ordinary');
+ const total=score('Fisk (60%), melk, salt.','fishcakes-ordinary');
+ assert.equal(fillet.score,41);assert.equal(trimmed.score,51);assert.equal(total.score,60);
+ assert.notEqual(fillet.comparisonKey,trimmed.comparisonKey);assert.notEqual(fillet.comparisonKey,total.comparisonKey);assert.notEqual(trimmed.comparisonKey,total.comparisonKey);
+ assert.equal(score('48 % fersk fiskefilet (50% hyse/torsk og 50% sei), melk.','fishcakes-ordinary').score,48);
+ assert.equal(score('Fersk hysefilet (49%), melk.','fishcakes-ordinary').score,49);
+ for(const s of ['Fiskefilet 41 % av fisken er hyse, melk.','41 % fiskefilet av fisken er hyse, melk.','Fiskeblanding (fiskefilet 41%), melk.','Fiskefilet 41 %, fiskefilet 48 %, melk.','Fiskefilet 41 %, renskåret fisk 48 %, melk.','Fiskefilet 120 %, melk.'])assert.equal(score(s,'fishcakes-ordinary').score,null,s);
+});
+
 test('explicit label syntax preserves quantity without borrowing nested or relative percentages',()=>{
  assert.equal(score('100% Peanøtter','peanut-butter-100').score,100);
  assert.equal(score('Ristede og malte økologiske peanøtter 99,4% (Norge), havsalt.','peanut-butter-near-pure').score,99.4);
