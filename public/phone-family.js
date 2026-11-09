@@ -8,7 +8,9 @@ const node=(tag,text,cls)=>{const el=document.createElement(tag);if(text!==undef
 const dayText=(day,opts={weekday:'long',day:'numeric',month:'long'})=>new Intl.DateTimeFormat('nb-NO',{timeZone:'Europe/Oslo',...opts}).format(new Date(day+'T12:00:00Z'));
 export function installFamily({api,post,status}) {
  let editor,shopping;
- async function openShopping(){try{if(!shopping){const {installShoppingView}=await import('./shopping-view.mjs?v='+Date.now());shopping=installShoppingView({panel:$('#family-shopping'),base:'/send/api/shopping',compact:true});}shopping.open();}catch{$('#family-shopping').textContent='Handel blir tilgjengelig når den pågående kjøringen er ferdig.';}}
+ async function openShopping(){try{if(!shopping){const {installShoppingView}=await import('./shopping-view.mjs?v='+Date.now());shopping=installShoppingView({panel:$('#family-shopping'),base:'/send/api/shopping',compact:true,onExplore:()=>setView('explore')});}shopping.open();}catch{$('#family-shopping').textContent='Handel blir tilgjengelig når den pågående kjøringen er ferdig.';}}
+ let explorer;
+ async function openExplorer(){try{if(!explorer){const {installLibraryExplorer}=await import('./library-explorer.mjs?v='+Date.now());explorer=installLibraryExplorer({panel:$('#family-explore'),base:'/send/api/shopping',compact:true,onBack:()=>setView('shopping')});}explorer.open();}catch{$('#family-explore').textContent='Varene blir tilgjengelige når den pågående kjøringen er ferdig.';}}
  async function refreshProfile(){try{if(!editor){const {installProfileEditor}=await import('./profile-editor.mjs?v='+Date.now());editor=installProfileEditor($('#mobile-profile-cards'),{read:()=>api('/profile'),save:data=>post('/profile/edit',data),onSaved:()=>refresh()});}await editor.refresh();}catch{$('#mobile-profile-cards').textContent='Profilredigeringen blir tilgjengelig når den pågående kjøringen er ferdig.';}}
  let data={members:[],events:[]},person='all',view='home',mode='agenda',day=osloDay(),showLater=false,signature='',openedId=null;
  const colors=new Proxy({}, {get:(_,id)=>memberColor(data.members,id)});
@@ -18,7 +20,7 @@ export function installFamily({api,post,status}) {
  const active=()=>matching().filter(e=>!e.visibility?.hidden);
  const left=e=>e.task?.items.filter(i=>!i.doneAt).length??0;
  const tasks=()=>active().filter(e=>e.task&&!e.cancelled&&left(e));
- function setView(next){view=next;$('#family-home').hidden=view!=='home';$('#family-tasks').hidden=view!=='tasks';$('#family-profile').hidden=view!=='profile';$('#family-shopping').hidden=view!=='shopping';$('#person-tabs').hidden=['profile','shopping'].includes(view);$('#capture').hidden=view!=='capture';$('#family').hidden=view==='capture';for(const b of document.querySelectorAll('[data-view]'))b.classList.toggle('selected',b.dataset.view===view);if(view==='profile')refreshProfile();if(view==='shopping')openShopping();render();window.scrollTo({top:0});}
+ function setView(next){view=next;$('#family-home').hidden=view!=='home';$('#family-tasks').hidden=view!=='tasks';$('#family-profile').hidden=view!=='profile';$('#family-shopping').hidden=view!=='shopping';$('#family-explore').hidden=view!=='explore';$('#person-tabs').hidden=['profile','shopping','explore'].includes(view);$('#capture').hidden=view!=='capture';$('#family').hidden=view==='capture';for(const b of document.querySelectorAll('[data-view]'))b.classList.toggle('selected',b.dataset.view===view||view==='explore'&&b.dataset.view==='shopping');if(view==='profile')refreshProfile();if(view==='shopping')openShopping();if(view==='explore')openExplorer();render();window.scrollTo({top:0});}
  for(const b of document.querySelectorAll('[data-view]'))b.onclick=()=>setView(b.dataset.view);
  for(const b of document.querySelectorAll('[data-mode]'))b.onclick=()=>{mode=b.dataset.mode;showLater=false;render();};
  $('#event-close').onclick=()=>$('#mobile-event').close();

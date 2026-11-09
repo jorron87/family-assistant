@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="/app.css">
     <link rel="stylesheet" href="/kiosk.css">
     <link rel="stylesheet" href="/doorbell.css">
-    <link rel="stylesheet" href="/shopping.css">
+    <link rel="stylesheet" href="/shopping.css"><link rel="stylesheet" href="/library-explorer.css">
   </head>
   <body>
     <header class="site-header">
@@ -22,7 +22,7 @@
         <button type="button" data-tab="month">Måned</button>
         <button type="button" data-tab="tasks">Oppgaver</button>
         <button type="button" data-tab="nearby">Rundt oss</button>
-        <button type="button" data-tab="shopping">Handel</button>
+        <button type="button" data-tab="shopping">Handel</button><button type="button" data-tab="explore">Varer</button>
         <span class="nav-divider" aria-hidden="true"></span>
         <button type="button" data-tab="archive">Kilder</button>
         <button type="button" data-tab="sources">Dekning</button>
@@ -54,7 +54,7 @@
         <div id="calendar-content"></div>
       </section>
 
-      <section id="shopping" class="panel" aria-label="Handel"></section>
+      <section id="shopping" class="panel" aria-label="Handel"></section><section id="explore" class="panel" aria-label="Utforsk varene"></section>
       <section id="tasks" class="panel" aria-label="Oppgaver"><div class="section-heading"><span class="eyebrow">Dette skal gjøres</span><h2>Oppgaver</h2><p>Trykk på en gruppe for å åpne sjekklisten. Telleren viser uferdige deloppgaver som har startet eller starter de neste 7 dagene.</p></div><div id="task-list" class="cards"></div></section>
       <section id="nearby" class="panel" aria-label="Hva skjer rundt oss">
         <div class="section-heading"><span class="eyebrow">Litt å glede seg til</span><h2>Hva skjer rundt oss?</h2><p>Utvalgte forslag for familien. Velg en person for å se det som kan passe.</p></div>

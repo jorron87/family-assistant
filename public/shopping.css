@@ -9,6 +9,7 @@
 .shop .shop-tabs button.on { background: var(--s-card); font-weight: 600; }
 .shop-refresh { width: 100%; min-height: 44px; margin-bottom: 12px; border: 0; border-radius: 12px; background: var(--s-green); color: #fff; font: inherit; cursor: pointer; }
 .shop-refresh[hidden] { display: none; }
+.shop .shop-explore { min-height: 42px; padding: 8px 14px; border: 1px solid var(--s-line); border-radius: 11px; background: transparent; color: var(--s-green); font: inherit; font-size: 14.5px; cursor: pointer; }
 .shop-hero, .shop-card, .shop-store { padding: 18px; border: 1px solid var(--s-line); border-radius: 18px; background: var(--s-card); }
 .shop-hero-number { font-family: var(--serif, Georgia, serif); font-size: 40px; line-height: 1.15; letter-spacing: -.02em; color: var(--s-green); }
 .shop-hero-number.small { font-size: 28px; }

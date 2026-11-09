@@ -1,5 +1,6 @@
 import {readConfig,configPath} from './config.mjs';
 import {libraryPriceProvider} from './shopping-library.mjs';
+import {sendExplorerBundle} from './library-explorer.mjs';
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -58,6 +59,7 @@ const kassal=createKassal({dataDir:DATA_DIR});
 PUBLIC_FILES.set('shopping-view.mjs','text/javascript; charset=utf-8');PUBLIC_FILES.set('barcode.mjs','text/javascript; charset=utf-8');
 PUBLIC_FILES.set('shopping.css','text/css; charset=utf-8');
 PUBLIC_FILES.set('pantry-groups.mjs','text/javascript; charset=utf-8');
+PUBLIC_FILES.set('library-explorer.mjs','text/javascript; charset=utf-8');PUBLIC_FILES.set('library-explorer-core.mjs','text/javascript; charset=utf-8');PUBLIC_FILES.set('library-explorer.css','text/css; charset=utf-8');
 const sessionMaintenance = createSessionMaintenance({dataDir:DATA_DIR});
 
 function send(res, status, value, type = "application/json; charset=utf-8") {
@@ -92,6 +94,9 @@ async function handle(req, res) {
     if(path==='/api/shopping/family'&&method==='GET')return send(res,200,{...store.shopping.familyView(),oda:oda.status()});
     if(path==='/api/shopping/summary'&&method==='GET')return send(res,200,store.shopping.familySummary());
     if(path==='/api/shopping/product-info'&&method==='GET'){const params=new URL(req.url,`http://${host}`).searchParams;return send(res,200,store.shopping.productInfo({key:params.get('key'),watchId:params.get('watchId')}));}
+    if(path==='/api/shopping/explore'&&method==='GET'){const bundle=await store.shopping.explorer.bundle();if(bundle.status!=='ready')return send(res,200,{status:bundle.status});return sendExplorerBundle(req,res,bundle);}
+    if(path==='/api/shopping/explore-ingredients'&&method==='GET')return send(res,200,await store.shopping.explorer.ingredients(new URL(req.url,`http://${host}`).searchParams.get('q')));
+    if(path==='/api/shopping/explore-family'&&method==='GET')return send(res,200,store.shopping.explorer.family(new URL(req.url,`http://${host}`).searchParams.get('id')));
     if(path==='/api/shopping/feed'&&method==='POST')return send(res,200,store.shopping.feed(await json(req)));
     if(path==='/api/shopping/source'&&method==='GET'){const offer=store.shopping.offerSource(new URL(req.url,`http://${host}`).searchParams.get('offerId'));const loaded=await offerSources.load(offer.sourceUrl);return send(res,200,loaded.kind==='pdf'?{kind:'pdf',page:flyerPage(offer.evidence)}:{kind:'page',qr:await QRCode.toDataURL(offer.sourceUrl,{width:360,margin:2})});}
     if(path==='/api/shopping/source/file'&&method==='GET'){const offer=store.shopping.offerSource(new URL(req.url,`http://${host}`).searchParams.get('offerId'));const loaded=await offerSources.load(offer.sourceUrl);if(loaded.kind!=='pdf')return send(res,404,{error:'Kilden er ikke en PDF.'});return send(res,200,loaded.bytes,'application/pdf');}

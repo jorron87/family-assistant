@@ -113,6 +113,12 @@ Dagens billigste krever approved gjeldende metadata og en dokumentert aktuell br
 
 `summary` og `audit` viser faktisk antall grupper, produkter og medlemskap per kategori/kjede, gjeldende godkjenninger, aktuelle sammenlignbare priser og researchhull. Filens oppgitte `coverage` returneres separat som `reportedCoverage`. Antall treff, planlagte søk og bibliotekets gruppeliste beviser aldri komplett kjedesortiment eller full kategoridekning. Et bibliotek kan være nyttig mens mange pakninger, næringsgrunnlag og koblinger fortsatt er uavklart.
 
+## Utforsk varene
+
+Fanen `Varer` på dashbordet og knappen `Utforsk alle varene` under Handel på mobilen viser det kompilerte biblioteket for familien. Siden bare leser `shopping-index.json`. Den godkjenner ingen produkter og endrer ingen watch, liste, kurv eller pris. `GET /api/shopping/explore` og `/send/api/shopping/explore` leverer et komprimert lesegrunnlag med ETag; filtrering, fasetter og sortering skjer i `public/library-explorer-core.mjs`. `explore-ingredients?q=` gir treff i ingredienslister, og `explore-family?id=` gir medlemmer med status og begrunnelse.
+
+Rader med samme strekkode vises som ett varekort, men det er bare visning. Hver kjedes pakning, pris, næring og etikett beholdes, ulike pakninger vises aldri som én, og et merke som økologisk eller laktosefri må gjelde alle kjedepostene. Enhetspris krever gjeldende godkjent medlemskap, og prisalder vurderes i nettleseren ved visning. Ukjente tall oppfyller aldri en grense og regnes aldri som null. Motstridende kostfiber holdes utenfor. Råvarescore kan bare sorteres når ett målegrunnlag er valgt. «Uten» en ingrediens krever kjent, ikke avkuttet ingrediensliste og er ingen allergenvurdering. Hyllene er en visningsgruppering av bibliotekets kategorier (`shelfOf` i `src/library-explorer.mjs`).
+
 ## Dokumentert råvarekvalitet i produktbiblioteket
 
 `compare` returnerer `rows[].quality` fra `src/product-quality.mjs` når produktets gjennomgang fortsatt er gyldig. Modellen `ingredient-content-v9` gir en forklarbar score 0–100 for dokumentert råvareinnhold eller en eksplisitt ernæringsdimensjon innen bestemte varetyper. Den godkjenner ingen ekvivalens, påvirker ingen pris eller watch og er ingen samlet helse-, smaks- eller produksjonsvurdering. Ukjente data gir `score:null`, aldri null poeng eller et merke-/prisbasert anslag.

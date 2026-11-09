@@ -3,6 +3,7 @@ import {validateNutrition,purchaseNutrition} from './shopping-nutrition.mjs';
 import {calibrateMarket} from './shopping-market.mjs';
 import {createMarketCatalog} from './shopping-catalog.mjs';
 import {createStockIntake} from './shopping-stock.mjs';
+import {createLibraryExplorer} from './library-explorer.mjs';
 import {annualNeed,chainName,commonPacks,dealScore,packsFor,dealTier,defaultShelfLifeMonths,estimateStock,packBreakdown,planQuantities,shelfLifeMonths,shelfWithDate} from './shopping-planning.mjs';
 
 const hash=value=>createHash('sha256').update(value).digest('hex').slice(0,24);
@@ -1024,6 +1025,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const groups=reader.groupsOf(key).map(m=>{const g=reader.group(m.groupId);return {name:g.name,category:g.category,status:m.s,inclusion:g.inclusion,comparisonBasis:g.comparisonBasis,qualityBasis:g.qualityBasis,equivalenceEvidence:readable(m.e),qualityEvidence:m.qe,quality:m.q?{score:m.q.score,label:m.q.label,criterion:m.q.criterion,value:m.q.value,unit:m.q.unit,evidence:m.q.evidence,limitations:reader.qualityNote(m.q.key),...peersOf(m)}:null,nutrition:m.n??null,value:reader.valueDetail(key,m.groupId),qualityStatus:m.qs,qualityReason:m.qr};}).sort((a,b)=>Number(b.status==='approved')-Number(a.status==='approved')||Number(!!b.quality)-Number(!!a.quality));
     return {available:true,watchName:w?.name??null,product:{key,name:p.name,brand:p.brand,ean:p.ean,storeName:p.store==='ODA_NO'?'Oda':store?cleanStore(store.name):chainName(p.store),packAmount:p.pack,unit:p.unit,packEvidence:p.packEvidence,ingredients:p.ingredients,description:p.description,labels:Object.entries(p.attributes??{}).filter(([,value])=>value===true).map(([name])=>name),nutrition:p.nutrition,sourceUrl:/^https:\/\//.test(p.sourceUrl??'')?p.sourceUrl:null,image:imageRef(p.image),pills:reader.pills(key),price:{grossPackPrice:price.grossPackPrice,fresh:price.fresh,receiptAt:price.receiptAt}},groups};
   }
+  const explorer=createLibraryExplorer({reader:libReader,imageRef,chainName,ownStores:()=>['ODA_NO',...s.settings.stores.map(x=>x.chainCode).filter(Boolean)],status:()=>libraryPrices?.status?.()??'disabled'});
   function librarySearch(query,limit=30) {
     const reader=libReader();if(!reader)throw Error('Produktbiblioteket er ikke tilgjengelig.');
     return reader.search(String(query??'').slice(0,200),Math.min(200,Number(limit)||30)).map(({key,product,groups,price})=>({productKey:key,name:product.name,brand:product.brand,store:product.store,ean:product.ean,canonicalPackAmount:product.pack,unit:product.unit,packDocumented:product.packKnown,groups,grossPackPrice:price.grossPackPrice,receiptAt:price.receiptAt,priceFresh:price.fresh}));
@@ -1066,5 +1068,5 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     });
   }
   function cartReceipt(id,patch) {return update(()=>s.cartReceipts[id]={...(s.cartReceipts[id]??{}),...patch,id,updatedAt:now().toISOString()});}
-  return {productInfo,libraryAudit,libraryAuditAck,libraryLinkCandidates,libraryLink,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
+  return {explorer,productInfo,libraryAudit,libraryAuditAck,libraryLinkCandidates,libraryLink,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
 }

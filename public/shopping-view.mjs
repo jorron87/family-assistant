@@ -55,7 +55,7 @@ export function splitCheaper(rows,saving=row=>row.savings?.annual??0) {
   return {cheaper:rows.filter(x=>x.places?.length).sort((a,b)=>saving(b)-saving(a)),rest:rows.filter(x=>!x.places?.length)};
 }
 
-export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/shopping',compact=false}) {
+export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=null,base='/api/shopping',compact=false}) {
   const draftEdits=new Map(),cartState=new Map(),cartIds=new Map();let cartBusy=false;
   const check={itemId:null,query:'',price:'',size:null,custom:'',customUnit:null};
   let listNeed='later',cart=null,cartHolder=null,draftSync=null;
@@ -912,6 +912,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
       node.setAttribute('role','tab');node.setAttribute('aria-selected',String(key===tab));tabs.append(node);
     }
     head.append(tabs);
+    if(onExplore)head.append(button('Utforsk alle varene →',onExplore,'shop-explore'));
     const body=el('div',undefined,'shop-body');
     panel.append(head,refresh,body,toastNode);
     if(tab==='buy')renderBuy(body);else if(tab==='list')renderList(body);else if(tab==='pantry')renderPantry(body);else renderInsight(body);

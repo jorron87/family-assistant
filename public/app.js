@@ -28,7 +28,8 @@ let houseLoading=false;
 let profileEditor;
 let profileLoading=false;
 let state;
-const shoppingView=installShoppingView({panel:document.querySelector('#shopping'),banner:document.querySelector('#shopping-banner'),onOpen:()=>setTab('shopping')});
+const shoppingView=installShoppingView({panel:document.querySelector('#shopping'),banner:document.querySelector('#shopping-banner'),onOpen:()=>setTab('shopping'),onExplore:()=>setTab('explore')});
+let explorerView=null;
 const kiosk = new URLSearchParams(location.search).has("kiosk");
 let doorbellView={isOpen:()=>false};
 // ?celebrate=tick eller ?celebrate=done viser feiringen med prøvedata (uten å krysse av noe).
@@ -831,7 +832,7 @@ function render() {
   }
   if (kiosk) { const inMore = ["archive","sources","profile"].includes(tab); $("#more-button").classList.toggle("active", inMore); if (inMore) $("#more-button").setAttribute("aria-current","page"); else $("#more-button").removeAttribute("aria-current"); }
   for (const panel of document.querySelectorAll(".panel")) panel.classList.toggle("active", panel.id === (isCalendarTab(tab) ? "calendar" : tab));
-  $(".filter-bar").hidden = tab === "sources" || tab === "profile" || tab === "house" || tab === "shopping";
+  $(".filter-bar").hidden = tab === "sources" || tab === "profile" || tab === "house" || tab === "shopping" || tab === "explore";
   if (isCalendarTab(tab)) renderCalendar();
   if (tab === "archive") renderArchive();
   if (tab === "tasks") renderTasks();
@@ -839,7 +840,12 @@ function render() {
   if (tab === "sources") renderSources();
   if (tab === "profile") renderProfile();
   if (tab === 'shopping') shoppingView.open();
+  if (tab === 'explore') loadExplorer();
   for (const element of document.querySelectorAll("[data-scroll-key]")) element.scrollTop=scrolls.get(element.dataset.scrollKey) || 0;
+}
+async function loadExplorer() {
+ if(!explorerView){const {installLibraryExplorer}=await import("./library-explorer.mjs?v="+Date.now());explorerView=installLibraryExplorer({panel:document.querySelector("#explore")});}
+ explorerView.open();
 }
 async function loadHouseView() {
  if(houseView||houseLoading)return;houseLoading=true;try{const {installHomeView}=await import("./home-view.mjs?v="+Date.now());houseView=installHomeView({panel:document.querySelector("#house"),rail:document.querySelector("#house-rail"),onOpen:()=>setTab("house"),onData:kiosk?kioskHome.setHome:undefined});}catch{document.querySelector("#house").textContent="Husvisningen aktiveres når den pågående kjøringen er ferdig.";}finally{houseLoading=false;}

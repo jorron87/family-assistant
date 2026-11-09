@@ -2,6 +2,7 @@ import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {loginProblems,loginSummary} from '../public/login-status.mjs';
 import {weeklyLetters} from './weekly-letters.mjs';
+import {sendExplorerBundle} from './library-explorer.mjs';
 
 export function phoneHandler({odaCart=null,productImages=null,oda=null,store,root,send,body,json,onQueued=()=>{},weather=null,sessionMaintenance=null}) {
   const attempts=[];
@@ -21,6 +22,9 @@ export function phoneHandler({odaCart=null,productImages=null,oda=null,store,roo
         assets['/send/barcode.mjs']=['barcode.mjs','text/javascript; charset=utf-8'];
         assets['/send/shopping.css']=['shopping.css','text/css; charset=utf-8'];
         assets['/send/phone-boot.js']=['phone-boot.js','text/javascript; charset=utf-8'];
+        assets['/send/library-explorer.mjs']=['library-explorer.mjs','text/javascript; charset=utf-8'];
+        assets['/send/library-explorer-core.mjs']=['library-explorer-core.mjs','text/javascript; charset=utf-8'];
+        assets['/send/library-explorer.css']=['library-explorer.css','text/css; charset=utf-8'];
         if(path==='/'||path==='/send') {res.writeHead(302,{Location:'/send/'});return res.end();}
         if(assets[path])return send(res,200,readFileSync(join(root,'public',assets[path][0])),assets[path][1]);
       }
@@ -57,6 +61,9 @@ export function phoneHandler({odaCart=null,productImages=null,oda=null,store,roo
       if(path==='/send/api/shopping/stock-action'&&req.method==='POST')return send(res,200,store.shopping.stockIntake.action(await json(req)));
       if(path==='/send/api/shopping/stock-scan'&&req.method==='POST')return send(res,200,store.shopping.stockScan(await json(req)));
       if(path==='/send/api/shopping/image'&&req.method==='GET'&&productImages){const url=store.shopping.imageSource(new URL(req.url,'http://localhost').searchParams.get('id'));const image=url?await productImages.load(url):null;if(!image)return send(res,404,{error:'Fant ikke bildet.'});res.setHeader('Cache-Control','private, max-age=86400');return send(res,200,image.bytes,image.type);}
+      if(path==='/send/api/shopping/explore'&&req.method==='GET'){const bundle=await store.shopping.explorer.bundle();if(bundle.status!=='ready')return send(res,200,{status:bundle.status});return sendExplorerBundle(req,res,bundle);}
+      if(path==='/send/api/shopping/explore-ingredients'&&req.method==='GET')return send(res,200,await store.shopping.explorer.ingredients(new URL(req.url,'http://localhost').searchParams.get('q')));
+      if(path==='/send/api/shopping/explore-family'&&req.method==='GET')return send(res,200,store.shopping.explorer.family(new URL(req.url,'http://localhost').searchParams.get('id')));
       if(path==='/send/api/shopping/summary'&&req.method==='GET')return send(res,200,store.shopping.familySummary());
       if(path==='/send/api/shopping/product-info'&&req.method==='GET'){const params=new URL(req.url,'http://localhost').searchParams;return send(res,200,store.shopping.productInfo({key:params.get('key'),watchId:params.get('watchId')}));}
       if(req.method==='POST'&&path==='/send/api/shopping/list'){const input=await json(req);return send(res,200,odaCart?await odaCart.list(input):store.shopping.list(input));}

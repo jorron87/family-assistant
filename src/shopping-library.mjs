@@ -4,7 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {dirname,join} from 'node:path';
 import {readProductLibrary,productTextHash} from './product-library.mjs';
 
-const INDEX_VERSION=3,FRESH_MS=48*3600000,RETRY_MS=60000;
+const INDEX_VERSION=4,FRESH_MS=48*3600000,RETRY_MS=60000;
 const low=value=>String(value??'').normalize('NFC').toLocaleLowerCase('nb-NO');
 const script=fileURLToPath(new URL('../scripts/product-library.mjs',import.meta.url));
 const stampOf=file=>{const info=statSync(file);return `${info.mtimeMs}:${info.size}`;};
@@ -77,6 +77,7 @@ export function createIndexReader(index) {
   }
   return {
    builtAt:index.builtAt,
+   index:()=>index,
    group:id=>own(index.groups,id),
    product:key=>own(index.products,key),
    qualityNote:key=>index.qualityNotes?.[key]??[],
