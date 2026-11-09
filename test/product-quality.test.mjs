@@ -223,3 +223,12 @@ test('wholegrain pasta scores the declared wholegrain flour in the recipe, not t
  assert.equal(score('Fullkornmel av durumhvete (65%), mel av durumhvete.','pasta-durum-white').status,'not-applicable');
  assert.equal(scoreProductQuality({ingredients:'Fullkornmel av durumhvete (65%), vann.'},{groupId:id}).status,'review-required');
 });
+
+test('pork liver pate scores only directly declared liver share in the whole product',()=>{
+ const group='pork-liver-pate--standard--fine-or-unconfirmed--process-unconfirmed';
+ const a=score('Svinelever 31 %, vann, svinefett, svinekjøtt.',group),b=score('Vann, svinelever* (32 %), småflesk, salt.',group),c=score('Lever av svin (30%), melk, spekk.','pork-liver-pate--standard--coarse--oven');
+ assert.deepEqual([a.score,b.score,c.score],[31,32,30]);assert.equal(a.comparisonKey,b.comparisonKey);assert.equal(a.comparisonKey,c.comparisonKey);assert.equal(a.measurement.basis,'declared-pork-liver-ingredient-percent');
+ for(const s of ['Svinelever og kjakeflesk av svin (64 % hvorav 33 % svinelever), vann.','Svinelever 31 % av kjøttet, vann.','Svinelever (31 %) av råvarene, vann.','Svinelever 31 % (av kjøttet), vann.','Leverblanding (svinelever 31 %), vann.','Svinelever 31 %, kyllinglever, vann.','Svinelever 31 % og kyllinglever 5 %, vann.','Svinelever 31 %, svinelever 31 %, vann.','Svinelever 0 %, vann.','Svinelever 101 %, vann.','Svinelever, svinekjøtt 31 %, vann.'])assert.equal(score(s,group).score,null,s);
+ assert.equal(score('Svinelever 31 %, vann.','pork-sausage').status,'not-applicable');
+ assert.equal(scoreProductQuality({ingredients:'Svinelever 31 %, vann.'},{groupId:group}).status,'review-required');
+});

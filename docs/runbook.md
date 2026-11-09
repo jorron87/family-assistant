@@ -129,7 +129,7 @@ En rad som nettopp er observert uten pris, er ikke parkert og går til vanlig gj
 
 ## Dokumentert råvarekvalitet i produktbiblioteket
 
-`compare` returnerer `rows[].quality` fra `src/product-quality.mjs` når produktets gjennomgang fortsatt er gyldig. Modellen `ingredient-content-v13` gir en forklarbar score 0–100 for dokumentert råvareinnhold eller en eksplisitt ernæringsdimensjon innen bestemte varetyper. Den godkjenner ingen ekvivalens, påvirker ingen pris eller watch og er ingen samlet helse-, smaks- eller produksjonsvurdering. Ukjente data gir `score:null`, aldri null poeng eller et merke-/prisbasert anslag.
+`compare` returnerer `rows[].quality` fra `src/product-quality.mjs` når produktets gjennomgang fortsatt er gyldig. Modellen `ingredient-content-v14` gir en forklarbar score 0–100 for dokumentert råvareinnhold eller en eksplisitt ernæringsdimensjon innen bestemte varetyper. Den godkjenner ingen ekvivalens, påvirker ingen pris eller watch og er ingen samlet helse-, smaks- eller produksjonsvurdering. Ukjente data gir `score:null`, aldri null poeng eller et merke-/prisbasert anslag.
 
 For ketchup brukes dokumenterte gram tomater brukt per 100 g ketchup, med 200 g som modellens uttrykkelige målverdi: `min(100, gram / 200 × 100)`. Det er en synlig prioriteringsregel, ikke en ernæringsmessig grenseverdi. 148 g gir 74 poeng, 200 g gir 100. Tomatpuré-/konsentratprosent vises som egen opplysning; uten dokumentert konsentrasjon eller råvareekvivalent blir den aldri omregnet til ferske tomater. Modellen ser ikke på merke, pris, økologisk merking eller antall tilsetningsstoffer som helsebevis.
 
@@ -146,6 +146,8 @@ For gjennomgått fiskegrateng med makaroni måler en separat score den deklarert
 For gjennomgått naturelt kyllingpålegg viser en separat score kun uttrykkelig deklarert andel av én kyllingkjøttingrediens, for eksempel 74 % kyllingbryst eller 87 % kyllingfilet. Flere kjøttingredienskomponenter, uoppgitt andel og relative andeler gir ukjent score. Mengden rått kjøtt brukt per 100 g ferdig stekt vare er et annet målegrunnlag og overføres ikke til prosentandelen. Tekstur, tilberedning, fett og salt må fortsatt vurderes separat; dette er ikke en samlet helse- eller smaksvurdering.
 
 For de gjennomgåtte kokt-skinkegruppene gjelder en egen score for uttrykkelig deklarert andel av én svinekjøttingrediens, separat fra kyllingpålegg. Sammensatte og renskårne stykker, fett og salt kan være forskjellige. Flere svinekjøttkomponenter, relativ prosent og råvareinnsats per ferdig 100 g gir ikke slik prosentandel.
+
+For gjennomgått leverpostei av svin måler en separat score bare direkte deklarert andel svinelever i hele varen. Kombinert kjøtt-/leverandel med en uavklart «hvorav»-opplysning, flere leverkomponenter og andeler av en annen ingrediens gir ukjent score. Leverandelen er ikke total kjøttandel, et dokumentert jerninnhold eller en samlet helsevurdering. Ulikt fett og salt vises separat.
 
 For gjennomgått crème-fraîche-potetsalat viser en egen score bare deklarert andel potet eller potetskiver i retten. Potetflak, annen potetingrediens, manglende andel eller flere potetkomponenter gjør grunnlaget uavklart. De praktiske og snevre gruppene deler sammenligningsnøkkel for denne målingen; crème fraîche, fett, salt, sukker og øvrige ingredienser vises separat. Dette er ikke en samlet helse- eller smaksvurdering.
 

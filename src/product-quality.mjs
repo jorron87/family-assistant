@@ -1,6 +1,6 @@
 // A transparent category-specific ingredient-content score, not a health rating.
 // It never approves equivalence, changes a price, or supplies missing label facts.
-export const QUALITY_MODEL_VERSION='ingredient-content-v13';
+export const QUALITY_MODEL_VERSION='ingredient-content-v14';
 const clean=v=>String(v??'').normalize('NFC').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
 const number=v=>Number(v.replace(',','.'));
 const decimal='(?<![\\d.,])(\\d{1,4}(?:[.,]\\d{1,3})?)';
@@ -87,6 +87,16 @@ function wholegrainPastaPercent(ingredients){
  const re=new RegExp('^fullkorns?mel\\s+av\\s+durumhvete\\s*\\*?\\s*(?:\\(\\s*)?'+decimal+'\\s*%(?!\\s*\\)?\\s*\\(?\\s*av\\b)','i');
  const m=part.match(re);return m?uniqueFact([{value:number(m[1]),text:m[0],field:'ingredients'}],100):{fact:null,reason:'missing-declared-amount'};
 }
+// Liver share is not total meat and does not imply any specific iron content.
+function porkLiverPatePercent(ingredients){
+ const parts=components(ingredients).filter(part=>/lever/i.test(part));
+ if(parts.length!==1)return{fact:null,reason:parts.length?'multiple-liver-components':'missing-declared-amount'};
+ if((parts[0].match(/lever/gi)??[]).length!==1)return{fact:null,reason:'multiple-liver-components'};
+ const re=new RegExp('^(?:ingredienser:\\s*)?(?:svinelever|lever\\s+av\\s+svin)\\s*\\*?\\s*(?:\\(\\s*)?'+decimal+'\\s*%(?!\\s*\\)?\\s*\\(?\\s*(?:av|hvorav)\\b)','i');
+ const m=parts[0].match(re);if(!m)return{fact:null,reason:'ambiguous-liver-component'};
+ if(number(m[1])===0)return{fact:null,reason:'missing-or-invalid-liver-share'};
+ return uniqueFact([{value:number(m[1]),text:m[0],field:'ingredients'}],100);
+}
 // Only add individually declared tomato ingredients when every tomato component
 // is an unambiguous, directly declared un-concentrated ingredient. Tomato purée,
 // juice or an undeclared component would make the total a partial lower bound.
@@ -127,6 +137,7 @@ function profile(groupId){
  if(/^crispbread-/.test(id))return{id:'crispbread',label:'Deklarert kostfiber per 100 g',basis:'dietary-fiber-g-per-100g',unit:'g/100 g',target:30};
  if(id==='bread-wholegrain')return{id:'wholegrain-bread',label:'Deklarert kostfiber per 100 g grovbrød',basis:'dietary-fiber-g-per-100g',unit:'g/100 g',target:15};
  if(id==='pasta-wholegrain')return{id:'wholegrain-pasta',label:'Deklarert andel fullkornmel i pasta',basis:'declared-wholegrain-flour-ingredient-percent',unit:'%',target:100};
+ if(id==='pork-liver-pate')return{id:'pork-liver-pate',label:'Deklarert andel svinelever',basis:'declared-pork-liver-ingredient-percent',unit:'%',target:100};
  if(['muesli-fruit-raisin-pineapple-banana','muesli-fruit-practical'].includes(id))return{id:'fruit-muesli',label:'Deklarert kostfiber per 100 g fruktmüsli',basis:'dietary-fiber-g-per-100g',unit:'g/100 g',target:15};
  if(/^(?:fruit-spread-|jam-)/.test(id)){
   const fruit=[['blueberry','(?:vill)?blåbær'],['blackcurrant','solbær'],['apricot','aprikos(?:er)?'],['orange','appelsin(?:er)?'],['raspberry','bringebær'],['strawberry','jordbær']].find(([word])=>id.includes(word));
@@ -146,6 +157,7 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
  if(p.id==='fruit-muesli'){base.label='Kostfiber';base.limitations=['Måler kun deklarert kostfiber per 100 g spiseklar fruktmüsli.','15 g per 100 g er modellens skaleringsmål, ikke en anbefalt inntaksmengde eller grenseverdi.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering, og viser ikke direkte fullkornsandel.'];}
  if(p.id==='wholegrain-bread'){base.label='Kostfiber';base.limitations=['Måler kun deklarert kostfiber per 100 g ferdig grovbrød.','15 g per 100 g er modellens skaleringsmål, ikke en anbefaling eller en grenseverdi.','Dette er ikke fullkornsandel eller en samlet helse-, smaks- eller kvalitetsvurdering; null oppgis som uavklart for denne gruppen.'];}
  if(p.id==='wholegrain-pasta')base.limitations=['Måler kun uttrykkelig deklarert andel fullkornmel i hele pastaoppskriften.','Fullkornsmerking av hveten alene, fiberinnhold og andel av kornet er andre målegrunnlag.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering.'];
+ if(p.id==='pork-liver-pate')base.limitations=['Måler bare uttrykkelig deklarert andel svinelever i hele leverposteien.','Dette er ikke total kjøttandel eller en dokumentert mengde jern; fett, salt og øvrig oppskrift varierer og vises separat.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering.'];
  if(p.id==='pasta-tomato')base.limitations=['Måler bare uttrykkelig deklarerte tomatandeler i mild ferdig pastasaus.','Tomatpuré, konsentrert juice og uoppgitte tomatandeler gjør totalen uavklart og gir ingen score.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering; sukker og salt vises separat.'];
  if(p.id==='beans-in-tomato')base.limitations=['Måler kun deklarert bønneandel i det spiseklare helproduktet med saus.','Bønnenes vanninnhold og øvrig oppskrift kan variere; sukker og salt vises separat.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering.'];
  if(p.id==='chicken-coldcut')base.limitations=['Måler kun uttrykkelig deklarert andel av én kyllingkjøttingrediens i pålegget.','Steking, oppskrift, konsistens og saltinnhold kan variere; kjøttmengde brukt per 100 g ferdig vare har et annet målegrunnlag.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering.'];
@@ -171,6 +183,8 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
   result=potatoSaladPercent(ingredients);
  }else if(p.id==='wholegrain-pasta'){
   result=wholegrainPastaPercent(ingredients);
+ }else if(p.id==='pork-liver-pate'){
+  result=porkLiverPatePercent(ingredients);
  }else if(p.id==='pasta-tomato'){
   result=pastaTomatoPercent(ingredients);
  }else if(p.id==='beans-in-tomato'&&components(ingredients).filter(part=>/bønn|bean/i.test(part)).length>1){
