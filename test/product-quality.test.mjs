@@ -197,3 +197,24 @@ test('potato salad scores only an explicit and complete potato ingredient share'
  assert.equal(score('Poteter 60 %, olje.','potato-fries').status,'not-applicable');
  assert.equal(scoreProductQuality(p,{groupId:opts.groupId}).status,'review-required');
 });
+
+test('wholegrain bread fiber uses sourced per-100g facts and holds zeros and conflicts',()=>{
+ const opts={groupId:'bread-wholegrain--lower-fat',reviewCurrent:true},product={ingredients:'Sammalt hvete, vann, hvetemel.',sourceUrl:'https://store.example/bread',nutrition:{basis:'g',sourceUrl:'https://producer.example/bread',per100:{fiber:6,fat:2,sugars:1,salt:1}}};
+ const a=scoreProductQuality(product,opts),b=scoreProductQuality({...product,nutrition:{...product.nutrition,per100:{fiber:8.2,fat:3.7,sugars:1.1,salt:.8}}},{groupId:'bread-wholegrain--higher-fat',reviewCurrent:true});
+ assert.equal(a.score,40);assert.equal(b.score,54.7);assert.equal(a.comparisonKey,b.comparisonKey);assert.equal(a.measurement.sourceUrl,'https://producer.example/bread');assert.equal(a.nutrition.fat,2);
+ assert.notEqual(a.comparisonKey,scoreProductQuality(product,{groupId:'crispbread-wheat',reviewCurrent:true}).comparisonKey);assert.notEqual(a.comparisonKey,scoreProductQuality(product,{groupId:'muesli-fruit-practical',reviewCurrent:true}).comparisonKey);
+ for(const fiber of [undefined,0,-1,101,NaN])assert.equal(scoreProductQuality({...product,nutrition:{...product.nutrition,per100:{fiber}}},opts).score,null,String(fiber));
+ assert.equal(scoreProductQuality({...product,nutritionObservation:{fiberConflict:{evidence:'Etiketter er uenige'}}},opts).score,null);
+ assert.equal(scoreProductQuality({...product,nutrition:{...product.nutrition,sourceUrl:null}},opts).score,null);
+ assert.equal(scoreProductQuality({...product,nutrition:{...product.nutrition,basis:'ml'}},opts).score,null);
+ assert.equal(scoreProductQuality(product,{groupId:opts.groupId}).status,'review-required');
+ assert.equal(scoreProductQuality(product,{groupId:'bread-white',reviewCurrent:true}).status,'not-applicable');
+});
+
+test('wholegrain pasta scores the declared wholegrain flour in the recipe, not the wheat alone',()=>{
+ const id='pasta-wholegrain',a=score('Fullkornmel av durumhvete (65%), mel av durumhvete.',id),b=score('Fullkornmel av durumhvete (55%) og mel av durumhvete',id);
+ assert.equal(a.score,65);assert.equal(b.score,55);assert.equal(a.comparisonKey,b.comparisonKey);assert.equal(a.measurement.basis,'declared-wholegrain-flour-ingredient-percent');
+ for(const text of ['Fullkorn durumhvete, vann.','Fullkorn durumhvete semulina (100% italiensk hvete), vann.','Fullkornmel av durumhvete, vann.','Fullkornmel av durumhvete 65 % av melet, vann.','Fullkornmel av durumhvete (65 %) av melet, vann.','Fullkornmel av durumhvete 65 % (av melet), vann.','Fullkornmel av durumhvete (65%), sammalt rug, vann.','Fullkornmel av durumhvete (65%) og sammalt rug, vann.','Fullkornmel av durumhvete (101%), vann.','Kornblanding (fullkornmel av durumhvete 65 %), vann.'])assert.equal(score(text,id).score,null,text);
+ assert.equal(score('Fullkornmel av durumhvete (65%), mel av durumhvete.','pasta-durum-white').status,'not-applicable');
+ assert.equal(scoreProductQuality({ingredients:'Fullkornmel av durumhvete (65%), vann.'},{groupId:id}).status,'review-required');
+});

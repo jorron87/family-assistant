@@ -1,6 +1,6 @@
 // A transparent category-specific ingredient-content score, not a health rating.
 // It never approves equivalence, changes a price, or supplies missing label facts.
-export const QUALITY_MODEL_VERSION='ingredient-content-v12';
+export const QUALITY_MODEL_VERSION='ingredient-content-v13';
 const clean=v=>String(v??'').normalize('NFC').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
 const number=v=>Number(v.replace(',','.'));
 const decimal='(?<![\\d.,])(\\d{1,4}(?:[.,]\\d{1,3})?)';
@@ -77,6 +77,16 @@ function potatoSaladPercent(ingredients){
  if(found.length>1)return{fact:null,reason:'multiple-potato-components'};
  return uniqueFact(found,100);
 }
+// The explicit wholegrain-flour percentage describes the product recipe. A
+// claim that the wheat itself is wholegrain does not establish the same basis.
+function wholegrainPastaPercent(ingredients){
+ const componentsWithWholegrain=components(ingredients).filter(part=>/fullkorn|sammalt/i.test(part));
+ if(componentsWithWholegrain.length!==1)return{fact:null,reason:componentsWithWholegrain.length?'multiple-wholegrain-components':'missing-declared-amount'};
+ const part=componentsWithWholegrain[0];
+ if((part.match(/fullkorn|sammalt/gi)??[]).length!==1)return{fact:null,reason:'multiple-wholegrain-components'};
+ const re=new RegExp('^fullkorns?mel\\s+av\\s+durumhvete\\s*\\*?\\s*(?:\\(\\s*)?'+decimal+'\\s*%(?!\\s*\\)?\\s*\\(?\\s*av\\b)','i');
+ const m=part.match(re);return m?uniqueFact([{value:number(m[1]),text:m[0],field:'ingredients'}],100):{fact:null,reason:'missing-declared-amount'};
+}
 // Only add individually declared tomato ingredients when every tomato component
 // is an unambiguous, directly declared un-concentrated ingredient. Tomato purée,
 // juice or an undeclared component would make the total a partial lower bound.
@@ -115,6 +125,8 @@ function profile(groupId){
  if(id==='pasta-sauce-tomato-mild-herbs')return{id:'pasta-tomato',label:'Deklarert tomatandel i saus',basis:'declared-unconcentrated-tomato-percent',unit:'%',target:100};
  if(id==='beans-white-in-tomato-sauce')return{id:'beans-in-tomato',label:'Deklarert bønneandel i tomatbønner',basis:'declared-bean-percent',unit:'%',target:100,token:'(?:utbløtte\\s+)?(?:hvite\\s+)?bønner'};
  if(/^crispbread-/.test(id))return{id:'crispbread',label:'Deklarert kostfiber per 100 g',basis:'dietary-fiber-g-per-100g',unit:'g/100 g',target:30};
+ if(id==='bread-wholegrain')return{id:'wholegrain-bread',label:'Deklarert kostfiber per 100 g grovbrød',basis:'dietary-fiber-g-per-100g',unit:'g/100 g',target:15};
+ if(id==='pasta-wholegrain')return{id:'wholegrain-pasta',label:'Deklarert andel fullkornmel i pasta',basis:'declared-wholegrain-flour-ingredient-percent',unit:'%',target:100};
  if(['muesli-fruit-raisin-pineapple-banana','muesli-fruit-practical'].includes(id))return{id:'fruit-muesli',label:'Deklarert kostfiber per 100 g fruktmüsli',basis:'dietary-fiber-g-per-100g',unit:'g/100 g',target:15};
  if(/^(?:fruit-spread-|jam-)/.test(id)){
   const fruit=[['blueberry','(?:vill)?blåbær'],['blackcurrant','solbær'],['apricot','aprikos(?:er)?'],['orange','appelsin(?:er)?'],['raspberry','bringebær'],['strawberry','jordbær']].find(([word])=>id.includes(word));
@@ -132,6 +144,8 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
  if(!p)return{...base,reasons:['no-category-model']};
  if(p.id==='crispbread'){base.label='Kostfiber';base.limitations=['Måler kun deklarert kostfiber per 100 g knekkebrød.','30 g per 100 g er modellens skaleringsmål, ikke en anbefalt inntaksmengde eller grenseverdi.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering, og viser ikke direkte fullkornsandel.'];}
  if(p.id==='fruit-muesli'){base.label='Kostfiber';base.limitations=['Måler kun deklarert kostfiber per 100 g spiseklar fruktmüsli.','15 g per 100 g er modellens skaleringsmål, ikke en anbefalt inntaksmengde eller grenseverdi.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering, og viser ikke direkte fullkornsandel.'];}
+ if(p.id==='wholegrain-bread'){base.label='Kostfiber';base.limitations=['Måler kun deklarert kostfiber per 100 g ferdig grovbrød.','15 g per 100 g er modellens skaleringsmål, ikke en anbefaling eller en grenseverdi.','Dette er ikke fullkornsandel eller en samlet helse-, smaks- eller kvalitetsvurdering; null oppgis som uavklart for denne gruppen.'];}
+ if(p.id==='wholegrain-pasta')base.limitations=['Måler kun uttrykkelig deklarert andel fullkornmel i hele pastaoppskriften.','Fullkornsmerking av hveten alene, fiberinnhold og andel av kornet er andre målegrunnlag.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering.'];
  if(p.id==='pasta-tomato')base.limitations=['Måler bare uttrykkelig deklarerte tomatandeler i mild ferdig pastasaus.','Tomatpuré, konsentrert juice og uoppgitte tomatandeler gjør totalen uavklart og gir ingen score.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering; sukker og salt vises separat.'];
  if(p.id==='beans-in-tomato')base.limitations=['Måler kun deklarert bønneandel i det spiseklare helproduktet med saus.','Bønnenes vanninnhold og øvrig oppskrift kan variere; sukker og salt vises separat.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering.'];
  if(p.id==='chicken-coldcut')base.limitations=['Måler kun uttrykkelig deklarert andel av én kyllingkjøttingrediens i pålegget.','Steking, oppskrift, konsistens og saltinnhold kan variere; kjøttmengde brukt per 100 g ferdig vare har et annet målegrunnlag.','Dette er ikke en samlet helse-, smaks- eller kvalitetsvurdering.'];
@@ -141,9 +155,9 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
  const cross=product?.nutritionObservation?.crossSourceLabel,primary=product?.nutritionObservation?.primaryLabel,ingredients=clean(product?.ingredients||cross?.ingredients),description=clean(product?.description),m=product?.nutrition?.basis==='g'?product.nutrition.per100:null;
  base.nutrition=m?{basis:'per 100 g',fat:Number.isFinite(m.fat)?m.fat:null,fiber:Number.isFinite(m.fiber)?m.fiber:null,sugars:Number.isFinite(m.sugars)?m.sugars:null,salt:Number.isFinite(m.salt)?m.salt:null}:null;
  let result;
- if(p.id==='crispbread'||p.id==='fruit-muesli'){
+ if(p.id==='crispbread'||p.id==='fruit-muesli'||p.id==='wholegrain-bread'){
   const fiber=m?.fiber,sourceUrl=product?.nutrition?.sourceUrl;
-  result=product?.nutritionObservation?.fiberConflict?{fact:null,reason:'conflicting-fiber-labels'}:Number.isFinite(fiber)&&fiber>=0&&fiber<=100&&/^https:\/\/\S+$/i.test(sourceUrl??'')?{fact:{value:fiber,evidence:[{text:`Kostfiber ${fiber} g per 100 g`,field:'nutrition.per100.fiber'}]},reason:null}:{fact:null,reason:'missing-or-invalid-fiber-per-100g'};
+  result=product?.nutritionObservation?.fiberConflict?{fact:null,reason:'conflicting-fiber-labels'}:Number.isFinite(fiber)&&(fiber>0||fiber===0&&p.id!=='wholegrain-bread')&&fiber<=100&&/^https:\/\/\S+$/i.test(sourceUrl??'')?{fact:{value:fiber,evidence:[{text:`Kostfiber ${fiber} g per 100 g`,field:'nutrition.per100.fiber'}]},reason:null}:{fact:null,reason:'missing-or-invalid-fiber-per-100g'};
  }else if(p.id==='fishsticks'){
   result=fishsticksPercent(ingredients);
  }else if(p.id==='fish-gratin'){
@@ -154,6 +168,8 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
   result=cookedHamPercent(ingredients);
  }else if(p.id==='potato-salad'){
   result=potatoSaladPercent(ingredients);
+ }else if(p.id==='wholegrain-pasta'){
+  result=wholegrainPastaPercent(ingredients);
  }else if(p.id==='pasta-tomato'){
   result=pastaTomatoPercent(ingredients);
  }else if(p.id==='beans-in-tomato'&&components(ingredients).filter(part=>/bønn|bean/i.test(part)).length>1){
@@ -179,7 +195,7 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
   }
  }
  if(!result.fact)return{...base,reasons:[result.reason,...(p.id==='ketchup'?['puree-percent-is-not-fresh-tomato-input']:[])]};
- const measurement={...result.fact,name:p.label,unit:p.unit,basis:p.basis,sourceUrl:p.id==='crispbread'||p.id==='fruit-muesli'?product?.nutrition?.sourceUrl??null:product?.sourceUrl??null};
+ const measurement={...result.fact,name:p.label,unit:p.unit,basis:p.basis,sourceUrl:['crispbread','fruit-muesli','wholegrain-bread'].includes(p.id)?product?.nutrition?.sourceUrl??null:product?.sourceUrl??null};
  measurement.evidence=measurement.evidence.map(e=>({...e,field:e.field==='ingredients'&&!product?.ingredients?'crossSourceLabel.ingredients':e.field,sourceUrl:e.field==='nutrition.per100.fiber'?product?.nutrition?.sourceUrl??null:e.field.startsWith('primaryLabel')?primary?.primaryUrl??null:e.field.startsWith('crossSourceLabel')||e.field==='ingredients'&&!product?.ingredients?cross?.sourceUrl??product?.sourceUrl??null:product?.sourceUrl??null}));
  return{...base,status:'scored',score:Math.round(Math.min(100,result.fact.value/p.target*100)*10)/10,comparisonKey:QUALITY_MODEL_VERSION+':'+p.id+(p.subtype?':'+p.subtype:'')+':'+p.basis,criterion:p.label,measurement,normalization:{target:p.target,unit:p.unit,formula:'min(100, deklarert mengde / målverdi × 100)'},reasons:[]};
 }
