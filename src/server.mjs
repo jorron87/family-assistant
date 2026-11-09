@@ -91,6 +91,7 @@ async function handle(req, res) {
     if(path==='/api/shopping'&&method==='GET')return send(res,200,{...store.shopping.view(),oda:oda.status(),kassal:kassal.status()});
     if(path==='/api/shopping/family'&&method==='GET')return send(res,200,{...store.shopping.familyView(),oda:oda.status()});
     if(path==='/api/shopping/summary'&&method==='GET')return send(res,200,store.shopping.familySummary());
+    if(path==='/api/shopping/product-info'&&method==='GET'){const params=new URL(req.url,`http://${host}`).searchParams;return send(res,200,store.shopping.productInfo({key:params.get('key'),watchId:params.get('watchId')}));}
     if(path==='/api/shopping/feed'&&method==='POST')return send(res,200,store.shopping.feed(await json(req)));
     if(path==='/api/shopping/source'&&method==='GET'){const offer=store.shopping.offerSource(new URL(req.url,`http://${host}`).searchParams.get('offerId'));const loaded=await offerSources.load(offer.sourceUrl);return send(res,200,loaded.kind==='pdf'?{kind:'pdf',page:flyerPage(offer.evidence)}:{kind:'page',qr:await QRCode.toDataURL(offer.sourceUrl,{width:360,margin:2})});}
     if(path==='/api/shopping/source/file'&&method==='GET'){const offer=store.shopping.offerSource(new URL(req.url,`http://${host}`).searchParams.get('offerId'));const loaded=await offerSources.load(offer.sourceUrl);if(loaded.kind!=='pdf')return send(res,404,{error:'Kilden er ikke en PDF.'});return send(res,200,loaded.bytes,'application/pdf');}

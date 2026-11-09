@@ -250,3 +250,33 @@ test('a line moved to another store can go back to Oda, as Oda variants and in o
  const result=await cart.list({action:'toOda',id:again.id,productId:1});
  assert.equal(result.inCart,true);assert.deepEqual(calls.map(x=>[x.productId,x.quantity]),[[1,1]]);assert.equal(f.shop.familyView().list.open.some(x=>x.id===again.id),false);
 });
+
+test('the item card shows the library score, its measurement and the label',t=>{
+ const f=fixture(t);f.native(f.rows[0]);f.d.products[1].nutrition={basis:'g',per100:{kcal:90,protein:1,fat:0,carbs:20,salt:2},sourceUrl:'https://oda.com/no/products/2-vare/',evidence:'Etikett'};f.d.products[1].metadataFingerprint=productMetadataFingerprint(f.d.products[1]);f.d.memberships[1].reviewedFingerprint=f.d.products[1].metadataFingerprint;f.write();
+ const info=f.shop.productInfo({key:'kassal:ODA_NO:2'});
+ assert.equal(info.product.name,'Billig ketchup 500 g');assert.equal(info.product.storeName,'Oda');assert.equal(info.product.ingredients,tomato(100));assert.equal(info.product.nutrition.per100.salt,2);
+ const q=info.groups[0].quality;assert.equal(q.score,50);assert.equal(q.value,100);assert.equal(q.unit,'g/100 g');assert.ok(q.limitations.length);assert.equal(q.rank,3);assert.equal(q.of,3);
+ assert.deepEqual(q.peers.map(x=>[x.score,x.own]),[[100,false],[74,false],[50,true]]);
+ assert.equal(info.groups[0].equivalenceEvidence,'Vanlig tomatketchup lest');
+});
+
+test('the item card finds a product from a watch or list line, and says when nothing is known',t=>{
+ const f=fixture(t);f.native(f.rows[0]);
+ assert.equal(f.shop.productInfo({watchId:f.w.id}).product.name,'Vanlig ketchup 500 g');
+ assert.equal(f.shop.productInfo({key:'kassal:ODA_NO:999'}).product,null);
+ assert.equal(f.shop.productInfo({key:'__proto__',watchId:'__proto__'}).product,null);
+ const unscored=f.shop.productInfo({key:'kassal:MENY_NO:4'}).groups[0];assert.equal(unscored.quality,null);assert.equal(unscored.qualityStatus,'unknown');
+ const row=f.shop.familyView().odaDraft.items[0];assert.equal(row.productKey,'kassal:ODA_NO:1');assert.equal(row.others.find(x=>x.storeName==='MENY').productKey,'kassal:MENY_NO:4');
+ const entry=f.shop.list({action:'add',alternative:true,watchId:f.w.id,name:'Tomatketchup',storeName:'MENY',packs:1,packAmount:.5,unit:'kg',unitPrice:24,productKey:'kassal:MENY_NO:4'});
+ assert.equal(f.shop.familyView().list.open.find(x=>x.id===entry.id).productKey,'kassal:MENY_NO:4');
+ const line=f.shop.cartReview({groups:[{items:[{product:{id:1,name:'Ketchup'},quantity:1,totalGrossAmount:'30.00'}]}],validationMessages:[],totalGrossAmount:'30.00'}).lines[0];assert.equal(line.productKey,'kassal:ODA_NO:1');
+});
+
+test('the item card shares places on equal scores and hides raw label data in the evidence',t=>{
+ const f=fixture(t);f.d.memberships[0].equivalenceEvidence='Etikett lest. Kildens per100-verdier: {"kcal":102,"fat":0.1} Pakning i navnet.';f.write();
+ for(const row of [2])f.rows[row].p.ingredients=tomato(200);
+ f.d.products[0].ingredients=tomato(200);f.d.products[0].metadataFingerprint=productMetadataFingerprint(f.d.products[0]);f.d.memberships[0].reviewedFingerprint=f.d.products[0].metadataFingerprint;f.write();
+ const info=f.shop.productInfo({key:'kassal:ODA_NO:1'}).groups[0];
+ assert.equal(info.quality.score,100);assert.equal(info.quality.rank,1,'a tie at the top is first place');
+ assert.equal(info.equivalenceEvidence,'Etikett lest. Pakning i navnet.');
+});

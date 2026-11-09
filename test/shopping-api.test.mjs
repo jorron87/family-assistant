@@ -23,6 +23,7 @@ test('shopping stays private, kiosk actions are limited, and order state survive
   for(const path of ['library-link','library-audit-ack'])assert.equal((await post(kiosk+'/api/shopping/'+path,{})).status,405);
   assert.equal((await post(kiosk+'/api/shopping/stock-scan',{action:'lookup',ean:'5901234123457'})).status,200);
   assert.equal((await post(mobile+'/send/api/shopping/stock-scan',{action:'lookup',ean:'5901234123457'})).status,401);
+  assert.equal((await fetch(kiosk+'/api/shopping/product-info?key=x')).status,200);assert.equal((await fetch(mobile+'/send/api/shopping/product-info?key=x')).status,401);
   assert.equal((await fetch(mobile+'/send/barcode.mjs')).status,200);assert.equal((await fetch(kiosk+'/barcode.mjs')).status,200);
   assert.equal((await post(base+'/api/shopping/kassal/configure',{apiKey:'synthetic-test-kassal-token'},{Origin:'https://untrusted.example'})).status,403);
   assert.equal((await post(base+'/api/shopping/kassal/configure',{apiKey:'synthetic-test-kassal-token'})).status,200);

@@ -231,19 +231,21 @@ export function createProductLibrary(input,{now=new Date()}={}) {
  /** Compact, time-independent read model for the shopping views. Price age is
   * judged by the reader at use, so the large source never loads in the server. */
  function shoppingIndex() {
-  const out={groups:{},members:{},products:{}};
+  const out={groups:{},members:{},products:{},qualityNotes:{}};
+  const short=(value,max)=>nonempty(value)?value.trim().slice(0,max):null;
   for(const [id,g] of groups){
    if(invalidGroups.has(id))continue;
-   out.groups[id]={name:g.name,category:g.category,unit:g.canonicalUnit,fingerprint:groupMetadataFingerprint(g),inclusion:g.inclusionCriteria,exclusions:g.exclusions};
+   out.groups[id]={name:g.name,category:g.category,unit:g.canonicalUnit,fingerprint:groupMetadataFingerprint(g),inclusion:g.inclusionCriteria,exclusions:g.exclusions,qualityBasis:g.qualityBasis,comparisonBasis:g.comparisonBasis};
    out.members[id]=(byGroup.get(id)??[]).filter(m=>products.has(m.productKey)&&!invalidProducts.has(m.productKey)&&!badFingerprints.has(m.productKey)).map(m=>{
     const a=assess(m,g,{ageless:true}),q=a.quality;
-    return {k:m.productKey,s:m.status,r:a.reviewCurrent,u:a.eligible?a.unitPrice:null,q:q.status==='scored'?{score:q.score,key:q.comparisonKey,label:q.label,criterion:q.criterion}:null};
+    if(q.status==='scored')out.qualityNotes[q.comparisonKey]=q.limitations;
+    return {k:m.productKey,s:m.status,r:a.reviewCurrent,u:a.eligible?a.unitPrice:null,q:q.status==='scored'?{score:q.score,key:q.comparisonKey,label:q.label,criterion:q.criterion,value:q.measurement?.value??null,unit:q.measurement?.unit??null,evidence:short(q.measurement?.evidence?.[0]?.text,200)}:null,qs:q.status,qr:q.reasons?.[0]??null,e:short(m.equivalenceEvidence,400),qe:short(m.qualityEvidence,300)};
    });
   }
   for(const [key,p] of products){
    if(invalidProducts.has(key)||badFingerprints.has(key))continue;
    const q=priceOf(key,{ageless:true}),n=p.nutrition;
-   out.products[key]={store:p.store,id:p.id,name:p.name,ean:p.ean??null,brand:p.brand??null,textHash:productTextHash(p),pack:positive(p.canonicalPackAmount)?p.canonicalPackAmount:null,packKnown:nonempty(p.packEvidence),unit:p.unit??null,rawPack:p.rawPack?{weight:p.rawPack.weight??null,weightUnit:p.rawPack.weightUnit??null}:null,sourceUrl:p.sourceUrl??null,attributes:p.attributes??null,available:p.available!==false&&p.delisted!==true,nutrition:n?{basis:n.basis,per100:n.per100,sourceUrl:n.sourceUrl??null}:null,
+   out.products[key]={store:p.store,id:p.id,name:p.name,ean:p.ean??null,brand:p.brand??null,ingredients:short(p.ingredients,2000),description:short(p.description,800),packEvidence:short(p.packEvidence,160),textHash:productTextHash(p),pack:positive(p.canonicalPackAmount)?p.canonicalPackAmount:null,packKnown:nonempty(p.packEvidence),unit:p.unit??null,rawPack:p.rawPack?{weight:p.rawPack.weight??null,weightUnit:p.rawPack.weightUnit??null}:null,sourceUrl:p.sourceUrl??null,attributes:p.attributes??null,available:p.available!==false&&p.delisted!==true,nutrition:n?{basis:n.basis,per100:n.per100,sourceUrl:n.sourceUrl??null}:null,
     quote:{grossPackPrice:q.grossPackPrice,grossUnitPrice:q.grossUnitPrice,unit:q.unit,directUnitVerified:q.directUnitVerified,receiptAt:q.receiptAt,reasons:q.reasons,sourceUrl:q.sourceUrl}};
   }
   return out;

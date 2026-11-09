@@ -421,6 +421,47 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
 
   // ---- Handleliste ----
   // Puts a product from another chain on that chain's part of the shopping list.
+  // ---- Varekort ----
+  const productName=(label,info)=>info.key||info.watchId?button(label,()=>productDialog(info,label),'shop-product-link'):el('strong',label);
+  const LABEL_TEXT={organic:'Økologisk',lactoseFree:'Laktosefri',glutenFree:'Glutenfri',frozen:'Frysevare'};
+  const NUTRIENTS=[['kcal','Energi','kcal'],['fat','Fett','g'],['carbs','Karbohydrater','g'],['sugars','Sukkerarter','g'],['fiber','Kostfiber','g'],['protein','Protein','g'],['salt','Salt','g']];
+  function qualityCard(group) {
+    const box=el('section',undefined,'shop-quality'),q=group.quality;
+    if(!q){box.append(el('p',group.qualityStatus==='unknown'?'Kvalitetsscore mangler: etiketten oppgir ikke mengden som måles.':'Vi har ingen kvalitetsmodell for denne varetypen ennå.','shop-sub'));return box;}
+    const head=el('div',undefined,'shop-quality-head');head.append(el('span',nf(0).format(q.score),'shop-quality-score'),el('span','av 100 · '+q.label,'shop-sub'));box.append(head);
+    box.append(el('p',q.criterion+(q.value!=null?': '+nf(1).format(q.value)+' '+(q.unit??''):'')));
+    if(q.evidence)box.append(el('p','Fra etiketten: «'+q.evidence+'»','shop-sub'));
+    if(q.rank&&q.of>1)box.append(el('p','Nummer '+q.rank+' av '+q.of+' varer målt på samme måte.'));
+    if(q.peers.length>1){const list=el('div',undefined,'shop-quality-peers');for(const peer of q.peers){const row=el('div',undefined,'shop-quality-peer'+(peer.own?' own':''));row.append(el('span',nf(0).format(peer.score),'shop-quality-peer-score'),el('span',peer.name),el('span',peer.unitPrice!=null?price(peer.unitPrice):'','shop-sub'));list.append(row);}box.append(list);}
+    if(q.limitations.length)box.append(el('p',q.limitations.join(' '),'shop-sub'));
+    return box;
+  }
+  function renderProductInfo(holder,data) {
+    holder.replaceChildren();holder.className='';
+    if(!data.available){holder.append(el('p','Produktbiblioteket er ikke tilgjengelig akkurat nå.','shop-sub'));return;}
+    if(!data.product){holder.append(el('p',(data.watchName?data.watchName+' er':'Denne varen er')+' ikke med i produktbiblioteket ennå.','shop-sub'));return;}
+    const p=data.product,section=(title,...nodes)=>{const node=el('section',undefined,'shop-product-section');node.append(el('h3',title),...nodes);holder.append(node);};
+    const top=el('div',undefined,'shop-product-top'),text=el('div',undefined,'shop-list-text');
+    text.append(el('strong',p.name),el('span',[p.brand,p.storeName,p.packAmount&&p.unit?packLabel(p.packAmount,p.unit):null,p.price.grossPackPrice!=null?price(p.price.grossPackPrice)+(p.price.fresh?'':' (eldre pris)'):null].filter(Boolean).join(' · '),'shop-sub'));
+    top.append(thumb(p.image),text);holder.append(top);
+    if(p.labels.length)holder.append(el('p',p.labels.map(x=>LABEL_TEXT[x]??x).join(' · '),'shop-sub'));
+    const approved=data.groups.filter(g=>g.status==='approved');
+    section('Kvalitet',...(approved.length?[...new Map(approved.map(g=>[g.quality?g.name:'none',g])).values()].slice(0,3).map(qualityCard):[el('p','Varen er ikke godkjent i noen varefamilie ennå.','shop-sub')]));
+    if(p.ingredients)section('Ingredienser',el('p',p.ingredients));
+    if(p.nutrition){const table=el('dl',undefined,'shop-facts');for(const [key,label,unit] of NUTRIENTS){const value=p.nutrition.per100?.[key];if(typeof value==='number')table.append(el('dt',label),el('dd',nf(1).format(value)+' '+unit));}section('Næring per 100 '+p.nutrition.basis,table);}
+    if(p.description)section('Beskrivelse',el('p',p.description,'shop-sub'));
+    for(const group of approved.slice(0,3))section('Varefamilie: '+group.name,...[group.equivalenceEvidence?el('p',group.equivalenceEvidence):null,group.qualityEvidence?el('p',group.qualityEvidence,'shop-sub'):null,group.comparisonBasis?el('p','Sammenlignes: '+group.comparisonBasis,'shop-sub'):null].filter(Boolean));
+    const facts=[p.ean?'Strekkode '+p.ean:null,p.packEvidence].filter(Boolean);if(facts.length)holder.append(el('p',facts.join(' · '),'shop-sub'));
+    if(p.sourceUrl&&!isKiosk()){const source=link('Se varen hos kilden ↗',p.sourceUrl);source.className='shop-source';holder.append(source);}
+  }
+  async function productDialog(info,title) {
+    const box=el('dialog',undefined,'shop-dialog shop shop-product'),holder=el('div','Henter varen …','shop-sub'),close=()=>{box.close();box.remove();};
+    const actions=el('div',undefined,'shop-actions');actions.append(button('Lukk',close));
+    box.append(el('h2',title),holder,actions);box.oncancel=event=>{event.preventDefault();close();};
+    document.body.append(box);box.showModal();
+    try{const query=new URLSearchParams();if(info.key)query.set('key',info.key);if(info.watchId)query.set('watchId',info.watchId);const found=await api('/product-info?'+query);if(box.isConnected)renderProductInfo(holder,found);}
+    catch(error){if(box.isConnected)holder.textContent=error.message;}
+  }
   const placeAction=place=>place.odaProductId?'Legg i Oda-kurven':'Legg på listen';
   function moveToOda(entryId,productId) {
     let note=null;
@@ -430,7 +471,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     if(place.odaProductId)return moveToOda(context.replaceEntry,place.odaProductId);
     const wanted=context.amount(),packs=place.packAmount&&wanted?Math.max(1,Math.ceil(wanted/place.packAmount-.001)):1,cost=place.unitPrice*(place.packAmount?packs*place.packAmount:0);
     const saving=wanted&&place.packAmount?Math.max(0,context.currentUnit*wanted-cost):null;
-    const body=place.offerId?{action:'add',offerId:place.offerId,packs:place.maxPacks?Math.min(place.maxPacks,packs):packs}:{action:'add',alternative:true,...(context.watchId?{watchId:context.watchId}:{}),name:context.name,detail:place.name,storeName:place.storeName,packs,packAmount:place.packAmount,unit:context.unit,unitPrice:place.unitPrice,saving:saving===null?null:Math.round(saving*100)/100,imageId:place.image};
+    const body=place.offerId?{action:'add',offerId:place.offerId,packs:place.maxPacks?Math.min(place.maxPacks,packs):packs}:{action:'add',alternative:true,...(context.watchId?{watchId:context.watchId}:{}),name:context.name,detail:place.name,storeName:place.storeName,productKey:place.productKey,packs,packAmount:place.packAmount,unit:context.unit,unitPrice:place.unitPrice,saving:saving===null?null:Math.round(saving*100)/100,imageId:place.image};
     act(async()=>{await api('/list',body);if(context.replaceEntry)await api('/list',{action:'remove',id:context.replaceEntry});},'Lagt på listen for '+place.storeName+'.',context.removeFromCart,context.removeFromCart?'Fjern fra kurven':undefined);
   }
   function cheaperBlock(item,context) {
@@ -455,14 +496,14 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     return details('variant:'+watchId,'Andre varianter ('+(variants.length+others.length)+')',node=>{
       for(const variant of variants){
         const row=el('div',undefined,'shop-variant'),text=el('div',undefined,'shop-list-text'),chosen=variant.productId===currentId;
-        text.append(el('strong',variant.name),el('span',price(variant.packPrice)+' · '+price(variant.unitPrice)+'/'+unit+(variant===variants[0]?(others.length?' · billigst hos Oda':' · billigst'):'')+(variant.quality?` · ${variant.quality.label} ${nf(0).format(variant.quality.score)} av 100`:'')+(variant.library?' · annet merke':'')+(variant.maxAtOda!=null?' · maks '+variant.maxAtOda:''),'shop-sub'));
+        text.append(productName(variant.name,{key:variant.productKey}),el('span',price(variant.packPrice)+' · '+price(variant.unitPrice)+'/'+unit+(variant===variants[0]?(others.length?' · billigst hos Oda':' · billigst'):'')+(variant.quality?` · ${variant.quality.label} ${nf(0).format(variant.quality.score)} av 100`:'')+(variant.library?' · annet merke':'')+(variant.maxAtOda!=null?' · maks '+variant.maxAtOda:''),'shop-sub'));
         row.append(thumb(variant.image),text,chosen?el('span','Valgt','shop-onlist'):button('Velg',()=>{if(onPick)return onPick(variant);draftEdits.delete(watchId);act(()=>api('/list',{action:'variant',watchId,productId:variant.productId}),'Oda-variant valgt.');}));
         node.append(row);
       }
       if(others.length)node.append(el('p','Samme varefamilie hos andre kjeder','shop-sub shop-variant-head'));
       for(const other of others){
         const row=el('div',undefined,'shop-variant'),text=el('div',undefined,'shop-list-text');
-        text.append(el('strong',other.name),el('span',[other.storeName+(other.online?' (+ frakt)':''),other.packPrice!=null?price(other.packPrice):null,price(other.unitPrice)+'/'+unit,other===others[0]?'billigst':null,other.offer?'tilbud':null,other.quality?`${other.quality.label} ${nf(0).format(other.quality.score)} av 100`:null,other.own?null:'utenfor butikkene deres'].filter(Boolean).join(' · '),'shop-sub'));
+        text.append(productName(other.name,{key:other.productKey}),el('span',[other.storeName+(other.online?' (+ frakt)':''),other.packPrice!=null?price(other.packPrice):null,price(other.unitPrice)+'/'+unit,other===others[0]?'billigst':null,other.offer?'tilbud':null,other.quality?`${other.quality.label} ${nf(0).format(other.quality.score)} av 100`:null,other.own?null:'utenfor butikkene deres'].filter(Boolean).join(' · '),'shop-sub'));
         row.append(thumb(other.image),text);if(context&&other.storeName!==context.currentStore)row.append(button(placeAction(other),()=>addElsewhere(other,context)));node.append(row);
       }
     },'shop-variants');
@@ -472,7 +513,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
     const tick=el('input');tick.type='checkbox';tick.checked=!!entry.checkedAt;tick.setAttribute('aria-label',`Kjøpt: ${entry.name}`);
     tick.onchange=()=>act(()=>api('/list',{action:tick.checked?'check':'uncheck',id:entry.id}),tick.checked&&entry.watchId?'Lagt på lager.':null);
     const text=el('div',undefined,'shop-list-text'),qty=entry.packs&&entry.packAmount?`${entry.packs} × ${packLabel(entry.packAmount,entry.unit)} `:'';
-    text.append(el('strong',qty+entry.name));
+    text.append(productName(qty+entry.name,{key:entry.productKey,watchId:entry.watchId}));
     const facts=[entry.cartError,entry.reason,entry.detail,entry.unitPrice?`${price(entry.unitPrice)}/${entry.unit}`:null,entry.saving?`Spar ${kr(entry.saving)}`:null,entry.cheaper&&!entry.places?.length?`Billigere nå: ${price(entry.cheaper.unitPrice)}/${entry.unit} hos ${entry.cheaper.storeName}`:null,entry.expired?'Tilbudet er over':entry.validTo?`Til ${dayLabel(entry.validTo)}`:null].filter(Boolean);
     if(facts.length)text.append(el('span',facts.join(' · '),'shop-sub'+(entry.expired?' shop-expired':'')));
     row.append(tick,thumb(entry.image),text);
@@ -511,7 +552,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
   }
   function cartLine(line) {
     const row=el('div',undefined,'shop-draft-row');
-    const text=el('div',undefined,'shop-list-text');text.append(el('strong',line.name),el('span',[line.total?kr(Number(line.total)):null,line.unitPrice?price(line.unitPrice)+'/'+line.unit:null].filter(Boolean).join(' · '),'shop-sub'));
+    const text=el('div',undefined,'shop-list-text');text.append(productName(line.name,{key:line.productKey,watchId:line.watchId}),el('span',[line.total?kr(Number(line.total)):null,line.unitPrice?price(line.unitPrice)+'/'+line.unit:null].filter(Boolean).join(' · '),'shop-sub'));
     const swapTo=variant=>act(async()=>{const quantity=line.packAmount?Math.max(1,Math.round(line.quantity*line.packAmount/variant.packAmount)):line.quantity;cart=await api('/oda/swap',{requestId:crypto.randomUUID(),fromProductId:line.productId,toProductId:variant.productId,quantity,watchId:line.watchId});},'Variant byttet i kurven.');
     const value=el('span',String(line.quantity),'shop-step-value'),step=el('div',undefined,'shop-step');
     const change=delta=>{
@@ -577,7 +618,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},base='/api/
         const on=el('input');on.type='checkbox';on.checked=state.on;on.setAttribute('aria-label',`Ta med ${item.name}`);
         on.onchange=()=>{state.on=on.checked;state.userOn=true;armed=false;refresh();};
         const text=el('div',undefined,'shop-list-text'),note={excellent:'Svært bra pris nå',good:'Bra pris nå',dear:'Dyrere enn vanlig, derfor lite'}[item.tier];
-        text.append(el('strong',item.name),el('span',[item.productName,`${price(item.packPrice)} per pakke · ${price(item.unitPrice)}/${item.unit}`,note,draft.items.some(x=>x.stockKnown)&&!item.stockKnown?'Lager ikke talt':null].filter(Boolean).join(' · '),'shop-sub'));
+        text.append(productName(item.name,{key:item.productKey,watchId:item.watchId}),el('span',[item.productName,`${price(item.packPrice)} per pakke · ${price(item.unitPrice)}/${item.unit}`,note,draft.items.some(x=>x.stockKnown)&&!item.stockKnown?'Lager ikke talt':null].filter(Boolean).join(' · '),'shop-sub'));
         const value=el('span',String(state.packs),'shop-step-value'),step=el('div',undefined,'shop-step');
         const change=delta=>{state.packs=Math.min(item.maxAtOda??100,Math.max(1,state.packs+delta));state.userPacks=true;value.textContent=String(state.packs);armed=false;refresh();cheaper?.refresh();};
         step.append(button('−',()=>change(-1)),value,button('+',()=>change(1)));

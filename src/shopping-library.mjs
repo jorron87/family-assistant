@@ -4,7 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {dirname,join} from 'node:path';
 import {readProductLibrary,productTextHash} from './product-library.mjs';
 
-const INDEX_VERSION=1,FRESH_MS=48*3600000,RETRY_MS=60000;
+const INDEX_VERSION=2,FRESH_MS=48*3600000,RETRY_MS=60000;
 const low=value=>String(value??'').normalize('NFC').toLocaleLowerCase('nb-NO');
 const script=fileURLToPath(new URL('../scripts/product-library.mjs',import.meta.url));
 const stampOf=file=>{const info=statSync(file);return `${info.mtimeMs}:${info.size}`;};
@@ -48,15 +48,17 @@ export function createIndexReader(index) {
    return {...q,fresh:ok,reasons};
   };
   const rowOf=(row,groupId)=>{const product=index.products[row.k],price=priceOf(product);return {productKey:row.k,groupId,status:row.s,reviewCurrent:row.r,product,price,unitPrice:row.u,eligible:row.u!==null&&price.fresh&&!price.reasons.length,quality:row.q};};
-  const members=groupId=>(index.members[groupId]??[]).map(row=>rowOf(row,groupId));
+  const own=(map,key)=>Object.hasOwn(map,key)?map[key]:null;
+  const members=groupId=>(own(index.members,groupId)??[]).map(row=>rowOf(row,groupId));
   const groupsOf=key=>memberships.get(key)??[];
   return {
    builtAt:index.builtAt,
-   group:id=>index.groups[id]??null,
-   product:key=>index.products[key]??null,
+   group:id=>own(index.groups,id),
+   product:key=>own(index.products,key),
+   qualityNote:key=>index.qualityNotes?.[key]??[],
    imageUrls:()=>Object.values(index.products).map(p=>p.image).filter(Boolean),
    members,groupsOf,
-   quote(key){const product=index.products[key];if(!product)return null;return {product,reviewCurrent:groupsOf(key).some(m=>m.s==='approved'&&m.r),price:priceOf(product)};},
+   quote(key){const product=own(index.products,key);if(!product)return null;return {product,reviewCurrent:groupsOf(key).some(m=>m.s==='approved'&&m.r),price:priceOf(product)};},
    byEan:value=>byEan.get(ean(value))??[],
    byOdaId:id=>byOda.get(Number(id))??null,
    quality:(key,groupIds)=>{const rows=groupsOf(key).filter(m=>m.s==='approved'&&m.q&&(!groupIds||groupIds.includes(m.groupId)));return rows[0]?.q??null;},

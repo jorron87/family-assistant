@@ -197,3 +197,17 @@ body.kiosk .main-nav button { padding-left: 13px; padding-right: 13px; }
 .shop-elsewhere-note{margin:2px 0 0;font-weight:600}
 .shop-return{flex-basis:100%;margin-top:2px}
 .shop-group-label{margin:12px 0 2px;font-size:14px;font-weight:600}
+.shop-product-link{all:unset;display:block;font-weight:700;cursor:pointer;text-decoration:underline;text-decoration-color:var(--s-line);text-underline-offset:3px;overflow-wrap:anywhere}
+.shop-product-link:focus-visible{outline:2px solid var(--s-green);outline-offset:2px}
+.shop-list-row.done .shop-product-link{color:var(--s-muted);text-decoration:line-through}
+.shop-product-top{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+.shop-product-section{margin-top:14px}
+.shop-product-section h3{font-size:16px;margin:0 0 6px}
+.shop-product-section p{margin:0 0 6px}
+.shop-quality{padding:10px 12px;border:1px solid var(--s-line);border-radius:10px;margin-bottom:8px}
+.shop-quality-head{display:flex;align-items:baseline;gap:8px}
+.shop-quality-score{font-size:30px;font-weight:700}
+.shop-quality-peers{display:grid;gap:4px;margin:6px 0}
+.shop-quality-peer{display:grid;grid-template-columns:32px 1fr auto;gap:8px;font-size:14px}
+.shop-quality-peer.own{font-weight:700}
+.shop-quality-peer-score{text-align:right}

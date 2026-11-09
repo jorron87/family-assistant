@@ -58,6 +58,7 @@ export function phoneHandler({odaCart=null,productImages=null,oda=null,store,roo
       if(path==='/send/api/shopping/stock-scan'&&req.method==='POST')return send(res,200,store.shopping.stockScan(await json(req)));
       if(path==='/send/api/shopping/image'&&req.method==='GET'&&productImages){const url=store.shopping.imageSource(new URL(req.url,'http://localhost').searchParams.get('id'));const image=url?await productImages.load(url):null;if(!image)return send(res,404,{error:'Fant ikke bildet.'});res.setHeader('Cache-Control','private, max-age=86400');return send(res,200,image.bytes,image.type);}
       if(path==='/send/api/shopping/summary'&&req.method==='GET')return send(res,200,store.shopping.familySummary());
+      if(path==='/send/api/shopping/product-info'&&req.method==='GET'){const params=new URL(req.url,'http://localhost').searchParams;return send(res,200,store.shopping.productInfo({key:params.get('key'),watchId:params.get('watchId')}));}
       if(req.method==='POST'&&path==='/send/api/shopping/list'){const input=await json(req);return send(res,200,odaCart?await odaCart.list(input):store.shopping.list(input));}
       if(path==='/send/api/shopping/oda/live'&&req.method==='GET'&&odaCart)return send(res,200,await odaCart.read(new URL(req.url,'http://localhost').searchParams.has('force')));
       if(req.method==='POST'&&path==='/send/api/shopping/oda/line'&&odaCart)return send(res,200,await odaCart.change(await json(req)));
