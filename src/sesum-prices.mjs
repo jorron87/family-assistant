@@ -214,7 +214,7 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
  function review(input){
   if(!plain(input)||!['approved','excluded'].includes(input.status))throw Error('Invalid Sesum bridge decision.');
   const row=sourceRow(input.sourceKey);if(!row||input.sourceFingerprint!==row.fingerprint)throw Error('Sesum source metadata changed; review its current fingerprint.');
-  const equivalenceEvidence=text(input.equivalenceEvidence,'equivalence evidence',4000,{required:true}),packEvidence=text(input.packEvidence,'package evidence',4000,{required:input.status==='approved'}),base=rawReader();
+  const equivalenceEvidence=text(input.equivalenceEvidence,'equivalence evidence',6000,{required:true}),packEvidence=text(input.packEvidence,'package evidence',6000,{required:input.status==='approved'}),base=rawReader();
   const next={sourceKey:input.sourceKey,sourceFingerprint:row.fingerprint,status:input.status,productKey:input.productKey??null,productFingerprint:input.productFingerprint??null,packAmount:null,unit:null,equivalenceEvidence,packEvidence,reviewedAt:clock().toISOString()};
   if(input.status==='approved'){
    const donor=stable(input.productKey)?base?.product(input.productKey):null;
@@ -224,11 +224,14 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
    if(row.source.soldByWeight)throw Error('Variable-weight Sesum products need a separate verified unit-price contract.');
    if(row.source.soldByWeight===null&&input.fixedPackVerified!==true)throw Error('Unknown Sesum weight mode needs explicit fixedPackVerified and package evidence.');
    const sourcePack=packOf({...row.source,soldByWeight:false});
-   if(input.packBasis!=null&&input.packBasis!=='drained')throw Error('Unsupported Sesum package basis.');
+   if(input.packBasis!=null&&!['net','drained'].includes(input.packBasis))throw Error('Unsupported Sesum package basis.');
    if(input.packBasis==='drained'){
     if(sourcePack?.unit!=='kg'||input.unit!=='kg'||input.packAmount>sourcePack.amount&&!near(input.packAmount,sourcePack.amount))throw Error('A drained package needs known gross kg at least as large as the reviewed drained kg.');
-    next.packBasis='drained';next.packBasisEvidence=text(input.packBasisEvidence,'drained package evidence',4000,{required:true});
-   }else if(sourcePack&&(sourcePack.unit!==input.unit||!near(sourcePack.amount,input.packAmount)))throw Error('Sesum and donor package amounts disagree.');
+    next.packBasis='drained';next.packBasisEvidence=text(input.packBasisEvidence,'drained package evidence',6000,{required:true});
+   }else{
+    if(sourcePack&&(sourcePack.unit!==input.unit||!near(sourcePack.amount,input.packAmount)))throw Error('Sesum and donor package amounts disagree.');
+    if(input.packBasis==='net')next.packBasis='net';
+   }
    next.packAmount=input.packAmount;next.unit=input.unit;
    next.fixedPackVerified=row.source.soldByWeight===false||input.fixedPackVerified===true;
   }

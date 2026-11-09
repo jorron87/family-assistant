@@ -21,7 +21,7 @@ test('new Sesum discovery launches the existing shopping agent with research and
   const store={snapshot:()=>({runLease:lease,rawItems:{},events:{}}),reviewQueue:()=>({items:[]}),completionReport:()=>({profileReviews:[],missingDrive:[],unsyncedCalendar:[]}),activityFacebook:()=>[],activityFeedStatus:()=>({changedPages:[]}),shopping:{queue:()=>rows},phone:{list:()=>[]},calendarActions:()=>[],beginRun:()=>({acquired:true,lease:lease={token:'test-owned-lease'}}),endRun:token=>{assert.equal(token,lease.token);lease=null;},renewRun:()=>{}};
   try{
     const d=createIngestionDispatcher({store,root:'.',dataDir:dir,clock:()=>Date.parse('2026-11-09T12:00:00Z'),readConfig:()=>({enabled:true,minGapMinutes:0}),alive:()=>true,launch:input=>{launch=input;return {pid:123};}});
-    d.tick();assert.equal(d.status().workerScope,'handel');assert.match(launch.prompt,/shopping-sesum-discovery/);assert.match(launch.prompt,/shopping-sesum-register/);assert.match(launch.prompt,/shopping-sesum-catalog/);assert.match(launch.prompt,/Manglende EAN eller gjennomgått donor er aldri automatisk avslag/);
+    d.tick();assert.equal(d.status().workerScope,'handel');assert.match(launch.prompt,/shopping-sesum-discovery/);assert.match(launch.prompt,/shopping-sesum-register/);assert.match(launch.prompt,/shopping-sesum-catalog/);assert.match(launch.prompt,/familyFingerprints/);assert.match(launch.prompt,/Manglende EAN eller gjennomgått donor er aldri automatisk avslag/);
     rows=[];launch.onExit(0);assert.equal(lease,null);assert.equal(d.status().running,false);
   }finally{assert.ok(dir.startsWith(join(tmpdir(),'familien-dispatch-sesum-')));rmSync(dir,{recursive:true,force:true});}
 });

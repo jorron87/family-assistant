@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,readFileSync,writeFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {createSesumCollector,sesumSenderAllowed,sesumUrl} from '../src/shopping-sesum.mjs';
+import {createSesumCollector,sesumSenderAllowed,sesumUrl,sesumQueryPlan} from '../src/shopping-sesum.mjs';
+import {encrypt,decrypt} from '../src/crypto.mjs';
 
 const when='2026-11-09T12:00:00Z',productUrl='https://www.sesum.no/produkt/123-synthetic-tomatoes';
 function fixture(t,{familyCount=1,...config}={}){
@@ -15,6 +16,35 @@ function fixture(t,{familyCount=1,...config}={}){
 const response=(work,job,result,status='ok')=>({runId:work.runId,jobId:job.id,status,fetchedAt:when,result});
 const search=(job,{products=[],next=[],end=true}={})=>({ok:true,kind:'search',sourceUrl:job.url,productUrls:products,nextUrls:next,endReached:end,errors:[]});
 const product=(job,{observedAt='2026-11-09T10:00:00Z',price=7.9}={})=>({ok:true,kind:'product',sourceUrl:job.url,product:{id:'123',name:'Synthetic tomatoes 390 g',ean:'12345678',weight:390,weightUnit:'g'},prices:[{storeCode:'EXTRA',price,observedAt,source:'receipt'}]});
+
+test('source queries stay within 64 characters without losing core words or the original descriptor plan',()=>{
+  const requested='  Kjøttdeig av ren storfe med lavt fettinnhold til gryter og hverdagsmiddager uten tilsatt smak · uten dokumentert frysemerking  ';
+  const [plan]=sesumQueryPlan([requested]);assert.equal(plan.requestedQuery,requested);assert.ok(plan.actualQueries.length>1);
+  assert.ok(plan.actualQueries.every(q=>q.length<=64));assert.equal(plan.actualQueries.join(' '),plan.coreQuery,'all product-search words survive at word boundaries');
+  assert.deepEqual(plan.descriptorNotes,['uten dokumentert frysemerking']);assert.ok(!plan.actualQueries.includes(plan.descriptorNotes[0]),'library qualification notes are retained separately, not broad descriptor-only requests');
+  assert.deepEqual(plan.unsearchableTerms,[]);assert.throws(()=>sesumUrl('https://www.sesum.no/sok?q='+encodeURIComponent('x'.repeat(65)),'search'),/64/);
+});
+
+test('query-plan migration retains 109 completed short searches and a collected product while replacing only unsafe long requests',t=>{
+  const f=fixture(t,{cycleCalls:8}),shorts=Array.from({length:109},(_,i)=>'short source query '+i),long='Kjøttdeig av ren storfe med lavt fettinnhold til gryter og hverdagsmiddager uten tilsatt smak · uten dokumentert frysemerking';
+  const family={familyId:'family-0',name:'Synthetic family 0',unit:'kg',queries:[...shorts,long],requirementsFingerprint:'unchanged-requirements'};f.setFamilies([family]);
+  const jobs=Object.fromEntries(shorts.map((q,i)=>{const url=new URL('https://www.sesum.no/sok');url.searchParams.set('q',q);return ['short-'+i,{id:'short-'+i,kind:'search',url:url.href,generation:0,familyIds:['family-0'],status:'complete',attempts:0,createdAt:when,fetchedAt:when,endReached:true,discovered:0,nextJobIds:[]}];}));
+  const longUrl=new URL('https://www.sesum.no/sok');longUrl.searchParams.set('q',long);jobs['unsafe-long']={id:'unsafe-long',kind:'search',url:longUrl.href,generation:0,familyIds:['family-0'],status:'pending',attempts:1,createdAt:when,error:{code:'network_error'}};
+  const savedProduct={...product({url:productUrl}).product,prices:[],priceCandidates:[],relatedProducts:[]};jobs['collected-product']={id:'collected-product',kind:'product',url:productUrl,generation:0,familyIds:['family-0'],status:'complete',attempts:0,createdAt:when,fetchedAt:when,productObservation:savedProduct};
+  const legacy={schemaVersion:1,run:{id:'legacy-run',startedAt:when,finishedAt:null,status:'collecting',fingerprint:'old-planner',families:[{familyId:family.familyId,name:family.name,unit:family.unit,queries:family.queries,fingerprint:family.requirementsFingerprint}],chainCodes:['KIWI','REMA_1000','COOP_EXTRA'],revision:0,jobs},history:[],pauseUntil:null,observations:{}};
+  const path=join(f.dataDir,'sesum-collector.json.enc');writeFileSync(path,encrypt(Buffer.from(JSON.stringify(legacy)),f.options.encryptionKey));
+  const client=createSesumCollector(f.options),work=client.work({peek:true}),status=client.status();assert.equal(work.runId,'legacy-run');assert.equal(status.jobCountsByKind.search.complete,109);assert.equal(status.jobCountsByKind.product.complete,1);
+  assert.ok(work.jobs.length>0&&work.jobs.every(j=>j.kind==='search'&&new URL(j.url).searchParams.get('q').length<=64));assert.equal(f.received.length,0,'saved products are not reapplied or refetched for a planning-only change');
+  const after=JSON.parse(decrypt(readFileSync(path),f.options.encryptionKey));for(let i=0;i<109;i++)assert.deepEqual(after.run.jobs['short-'+i],jobs['short-'+i]);
+  assert.deepEqual(after.run.jobs['collected-product'],jobs['collected-product']);assert.ok(!after.run.jobs['unsafe-long']);assert.equal(after.run.supersededSearches['unsafe-long'].reason,'source-query-limit-64');
+  assert.equal(status.manifest[0].requestedQueries.length,110);assert.equal(status.manifest[0].queryPlan.length,110);assert.equal(client.catalog().items[0].fetchedAt,when);
+});
+
+test('an indivisible overlong search term remains an explicit partial constraint, never silently truncated',t=>{
+  const f=fixture(t,{queryOverrides:{'family-0':['x'.repeat(65)]}});f.client.work();const status=f.client.status();
+  assert.ok(status.manifest[0].unresolvedItems.some(i=>i.reason==='single-term-exceeds-source-limit-64'));
+  assert.equal(status.manifest[0].queryPlan.find(p=>p.requestedQuery.length===65).unsearchableTerms[0],'x'.repeat(65));
+});
 
 test('all followed families enter the manifest with no arbitrary family cap; peek never claims work',t=>{
   const {client}=fixture(t,{familyCount:121});

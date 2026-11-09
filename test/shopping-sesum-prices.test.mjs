@@ -135,3 +135,24 @@ for(const actualPrice of [true,false])test(`an entirely new Sesum SKU with ${act
   assert.equal(f.shop.familyView().items[0].prices.current,60,'changed source metadata withdraws the researched native membership and price');
   assert.ok(f.shop.queue().some(q=>q.do==='shopping-sesum-discovery'&&q.sourceKey==='sesum:KIWI:72'));
 });
+
+test('a false-positive search match excludes only the reviewed family and reopens on changed requirements',t=>{
+  const f=setup(t),other=f.shop.watch({name:'Another family',unit:'kg',storage:'pantry'});
+  const product={id:'72',name:'A new product 500g',brand:'New',ean:null,weight:500,weightUnit:'g',soldByWeight:false,sourceUrl:'https://www.sesum.no/produkt/72-a-new-product-500g',prices:[{storeCode:'KIWI',price:15,observedAt:NOW,source:'receipt_realtime',isPromo:false}]};
+  const observe=familyIds=>f.shop.sesumReceivePrices({familyIds,fetchedAt:f.clock.at,products:[product]});
+  const work=()=>f.shop.queue().find(q=>q.sourceKey==='sesum:KIWI:72');
+  observe([f.w.id,other.id]);
+  const candidate=f.shop.sesumCandidates()[0];
+  const reject=familyIds=>f.shop.sesumPriceReview({sourceKey:candidate.sourceKey,sourceFingerprint:candidate.sourceFingerprint,status:'excluded',familyIds,familyFingerprints:Object.fromEntries(candidate.families.map(x=>[x.familyId,x.requirementsFingerprint])),equivalenceEvidence:'Read the source product: its contents are outside the requirements of these specific search families.'});
+  assert.throws(()=>f.shop.sesumPriceReview({sourceKey:candidate.sourceKey,sourceFingerprint:candidate.sourceFingerprint,status:'excluded',equivalenceEvidence:'Wrong search match.'}),/familyIds/);
+  reject([f.w.id]);assert.deepEqual(work().familyIds,[other.id]);
+  const third=f.shop.watch({name:'A newly followed family',unit:'kg',storage:'pantry'});observe([third.id]);
+  assert.deepEqual(new Set(work().familyIds),new Set([other.id,third.id]),'a later relevant family is never globally suppressed by an earlier false search hit');
+  reject([other.id]);
+  const thirdCandidate=f.shop.sesumCandidates()[0];
+  f.shop.sesumPriceReview({sourceKey:candidate.sourceKey,sourceFingerprint:candidate.sourceFingerprint,status:'excluded',familyIds:[third.id],familyFingerprints:{[third.id]:thirdCandidate.families.find(x=>x.familyId===third.id).requirementsFingerprint},equivalenceEvidence:'The actual product is also outside this third family.'});
+  assert.equal(work(),undefined);
+  f.shop.watch({...f.w,note:'The household changed this family requirement.'});
+  assert.deepEqual(work().familyIds,[f.w.id]);
+  assert.throws(()=>reject([f.w.id]),/endret/,'stale family requirements cannot suppress new research');
+});

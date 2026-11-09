@@ -180,6 +180,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   const catalog=createMarketCatalog(s.marketCatalog,{save,now});
   s.sesumPrices??={};
   s.sesumDiscovery??={};
+  s.sesumFamilyReviews??={};
   let sesumPrices;
   const discovery=createSesumDiscovery(s.sesumDiscovery,{save,now,reader:()=>libraryPrices?.reader?.()??null,source:key=>sesumPrices?.sourceRecord(key)??null});
   const reviewedReader=()=>discovery.overlay(libraryPrices?.reader?.()??null);
@@ -1283,15 +1284,36 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       return {familyId:w.id,name:w.name,unit:w.unit,enabled:true,queries,requirementsFingerprint:hash(JSON.stringify([w.name,w.unit,w.variants??[],w.family??null,products.filter(p=>p.source!=='sesum').map(p=>[p.productKey,p.metadataFingerprint]).sort()])),products};
     });
   }
-  const sesumWork=()=>sesumPrices.pending().filter(p=>p.familyIds.some(id=>s.watches[id]?.enabled!==false&&s.watches[id])).map(p=>({...p,do:p.hasReviewedDonor?'shopping-sesum-review':'shopping-sesum-discovery',reason:p.hasReviewedDonor?'review-source-bridge':'new-product-needs-family-research'}));
+  const sesumRequirements=()=>new Map(sesumFamilies().map(f=>[f.familyId,hash(JSON.stringify([f.requirementsFingerprint,s.watches[f.familyId]?.note??null]))]));
+  const sesumFamilyDecision=(p,id,requirements)=>{
+    const row=s.sesumFamilyReviews[p.sourceKey]?.[id];
+    return row?.sourceFingerprint===p.sourceFingerprint&&row.familyFingerprint===requirements.get(id)?row:null;
+  };
+  function sesumWork(){
+    const requirements=sesumRequirements();
+    return sesumPrices.pending().map(p=>({...p,familyIds:p.familyIds.filter(id=>s.watches[id]?.enabled!==false&&s.watches[id]&&sesumFamilyDecision(p,id,requirements)?.status!=='excluded')})).filter(p=>p.familyIds.length).map(p=>({...p,do:p.hasReviewedDonor?'shopping-sesum-review':'shopping-sesum-discovery',reason:p.hasReviewedDonor?'review-source-bridge':'new-product-needs-family-research'}));
+  }
   function sesumCandidates(familyId){
-    const reader=reviewedReader();
-    return sesumPrices.candidates(familyId??null).map(p=>({...p,registration:discovery.record(p.sourceKey),families:p.familyIds.filter(id=>s.watches[id]).map(id=>{const w=s.watches[id];return {familyId:id,name:w.name,unit:w.unit,family:w.family??null,variants:w.variants??[],groups:linkStates(w,reader).filter(l=>l.state==='ok').map(l=>({groupId:l.groupId,...reader.group(l.groupId)}))};})}));
+    const reader=reviewedReader(),requirements=sesumRequirements();
+    return sesumPrices.candidates(familyId??null).map(p=>({...p,registration:discovery.record(p.sourceKey),families:p.familyIds.filter(id=>s.watches[id]).map(id=>{const w=s.watches[id];return {familyId:id,name:w.name,unit:w.unit,note:w.note??null,requirementsFingerprint:requirements.get(id),sourceDecision:sesumFamilyDecision(p,id,requirements),family:w.family??null,variants:w.variants??[],groups:linkStates(w,reader).filter(l=>l.state==='ok').map(l=>({groupId:l.groupId,...reader.group(l.groupId)}))};})}));
+  }
+  function sesumPriceReview(input){
+    if(!['excluded','reopen'].includes(input.status))return sesumPrices.review(input);
+    const source=sesumPrices.sourceRecord(input.sourceKey),requirements=sesumRequirements();
+    if(!source||source.sourceFingerprint!==input.sourceFingerprint)throw Error('Sesum-kilden er endret; les gjeldende fingerprint.');
+    if(!Array.isArray(input.familyIds)||!input.familyIds.length||new Set(input.familyIds).size!==input.familyIds.length||!input.familyFingerprints||typeof input.familyFingerprints!=='object')throw Error('Familieavslag krever familyIds og gjeldende familyFingerprints; søketreff er bare spor.');
+    const evidence=required(input.equivalenceEvidence,'Konkret familiebelegg');
+    for(const id of input.familyIds)if(!source.familyIds.includes(id)||!requirements.has(id)||!Object.hasOwn(input.familyFingerprints,id)||input.familyFingerprints[id]!==requirements.get(id))throw Error('Varefamilien er endret eller ukjent; les gjeldende krav før vurdering.');
+    return update(()=>{
+      s.sesumFamilyReviews[input.sourceKey]??={};
+      for(const id of input.familyIds){if(input.status==='reopen')delete s.sesumFamilyReviews[input.sourceKey][id];else s.sesumFamilyReviews[input.sourceKey][id]={status:'excluded',sourceFingerprint:source.sourceFingerprint,familyFingerprint:requirements.get(id),evidence,reviewedAt:now().toISOString()};}
+      return {sourceKey:input.sourceKey,status:input.status,familyIds:[...input.familyIds]};
+    });
   }
   function sesumRegister(input){
     const registration=discovery.register(input);
     const bridge=sesumPrices.review({...input,status:'approved',productKey:registration.productKey,productFingerprint:registration.productFingerprint,equivalenceEvidence:input.identityEvidence});
     return {registration,bridge};
   }
-  return {sesumFamilies,sesumReceivePrices:input=>sesumPrices.ingest(input),sesumCandidates,sesumRegister,sesumPriceReview:input=>sesumPrices.review(input),sesumPriceStatus:()=>({...sesumPrices.status(),discovery:discovery.status()}),familyReopen,listFamily,listFamilyWork,explorer,productInfo,libraryAudit,libraryAuditAck,libraryLinkCandidates,libraryLink,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
+  return {sesumFamilies,sesumReceivePrices:input=>sesumPrices.ingest(input),sesumCandidates,sesumRegister,sesumPriceReview,sesumPriceStatus:()=>({...sesumPrices.status(),discovery:discovery.status()}),familyReopen,listFamily,listFamilyWork,explorer,productInfo,libraryAudit,libraryAuditAck,libraryLinkCandidates,libraryLink,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
 }
