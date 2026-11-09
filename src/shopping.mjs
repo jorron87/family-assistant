@@ -1073,6 +1073,14 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     });
     return update(()=>{w.variants=links;w.family={kind:links.length?'library':'own',evidence,at};return {watchId:w.id,familyId:w.id,decision:w.family,links};});
   }
+  // Sends own, narrow families back to be built. The earlier reasoning stays with
+  // them, so the agent can see why they were held out.
+  function familyReopen(input) {
+    const reason=required(input.evidence,'Begrunnelse').slice(0,1000),ids=input.familyIds;
+    if(!Array.isArray(ids)||!ids.length||ids.length>200)throw Error('Oppgi 1–200 varefamilier.');
+    const rows=ids.map(id=>{const w=Object.hasOwn(s.watches,id)?s.watches[id]:null;if(!w)throw Error('Ukjent varefamilie: '+id);if(w.family?.kind!=='own')throw Error('Bare en egen, smal familie kan gjenåpnes: '+id);return w;});
+    return update(()=>{const at=now().toISOString();for(const w of rows){w.familyReopened={previous:w.family,evidence:reason,at};delete w.family;}return {reopened:rows.map(w=>w.id)};});
+  }
   function libraryWork() {
     const reader=libReader();if(!reader)return [];
     const audit=libraryAudit(),rows=groupRows(catalog.entries()),findings=new Map();for(const f of audit.findings){const list=findings.get(f.watchId)??[];list.push(f.id);findings.set(f.watchId,list);}
@@ -1083,7 +1091,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       if(broken.length){work.push({do:'shopping-family-build',watchId:w.id,watchName:w.name,reason:'group-changed',groups:broken.map(l=>l.groupId),fingerprint:hash(broken.map(l=>l.groupId+l.state+(l.group?.fingerprint??'')).join())});continue;}
       if(w.family)continue;
       const candidates=linkCandidates(w,reader,rows.get(w.id)??[]);
-      work.push({do:'shopping-family-build',watchId:w.id,watchName:w.name,reason:'undecided',groups:candidates.map(g=>g.groupId),fingerprint:hash(w.id+candidates.map(g=>g.groupId+g.fingerprint).join())});
+      work.push({do:'shopping-family-build',watchId:w.id,watchName:w.name,reason:w.familyReopened?'reopened':'undecided',previousDecision:w.familyReopened?.previous.evidence??null,groups:candidates.map(g=>g.groupId),fingerprint:hash(w.id+candidates.map(g=>g.groupId+g.fingerprint).join())});
     }
     return work;
   }
@@ -1189,5 +1197,5 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     });
   }
   function cartReceipt(id,patch) {return update(()=>s.cartReceipts[id]={...(s.cartReceipts[id]??{}),...patch,id,updatedAt:now().toISOString()});}
-  return {listFamily,listFamilyWork,explorer,productInfo,libraryAudit,libraryAuditAck,libraryLinkCandidates,libraryLink,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
+  return {familyReopen,listFamily,listFamilyWork,explorer,productInfo,libraryAudit,libraryAuditAck,libraryLinkCandidates,libraryLink,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
 }

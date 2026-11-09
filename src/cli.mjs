@@ -69,6 +69,7 @@ async function execute(command, args, flags) {
     case 'shopping-library-audit': result=await request('/api/shopping/library-audit');break;
     case 'shopping-library-ack': result=await request('/api/shopping/library-audit-ack','POST',json(args[0]));break;
     case 'shopping-library-candidates': result=await request('/api/shopping/library-candidates'+(args[0]?'?watchId='+encodeURIComponent(args[0]):''));break;
+    case 'shopping-family-reopen': result=await request('/api/shopping/library-family-reopen','POST',json(args[0]));break;
     case 'shopping-family-set': result=await request('/api/shopping/library-link','POST',json(args[0]));break;
     case 'shopping-family-candidates': result=await request('/api/shopping/library-candidates'+(args[0]?'?watchId='+encodeURIComponent(args[0]):''));break;
     case 'shopping-library-link': result=await request('/api/shopping/library-link','POST',json(args[0]));break;

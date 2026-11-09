@@ -86,6 +86,22 @@ test('a product already approved in a followed family needs no second review and
  assert.equal(f.shop.familyView().items[0].prices.current,null,'a concrete exclusion still wins');
 });
 
+test('an own family can go back to be built, with its earlier reasoning attached',t=>{
+ const f=fixture(t);
+ f.shop.settings({monitoringEnabled:true,stores:[]});
+ f.shop.libraryLink({familyId:f.w.id,evidence:'Krever egen vurdering av billigmerke',variants:[]});
+ const build=()=>f.shop.queue().filter(x=>x.do==='shopping-family-build');
+ assert.equal(build().length,0);
+ assert.throws(()=>f.shop.familyReopen({familyIds:['finnes-ikke'],evidence:'Familien vil ha den'}),/Ukjent/);
+ assert.throws(()=>f.shop.familyReopen({familyIds:[f.w.id],evidence:' '}),/Begrunnelse/);
+ assert.deepEqual(f.shop.familyReopen({familyIds:[f.w.id],evidence:'Familien vil ha den'}).reopened,[f.w.id]);
+ assert.equal(build()[0].reason,'reopened');assert.equal(build()[0].previousDecision,'Krever egen vurdering av billigmerke');assert.equal(build()[0].familyId,f.w.id);
+ assert.throws(()=>f.shop.familyReopen({familyIds:[f.w.id],evidence:'Igjen'}),/egen, smal/);
+ const g=f.provider.reader().group(f.g.id);
+ f.shop.libraryLink({familyId:f.w.id,evidence:'Bygget',variants:[{groupId:f.g.id,groupFingerprint:g.fingerprint,evidence:'Samme bruk'}]});
+ assert.equal(build().length,0);
+});
+
 test('old links migrate onto the family once, and a family without variants becomes its own',()=>{
  const state={shopping:{orders:{},offers:{},reviews:{},cartReceipts:{},settings:{monitoringEnabled:false,historyFrom:null,stores:[],storageNote:'',stockUpDays:60},watches:{
   linked:{id:'linked',name:'A',unit:'kg',libraryLinks:[{groupId:'g',groupFingerprint:'x'}],libraryDecision:{status:'linked',evidence:'E1',at:'T1'}},
