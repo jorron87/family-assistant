@@ -10,7 +10,7 @@ function uniqueFact(found,max){if(!found.length)return{fact:null,reason:'missing
 function percent(ingredients,token,{allowSpeciesList=false}={}){
  const qualifiers='(?:(?:øko(?:logisk(?:e)?)?|ristede?|malte?|organic|roasted|ground|og)\\s+)*';
  const patterns=[
-  new RegExp('^'+qualifiers+'(?:'+token+')\\s*\\*?\\s*(?:\\(\\s*)?'+decimal+'\\s*%','i'),
+  new RegExp('^'+qualifiers+'(?:'+token+')\\s*\\*?\\s*(?:\\(\\s*)?'+decimal+'\\s*%(?!\\s*av\\b)','i'),
   new RegExp('^'+decimal+'\\s*%\\s*'+qualifiers+'(?:'+token+')(?![\\p{L}\\p{N}_])','iu')
  ];
  if(allowSpeciesList)patterns.push(new RegExp('^(?:'+token+')\\s*\\[[^\\[\\]]+\\]\\s*'+decimal+'\\s*%(?!\\s*av\\b)','i'));

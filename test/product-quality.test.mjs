@@ -31,6 +31,8 @@ test('fish quantity is total fish, not an arbitrary nested species percentage',(
  assert.equal(score('Fisk (60 %), melk, potetmel.','fishcakes-high').score,60);
  assert.equal(score('Fisk (hyse 40 %, sei 20 %), melk.','fishcakes-high').score,null);
  assert.equal(score('Fisk 60 %, fisk 80 %, melk.','fishcakes-high').score,null);
+ assert.equal(score('Fisk 60 % av fisken er torsk, vann.','fishcakes-high').score,null);
+ assert.equal(score('Peanøtter 90 % av nøttene er ristede, salt.','peanut-butter-near-pure').score,null);
 });
 
 test('fishcake content uses one explicit total-share basis across researched fish tiers',()=>{
