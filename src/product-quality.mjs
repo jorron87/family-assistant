@@ -7,12 +7,13 @@ const decimal='(?<![\\d.,])(\\d{1,4}(?:[.,]\\d{1,3})?)';
 const limitations=['Måler dokumentert råvareinnhold innen samme varetype og målegrunnlag.','Ingen samlet helse-, smak-, dyrevelferds- eller produksjonskvalitet er beregnet.','Sukkerarter og salt vises separat; de er ikke skjulte vekter i råvarescoren.'];
 function components(text){let depth=0,start=0;const out=[];for(let at=0;at<text.length;at++){if(text[at]==='('||text[at]==='[')depth++;if(text[at]===')'||text[at]===']')depth=Math.max(0,depth-1);const decimalComma=/\d/.test(text[at-1]??'')&&/\d/.test(text[at+1]??'');if(!depth&&(text[at]===';'||text[at]===','&&!decimalComma)){out.push(text.slice(start,at).trim());start=at+1;}}out.push(text.slice(start).trim());return out;}
 function uniqueFact(found,max){if(!found.length)return{fact:null,reason:'missing-declared-amount'};const values=[...new Set(found.map(f=>f.value))];if(values.some(v=>!Number.isFinite(v)||v<0||v>max))return{fact:null,reason:'invalid-declared-amount'};if(values.length!==1)return{fact:null,reason:'conflicting-declared-amounts'};return{fact:{value:values[0],evidence:found.map(({text,field})=>({text,field}))},reason:null};}
-function percent(ingredients,token){
+function percent(ingredients,token,{allowSpeciesList=false}={}){
  const qualifiers='(?:(?:øko(?:logisk(?:e)?)?|ristede?|malte?|organic|roasted|ground|og)\\s+)*';
  const patterns=[
   new RegExp('^'+qualifiers+'(?:'+token+')\\s*\\*?\\s*(?:\\(\\s*)?'+decimal+'\\s*%','i'),
   new RegExp('^'+decimal+'\\s*%\\s*'+qualifiers+'(?:'+token+')(?![\\p{L}\\p{N}_])','iu')
  ];
+ if(allowSpeciesList)patterns.push(new RegExp('^(?:'+token+')\\s*\\[[^\\[\\]]+\\]\\s*'+decimal+'\\s*%(?!\\s*av\\b)','i'));
  const found=[];for(const part of components(ingredients))for(const re of patterns){const m=part.match(re);if(m)found.push({value:number(m[1]),text:m[0],field:'ingredients'});}return uniqueFact(found,100);
 }
 function tomatoInput(ingredients,description,crossDescription=''){const found=[];for(const [field,text]of [['ingredients',ingredients],['description',description],['crossSourceLabel.description',crossDescription]]){
@@ -50,7 +51,7 @@ export function scoreProductQuality(product,{groupId,reviewCurrent=false}={}){
   const puree=percent(ingredients,'tomatpur[eéè]|tomatpasta|tomatkonsentrat');
   if(puree.fact)base.context.push({name:'Deklarert tomatpuré/-konsentrat',value:puree.fact.value,unit:'%',evidence:puree.fact.evidence,note:'Konsentrasjon/tørrstoff er ukjent. Prosenten omregnes ikke til ferske tomater.'});
  }else{
-  result=percent(ingredients,'(?:'+p.token+')');
+  result=percent(ingredients,'(?:'+p.token+')',{allowSpeciesList:p.id==='fishcakes'});
   if(!result.fact&&result.reason==='missing-declared-amount'&&p.single?.test(ingredients))result={fact:{value:100,evidence:[{text:ingredients,field:'ingredients',interpretation:'Hele ingrediensdeklarasjonen består av én råvare.'}]},reason:null};
   if(p.id==='fruit-spread'&&!result.fact&&result.reason==='missing-declared-amount'){
    const re=new RegExp('(?:fremstilt|framstilt|laget)\\s+av\\s*'+decimal+'\\s*g\\s*(?:frukt(?:\\s+og\\s+bær)?|bær|'+p.fruit+')\\s*(?:per|pr\\.?)\\s*100\\s*g','gi'),found=[...ingredients.matchAll(re)].map(x=>({value:number(x[1]),text:x[0],field:'ingredients'}));

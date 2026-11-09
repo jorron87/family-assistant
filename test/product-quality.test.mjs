@@ -39,6 +39,10 @@ test('fishcake content uses one explicit total-share basis across researched fis
  assert.equal(ordinary.score,52);assert.equal(high.score,80);
  assert.equal(ordinary.comparisonKey,high.comparisonKey);
  assert.equal(score('Fisk (hyse 80 %, sei 20 %), vann.','fishcakes-very-high').score,null);
+ assert.equal(score('Fisk [torsk, hyse, sei] 52 %, vann.','fishcakes-ordinary').score,52);
+ assert.equal(score('Fisk [torsk 60 %, hyse 40 %] 80 %, vann.','fishcakes-very-high').score,80);
+ assert.equal(score('Fisk [torsk 60 %, hyse 40 %], vann.','fishcakes-very-high').score,null);
+ assert.equal(score('Fisk [torsk, hyse] 80 % av råvarene er norske.','fishcakes-very-high').score,null);
  assert.equal(score('Fisk 52 %, fisk 80 %, vann.','fishcakes-ordinary').score,null);
  assert.equal(score('Fisk 50 % (hvitlaks, surimi), melk.','fishcakes-surimi-ordinary').status,'not-applicable');
  assert.equal(score('Fisk 65 %, hvetemel.','fishsticks-breaded').status,'not-applicable');
