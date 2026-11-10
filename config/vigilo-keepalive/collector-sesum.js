@@ -10,8 +10,8 @@
   'use strict';
   const ORIGIN = 'https://www.sesum.no';
   const WORK = '/api/shopping/sesum/work', RECEIVE = '/api/shopping/sesum/receive';
-  const VERSION = 'sesum-collector-1.7.0';
-  const BUILD = 'sesum-collector-build-1.7.0-4';
+  const VERSION = 'sesum-collector-1.7.1';
+  const BUILD = 'sesum-collector-build-1.7.1-1';
   // The background alarm repairs the bridge every minute. Page ticks advance
   // the bounded durable queue more often; the server still controls spacing
   // and each batch has at most eight reads. Running/Locks prevent overlaps.

@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {createIndexReader} from './shopping-library.mjs';
 import {productTextHash} from './product-library.mjs';
+import {sanitizeUnitPriceBasis,unitPriceBasisFingerprint} from './sesum-unit-basis.mjs';
 
 const plain=value=>value!==null&&typeof value==='object'&&!Array.isArray(value)&&[Object.prototype,null].includes(Object.getPrototypeOf(value));
 const positive=value=>typeof value==='number'&&Number.isFinite(value)&&value>0;
@@ -11,6 +12,7 @@ const clone=value=>structuredClone(value);
 const near=(a,b)=>positive(a)&&positive(b)&&Math.abs(a-b)<=1e-6*Math.max(a,b);
 const normalize=value=>String(value??'').normalize('NFC').replace(/\s+/g,' ').trim();
 const lower=value=>normalize(value).toLocaleLowerCase('nb');
+const variableNative=entry=>/(?:^|\s)ca\.?\s*\d|cirka|omtrent|vektvare|\b(?:pr|per)\.?\s*(?:kg|l)\b/i.test(entry.name??'');
 function text(value,label,max=2000,{required=false}={}){
  if(value===undefined||value===null){if(required)throw Error(`${label} is required.`);return null;}
  if(typeof value!=='string'||value.length>max||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value))throw Error(`Invalid ${label}.`);
@@ -98,7 +100,9 @@ function normalizedRows(products,fetchedAt,at){
    const observedAt=time(inputPrice.observedAt,'actual Sesum price receipt',{nullable:true});
    if(observedAt&&Date.parse(observedAt)>at)throw Error('Actual Sesum price receipt cannot be in the future.');
    const source={...product,store},fingerprint=sesumSourceFingerprint(source),priceSource=text(inputPrice.source,'price source',100);
-   rows.push({sourceKey:`sesum:${store}:${id}`,source,fingerprint,fetchedAt,receipt:{price,observedAt,source:priceSource,sourceStoreCode:text(inputPrice.sourceStoreCode??inputPrice.storeCode,'source chain',100),isPromo:inputPrice.isPromo===true,promotion:promo(inputPrice.promotion),reasons:[...(observedAt?[]:['missing-price-receipt']),...(priceSource?[]:['missing-price-source']),...(price!==null?[]:['unknown-gross-package-price']),...(inputPrice.isPromo===true?['unverified-promotion-conditions']:[])]}});
+   const checked=sanitizeUnitPriceBasis(inputPrice.unitPriceBasis,{productId:id,sourceUrl:product.sourceUrl,storeCode:store,storeId:inputPrice.storeId,price,source:inputPrice.source,observedAt:inputPrice.observedAt});
+   const storeId=typeof inputPrice.storeId==='string'&&/^[1-9]\d{0,29}$/.test(inputPrice.storeId)?inputPrice.storeId:Number.isSafeInteger(inputPrice.storeId)&&inputPrice.storeId>0?String(inputPrice.storeId):null;
+   rows.push({sourceKey:`sesum:${store}:${id}`,source,fingerprint,fetchedAt,receipt:{price,observedAt,source:priceSource,sourceStoreCode:text(inputPrice.sourceStoreCode??inputPrice.storeCode,'source chain',100),storeId,rawUnitPrice:typeof inputPrice.rawUnitPrice==='number'&&Number.isFinite(inputPrice.rawUnitPrice)?inputPrice.rawUnitPrice:null,isPromo:inputPrice.isPromo===true,promotion:promo(inputPrice.promotion),...(product.soldByWeight===true?{variableWeight:true,unitPriceBasis:checked.basis,unitPriceBasisFingerprint:unitPriceBasisFingerprint(checked.basis,{sourceFingerprint:fingerprint,fetchedAt}),unitPriceBasisError:checked.reason}:{}),reasons:[...(observedAt?[]:['missing-price-receipt']),...(priceSource?[]:['missing-price-source']),...(price!==null?[]:['unknown-gross-package-price']),...(product.soldByWeight===true&&checked.reason?[checked.reason]:[]),...(inputPrice.isPromo===true?['unverified-promotion-conditions']:[])]}});
   }
   for(const inputPrice of input.priceCandidates??[]){
    if(!plain(inputPrice))continue;
@@ -111,26 +115,29 @@ function normalizedRows(products,fetchedAt,at){
     price:positive(inputPrice.price)&&inputPrice.price<=1e9?inputPrice.price:null,rawUnitPrice:typeof inputPrice.rawUnitPrice==='number'&&Number.isFinite(inputPrice.rawUnitPrice)?inputPrice.rawUnitPrice:null,
     source:priceSource,observedAt,isPromo:inputPrice.isPromo===true,promotion,sourceUrl:product.sourceUrl,reason:safeText(inputPrice.reason,300)??'unproven-price-candidate'};
    const source={...product,store},fingerprint=sesumSourceFingerprint(source);
-   rows.push({sourceKey:`sesum:${store}:${id}`,source,fingerprint,fetchedAt,receipt:{price:null,observedAt,source:priceSource,sourceStoreCode,isPromo:candidate.isPromo,promotion,candidate,
-    reasons:['unproven-price-candidate','unknown-gross-package-price',...(observedAt?[]:['missing-price-receipt']),...(priceSource?[]:['missing-price-source']),...(candidate.isPromo?['unverified-promotion-conditions']:[])]}});
+   rows.push({sourceKey:`sesum:${store}:${id}`,source,fingerprint,fetchedAt,receipt:{price:null,observedAt,source:priceSource,sourceStoreCode,isPromo:candidate.isPromo,promotion,candidate,...(product.soldByWeight===true?{variableWeight:true,unitPriceBasis:null,unitPriceBasisFingerprint:null,unitPriceBasisError:'unproven-own-unit-price-basis'}:{}),
+    reasons:['unproven-price-candidate','unknown-gross-package-price',...(product.soldByWeight===true?['unproven-own-unit-price-basis']:[]),...(observedAt?[]:['missing-price-receipt']),...(priceSource?[]:['missing-price-source']),...(candidate.isPromo?['unverified-promotion-conditions']:[])]}});
   }
  }
  return rows;
 }
 function newerReceipt(previous,incoming){
  if(!previous)return incoming;
+ const oldTime=Date.parse(previous.observedAt),newTime=Date.parse(incoming.observedAt);
+ if((previous.variableWeight||incoming.variableWeight)&&Number.isFinite(oldTime)&&Number.isFinite(newTime)&&newTime<oldTime)return previous;
+ if(incoming.variableWeight&&incoming.reasons.includes('unproven-price-candidate')&&Number.isFinite(newTime)&&(!Number.isFinite(oldTime)||newTime>=oldTime))return incoming;
  if(incoming.reasons.includes('unproven-price-candidate')&&previous.observedAt&&previous.source&&!previous.reasons.includes('unproven-price-candidate')){
   // Keep a real receipt (and its original age) when the same page also contains
   // an unproven alternative. The alternative remains available for research.
   return {...previous,candidate:incoming.candidate,candidateReasons:[...incoming.reasons]};
  }
  if(previous.reasons.includes('unproven-price-candidate')&&incoming.observedAt&&incoming.source&&!incoming.reasons.includes('unproven-price-candidate'))return {...incoming,candidate:previous.candidate,candidateReasons:[...previous.reasons]};
- const oldTime=Date.parse(previous.observedAt),newTime=Date.parse(incoming.observedAt);
  if(!Number.isFinite(newTime))return incoming;
  if(Number.isFinite(oldTime)&&newTime<oldTime)return previous;
  if(Number.isFinite(oldTime)&&newTime===oldTime){
-  const signature=p=>JSON.stringify([p.price,p.isPromo,p.promotion]);
+  const signature=p=>JSON.stringify([p.price,p.isPromo,p.promotion,...(p.variableWeight?[p.source,p.sourceStoreCode]:[])]);
   if(previous.reasons.includes('conflicting-latest-prices')||signature(previous)!==signature(incoming))return {...incoming,price:null,reasons:[...new Set([...previous.reasons,...incoming.reasons,'conflicting-latest-prices'])]};
+  if(previous.unitPriceBasis&&incoming.unitPriceBasis&&(previous.unitPriceBasis.unit!==incoming.unitPriceBasis.unit||previous.unitPriceBasis.amount!==incoming.unitPriceBasis.amount))return {...incoming,price:null,reasons:[...new Set([...previous.reasons,...incoming.reasons,'conflicting-latest-prices'])]};
  }
  return incoming;
 }
@@ -138,17 +145,27 @@ const currentGroups=(reader,key)=>(reader?.groupsOf(key)??[]).filter(row=>row.s=
 const donorAllowed=(row,key,donor)=>!key.startsWith('sesum:')||key===row.sourceKey&&donor?.source==='sesum'&&donor.nativeDiscovery===true&&donor.sourceFingerprint===row.fingerprint&&!donor.donorProductKey;
 function quoteOf(row,bridge){
  const receipt=row.receipt,reasons=receiptReasons(receipt);
+ if(bridge.priceBasis==='direct-unit'){
+  const basis=receipt.unitPriceBasis,verified=!!basis&&basis.unit===bridge.unit&&positive(receipt.price)&&bridge.priceIncludesVat===true;
+  if(!basis)reasons.push(receipt.unitPriceBasisError??'missing-own-unit-price-basis');
+  else if(basis.unit!==bridge.unit)reasons.push('direct-unit-review-mismatch');
+  return {grossPackPrice:null,grossUnitPrice:verified?basis.amount:null,unit:bridge.unit,directUnitVerified:verified,priceBasis:'direct-unit',unitPriceEvidence:verified?`${bridge.unitPriceEvidence} ${basis.label}; ${basis.rowControl}; ${bridge.vatEvidence}`:null,unitPriceBasisFingerprint:receipt.unitPriceBasisFingerprint??null,priceIncludesVat:bridge.priceIncludesVat===true,receiptAt:receipt.observedAt,reasons:[...new Set(reasons)],sourceUrl:row.source.sourceUrl,availabilityScope:'chain',priceSource:'sesum',sourceProductKey:row.sourceKey,isPromo:receipt.isPromo,promotion:receipt.promotion};
+ }
  if(!positive(bridge.packAmount))reasons.push('unknown-canonical-pack-amount');
  return {grossPackPrice:receipt.price,grossUnitPrice:null,unit:bridge.unit,directUnitVerified:false,receiptAt:receipt.observedAt,reasons,sourceUrl:row.source.sourceUrl,availabilityScope:'chain',priceIncludesVat:true,priceSource:'sesum',sourceProductKey:row.sourceKey};
 }
+const quoteSignature=q=>{const direct=q.directUnitVerified||q.grossUnitPrice!=null||q.priceBasis==='direct-unit';return JSON.stringify([q.grossPackPrice??null,q.grossUnitPrice??null,direct?q.unit??null:null,...(direct?[q.isPromo===true,q.promotion??null]:[])]);};
+const normalizedQuote=(quote,pack,unit)=>!quote||quote.reasons.length?null:positive(quote.grossPackPrice)&&positive(pack)?quote.grossPackPrice/pack:quote.directUnitVerified&&quote.unit===unit&&positive(quote.grossUnitPrice)?quote.grossUnitPrice:null;
 function chooseQuote(previous,incoming){
  if(!previous)return incoming;
  const a=Date.parse(previous?.receiptAt),b=Date.parse(incoming?.receiptAt);
  const unproven=quote=>quote.reasons.some(reason=>['unproven-price-candidate','missing-price-source','missing-price-receipt'].includes(reason));
+ if(previous.priceBasis==='direct-unit'&&Number.isFinite(a)&&Number.isFinite(b)&&b<a)return previous;
+ if(incoming.priceBasis==='direct-unit'&&Number.isFinite(b)&&(!Number.isFinite(a)||b>a))return incoming;
  if(unproven(incoming)&&Number.isFinite(a)&&!unproven(previous))return previous;
  if(unproven(previous)&&Number.isFinite(b)&&!unproven(incoming))return incoming;
  if(!Number.isFinite(b)||Number.isFinite(a)&&b<a)return previous;
- if(Number.isFinite(a)&&a===b&&previous.grossPackPrice!==incoming.grossPackPrice)return {...incoming,grossPackPrice:null,reasons:[...new Set([...(previous.reasons??[]),...incoming.reasons,'conflicting-latest-prices'])]};
+ if(Number.isFinite(a)&&a===b&&quoteSignature(previous)!==quoteSignature(incoming))return {...incoming,grossPackPrice:null,grossUnitPrice:null,directUnitVerified:false,reasons:[...new Set([...(previous.reasons??[]),...incoming.reasons,'conflicting-latest-prices'])]};
  if(Number.isFinite(a)&&a===b)return {...incoming,reasons:[...new Set([...previous.reasons,...incoming.reasons])]};
  return incoming;
 }
@@ -196,7 +213,10 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
  function validBridge(row,bridge,base){
   if(!row||!bridge||bridge.status!=='approved'||bridge.sourceFingerprint!==row.fingerprint)return false;
   const donor=base?.product(bridge.productKey);
-  return !!donor&&donorAllowed(row,bridge.productKey,donor)&&sesumDonorFingerprint(donor)===bridge.productFingerprint&&currentGroups(base,bridge.productKey).length>0&&donor.packKnown&&near(donor.pack,bridge.packAmount)&&donor.unit===bridge.unit&&boundNativeIdentity(donor,base,row.source.store)!==false;
+  const identity=!!donor&&donorAllowed(row,bridge.productKey,donor)&&sesumDonorFingerprint(donor)===bridge.productFingerprint&&currentGroups(base,bridge.productKey).length>0&&donor.unit===bridge.unit&&boundNativeIdentity(donor,base,row.source.store)!==false;
+  if(!identity)return false;
+  if(bridge.priceBasis==='direct-unit')return row.source.soldByWeight===true&&bridge.packAmount===null&&donor.pack===null&&!donor.nativeIdentity&&['kg','l'].includes(bridge.unit)&&bridge.priceIncludesVat===true&&!!bridge.vatEvidence&&!!bridge.variableWeightEvidence&&!!bridge.unitPriceEvidence&&(donor.variableWeightReviewed===true||bridge.variableDonorVerified===true)&&Array.isArray(bridge.reviewedGroups)&&bridge.reviewedGroups.length>0&&bridge.reviewedGroups.every(g=>base.group(g.groupId)?.fingerprint===g.groupFingerprint&&currentGroups(base,bridge.productKey).some(m=>m.groupId===g.groupId));
+  return donor.packKnown&&near(donor.pack,bridge.packAmount);
  }
  function ingest(input){
   if(!plain(input)||!Array.isArray(input.familyIds)||input.familyIds.length>10000||input.familyIds.some(id=>!stable(id)))throw Error('Invalid Sesum family IDs.');
@@ -212,7 +232,9 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
     if(familyIds.length!==previous.familyIds.length)staged.set(item.sourceKey,{...previous,familyIds});
     continue;
    }
-   staged.set(item.sourceKey,{...item,familyIds:[...new Set([...(previous?.familyIds??[]),...input.familyIds])],firstSeen:previous?.firstSeen??fetchedAt,receipt:changed?item.receipt:newerReceipt(previous?.receipt,item.receipt)});
+   const receipt=changed?item.receipt:newerReceipt(previous?.receipt,item.receipt),receiptHistory=[...(previous?.receiptHistory??[])];
+   if(previous&&hash(previous.receipt)!==hash(receipt))receiptHistory.push({fetchedAt:previous.fetchedAt,sourceFingerprint:previous.fingerprint,receipt:clone(previous.receipt)});
+   staged.set(item.sourceKey,{...item,familyIds:[...new Set([...(previous?.familyIds??[]),...input.familyIds])],firstSeen:previous?.firstSeen??fetchedAt,receipt,...(receiptHistory.length?{receiptHistory}:{} )});
   }
   if(staged.size){for(const [key,row] of staged)state.products[key]=row;state.revision++;save();}
   return {observed:staged.size,reviewed:[...staged.values()].filter(row=>validBridge(row,state.bridges[row.sourceKey],rawReader())).length,pending:[...staged.values()].filter(row=>!validBridge(row,state.bridges[row.sourceKey],rawReader())).length};
@@ -231,7 +253,7 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
    }
    donors.sort((a,b)=>(Number(b.match.ean)+Number(b.match.name)+Number(b.match.brand)+Number(b.match.pack))-(Number(a.match.ean)+Number(a.match.name)+Number(a.match.brand)+Number(a.match.pack))||a.productKey.localeCompare(b.productKey));
    const bridge=state.bridges[row.sourceKey]??null,current=validBridge(row,bridge,base);
-   return {sourceKey:row.sourceKey,sourceFingerprint:row.fingerprint,source:clone(source),price:{...clone(row.receipt),reasons:receiptReasons(row.receipt)},familyIds:[...row.familyIds],status:current?'approved':bridge?.status==='excluded'&&bridge.sourceFingerprint===row.fingerprint?'excluded':'pending',bridge:bridge?clone(bridge):null,donors};
+   return {sourceKey:row.sourceKey,sourceFingerprint:row.fingerprint,source:clone(source),price:{...clone(row.receipt),reasons:receiptReasons(row.receipt)},basisReviewNeeded:current&&bridge.priceBasis==='direct-unit'&&!!row.receipt.unitPriceBasis&&row.receipt.unitPriceBasis.unit!==bridge.unit,familyIds:[...row.familyIds],status:current?'approved':bridge?.status==='excluded'&&bridge.sourceFingerprint===row.fingerprint?'excluded':'pending',bridge:bridge?clone(bridge):null,donors};
   });
  }
  function review(input){
@@ -244,6 +266,26 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
    if(!donor||!donorAllowed(row,input.productKey,donor)||sesumDonorFingerprint(donor)!==input.productFingerprint)throw Error('Donor metadata changed; review its current fingerprint.');
    if(boundNativeIdentity(donor,base,row.source.store)===false)throw Error('Native identity metadata changed; review its current fingerprint.');
    if(!currentGroups(base,input.productKey).length)throw Error('A donor needs a current reviewed product family.');
+   if(input.priceBasis==='direct-unit'){
+    if(row.source.soldByWeight!==true||input.packAmount!==null||input.canonicalPackAmount!=null||!['kg','l'].includes(input.unit)||donor.pack!==null||donor.unit!==input.unit||donor.nativeIdentity||input.fixedPackVerified!=null||input.packBasis!=null||input.nativeProductKey!=null)throw Error('Direct unit review requires a genuinely variable source and donor, null package and matching kg/l; fixed/native package overrides are forbidden.');
+    const receipts=(value,label)=>{
+     if(!Array.isArray(value)||!value.length||value.length>40)throw Error(`${label} actual primary receipts are required.`);
+     return value.map(r=>{if(!plain(r))throw Error(`Invalid ${label} receipt.`);const u=new URL(r.url),at=time(r.observedAt,'actual primary review receipt');if(u.protocol!=='https:'||u.username||u.password||u.href.length>4096||Date.parse(at)>clock().getTime())throw Error(`Invalid ${label} primary receipt.`);return {url:u.href,observedAt:at,evidence:text(r.evidence,label+' evidence',6000,{required:true})};});
+    };
+    next.priceBasis='direct-unit';next.unit=input.unit;next.packAmount=null;
+    next.variableWeightEvidence=text(input.variableWeightEvidence,'actual variable form evidence',6000,{required:true});next.unitPriceEvidence=text(input.unitPriceEvidence,'unit-price evidence',6000,{required:true});next.vatEvidence=text(input.vatEvidence,'gross consumer VAT evidence',6000,{required:true});
+    if([next.variableWeightEvidence,next.unitPriceEvidence,next.vatEvidence].some(v=>v.length<10))throw Error('Concrete actual variable, unit-price and VAT evidence is required.');
+    if(input.priceIncludesVat!==true)throw Error('Direct unit prices require explicitly reviewed gross consumer VAT.');next.priceIncludesVat=true;next.sourceReceipts=receipts(input.sourceReceipts,'source');
+    if(donor.variableWeightReviewed!==true){
+     if(input.variableDonorVerified!==true)throw Error('A null unknown package is not evidence of an actually variable donor.');
+     next.variableDonorVerified=true;next.donorVariableWeightEvidence=text(input.donorVariableWeightEvidence,'actual donor variable form evidence',6000,{required:true});next.donorSourceReceipts=receipts(input.donorSourceReceipts,'donor');
+     if(next.donorVariableWeightEvidence.length<10||!next.donorSourceReceipts.some(r=>!/(^|\.)sesum\.no$/i.test(new URL(r.url).hostname.replace(/\.$/,''))))throw Error('The donor variable form needs separate actual primary evidence, not the Sesum row label alone.');
+    }
+    const groups=input.reviewedGroups??input.memberships;
+    if(!Array.isArray(groups)||!groups.length||groups.length>50||new Set(groups.map(g=>g?.groupId)).size!==groups.length)throw Error('Direct unit review requires explicit current group fingerprints.');
+    next.reviewedGroups=groups.map(g=>{if(!stable(g?.groupId)||base.group(g.groupId)?.fingerprint!==g.groupFingerprint||base.group(g.groupId)?.unit!==input.unit||!currentGroups(base,input.productKey).some(m=>m.groupId===g.groupId))throw Error('Direct unit product group changed; review current group rules and unit.');return {groupId:g.groupId,groupFingerprint:g.groupFingerprint};});
+   }else{
+   if(input.priceBasis!=null&&input.priceBasis!=='package')throw Error('Unknown Sesum price basis.');
    if(!positive(input.packAmount)||!['kg','l','stk','m'].includes(input.unit)||!donor.packKnown||!near(donor.pack,input.packAmount)||donor.unit!==input.unit)throw Error('The bridge requires the donor\'s current documented canonical package.');
    if(row.source.soldByWeight)throw Error('Variable-weight Sesum products need a separate verified unit-price contract.');
    if(row.source.soldByWeight===null&&input.fixedPackVerified!==true)throw Error('Unknown Sesum weight mode needs explicit fixedPackVerified and package evidence.');
@@ -258,6 +300,7 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
    }
    next.packAmount=input.packAmount;next.unit=input.unit;
    next.fixedPackVerified=row.source.soldByWeight===false||input.fixedPackVerified===true;
+   }
   }
   state.bridges[input.sourceKey]=next;state.revision++;save();return clone(next);
  }
@@ -275,7 +318,7 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
    let group=peers.get(key);
    if(!group){
     const quotes=anchor.store===row.source.store?(nativeByProduct.get(anchorKey)??[]).filter(entry=>compatibleNative(entry,anchor)).map(nativeQuote).filter(Boolean):[];
-    let selected=anchor.store===row.source.store?anchor.quote:null;
+    let selected=anchor.store===row.source.store?bridge.priceBasis==='direct-unit'?{...anchor.quote,priceBasis:'direct-unit'}:anchor.quote:null;
     for(const quote of quotes)selected=chooseQuote(selected,quote);
     group={donor:anchor,productKey:anchorKey,store:row.source.store,selected,nativeQuotes:quotes,explicitNativeIdentity:!!identity};peers.set(key,group);
    }
@@ -292,13 +335,13 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
    const ownTime=Date.parse(original.receiptAt),selectedTime=Date.parse(selected?.receiptAt);
    if(!identity&&Number.isFinite(ownTime)&&Number.isFinite(selectedTime)){
     if(ownTime<selectedTime)quote={...original,reasons:[...new Set([...original.reasons,'superseded-price-receipt'])]};
-    else if(ownTime===selectedTime&&(selected.reasons.includes('conflicting-latest-prices')||selected.grossPackPrice!==original.grossPackPrice))quote={...original,grossPackPrice:null,reasons:[...new Set([...original.reasons,...selected.reasons,'conflicting-latest-prices'])]};
+    else if(ownTime===selectedTime&&(selected.reasons.includes('conflicting-latest-prices')||quoteSignature(selected)!==quoteSignature(original)))quote={...original,grossPackPrice:null,grossUnitPrice:null,directUnitVerified:false,reasons:[...new Set([...original.reasons,...selected.reasons,'conflicting-latest-prices'])]};
     else if(ownTime===selectedTime)quote={...original,reasons:[...new Set([...original.reasons,...selected.reasons])]};
    }
    const product={...donor,store:row.source.store,id:row.source.id,source:'sesum',productKey:row.sourceKey,sourceUrl:row.source.sourceUrl,ean:row.source.ean[0]??donor.ean??null,available:group.donor.store!==row.source.store||group.donor.available!==false,donorProductKey:bridge.productKey,sourceFingerprint:row.fingerprint,metadataFingerprint:hash([row.fingerprint,bridge.productFingerprint]),quote};
    out.products[row.sourceKey]=product;
    for(const m of currentGroups(base,bridge.productKey)){
-    const member={...m,k:row.sourceKey,u:positive(quote.grossPackPrice)&&!quote.reasons.length?quote.grossPackPrice/bridge.packAmount:null};
+    const member={...m,k:row.sourceKey,u:normalizedQuote(quote,bridge.packAmount,bridge.unit)};
     if(out.members[m.groupId].some(existing=>existing.k===row.sourceKey))out.members[m.groupId]=out.members[m.groupId].map(existing=>existing.k===row.sourceKey?member:existing);
     else out.members[m.groupId].push(member);
    }
@@ -306,7 +349,7 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
     const previous=out.products[group.productKey];
     if(selected!==previous.quote){
      out.products[group.productKey]={...previous,quote:selected,...(group.explicitNativeIdentity?{sesumIdentityReviewed:true}:{})};
-     for(const groupId of Object.keys(out.members))out.members[groupId]=out.members[groupId].map(m=>m.k===group.productKey?{...m,u:positive(selected.grossPackPrice)&&!selected.reasons.length?selected.grossPackPrice/group.donor.pack:null}:m);
+     for(const groupId of Object.keys(out.members))out.members[groupId]=out.members[groupId].map(m=>m.k===group.productKey?{...m,u:normalizedQuote(selected,group.donor.pack,group.donor.unit)}:m);
     }
     else if(group.explicitNativeIdentity)out.products[group.productKey]={...previous,sesumIdentityReviewed:true};
    }
@@ -317,10 +360,16 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
  function provide(entries,baseResult={status:'disabled',quotes:[]}){
   const over=overlay(),result=new Map((baseResult.quotes??[]).map(q=>[`${q.watchId}|${q.store}|${q.id}`,q]));
   if(!over)return baseResult;
+  const base=rawReader(),directDonors=new Set(Object.values(state.bridges).filter(bridge=>bridge.priceBasis==='direct-unit'&&validBridge(sourceRow(bridge.sourceKey),bridge,base)&&base.product(bridge.productKey).store===sourceRow(bridge.sourceKey).source.store).map(bridge=>bridge.productKey));
   for(const entry of entries){
    if(entry.status!=='approved')continue;
    const key=`kassal:${entry.store}:${entry.id}`,q=over.quote(key),p=q?.product;
-   if(!(q?.reviewCurrent||p?.sesumIdentityReviewed===true)||!['sesum','native-catalog'].includes(q.price.priceSource)||p.unit!==entry.unit||!near(p.pack,entry.packAmount)||p.textHash!==productTextHash(entry))continue;
+   if(directDonors.has(key)&&p?.pack===null&&!variableNative(entry)){
+    const old=result.get(`${entry.watchId}|${entry.store}|${entry.id}`);if(old?.directUnitVerified&&old.canonicalPackAmount===null)result.delete(`${entry.watchId}|${entry.store}|${entry.id}`);
+    continue; // A documented fixed native package outranks this variable source relation.
+   }
+   const direct=q?.price.directUnitVerified&&p?.pack===null&&q.price.unit===entry.unit&&variableNative(entry);
+   if(!(q?.reviewCurrent||p?.sesumIdentityReviewed===true)||!['sesum','native-catalog'].includes(q.price.priceSource)||p.unit!==entry.unit||!direct&&!near(p.pack,entry.packAmount)||p.textHash!==productTextHash(entry))continue;
    if(p.rawPack&&(p.rawPack.weight!==entry.weight||normalize(p.rawPack.weightUnit)!==normalize(entry.weightUnit)))continue;
    result.set(`${entry.watchId}|${entry.store}|${entry.id}`,{watchId:entry.watchId,store:entry.store,id:entry.id,canonicalPackAmount:p.pack,...q.price});
   }
@@ -328,7 +377,7 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
  }
  function pending(){
   const base=rawReader(),at=clock().getTime(),horizon=base?.horizonDays??183;
-  return Object.values(state.products).filter(row=>!validBridge(row,state.bridges[row.sourceKey],base)&&!(state.bridges[row.sourceKey]?.status==='excluded'&&state.bridges[row.sourceKey].sourceFingerprint===row.fingerprint)&&(!row.receipt.observedAt||at-Date.parse(row.receipt.observedAt)<=horizon*86400000)).map(row=>({sourceKey:row.sourceKey,sourceFingerprint:row.fingerprint,name:row.source.name,familyIds:[...row.familyIds],receiptAt:row.receipt.observedAt,hasReviewedDonor:findDonors(base,row.source).some(key=>donorAllowed(row,key,base?.product(key))&&currentGroups(base,key).length>0)}));
+  return Object.values(state.products).filter(row=>(!validBridge(row,state.bridges[row.sourceKey],base)||state.bridges[row.sourceKey]?.priceBasis==='direct-unit'&&row.receipt.unitPriceBasis&&row.receipt.unitPriceBasis.unit!==state.bridges[row.sourceKey].unit)&&!(state.bridges[row.sourceKey]?.status==='excluded'&&state.bridges[row.sourceKey].sourceFingerprint===row.fingerprint)&&(!row.receipt.observedAt||at-Date.parse(row.receipt.observedAt)<=horizon*86400000)).map(row=>({sourceKey:row.sourceKey,sourceFingerprint:row.fingerprint,name:row.source.name,familyIds:[...row.familyIds],receiptAt:row.receipt.observedAt,basisReviewNeeded:!!(validBridge(row,state.bridges[row.sourceKey],base)&&state.bridges[row.sourceKey].priceBasis==='direct-unit'&&row.receipt.unitPriceBasis&&row.receipt.unitPriceBasis.unit!==state.bridges[row.sourceKey].unit),hasReviewedDonor:findDonors(base,row.source).some(key=>donorAllowed(row,key,base?.product(key))&&currentGroups(base,key).length>0)}));
  }
  function sourceRecord(key){const row=sourceRow(key);return row?clone({sourceKey:row.sourceKey,sourceFingerprint:row.fingerprint,source:row.source,price:row.receipt,familyIds:row.familyIds}):null;}
  function sourceSummaries(){return Object.values(state.products).map(row=>({sourceKey:row.sourceKey,sourceFingerprint:row.fingerprint,name:row.source.name,store:row.source.store,familyIds:[...row.familyIds],receiptAt:row.receipt.observedAt}));}

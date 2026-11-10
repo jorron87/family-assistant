@@ -36,8 +36,8 @@
   }
 
   function entities(value) {
-    return String(value).replace(/&(?:amp|quot|apos|lt|gt|#\d+|#x[\da-f]+);/gi, (match) => {
-      const named = { '&amp;': '&', '&quot;': '"', '&apos;': "'", '&lt;': '<', '&gt;': '>' };
+    return String(value).replace(/&(?:amp|quot|apos|lt|gt|nbsp|#\d+|#x[\da-f]+);/gi, (match) => {
+      const named = { '&amp;': '&', '&quot;': '"', '&apos;': "'", '&lt;': '<', '&gt;': '>', '&nbsp;': '\u00a0' };
       if (own(named, match.toLowerCase())) return named[match.toLowerCase()];
       const hex = /^&#x/i.test(match);
       const code = Number.parseInt(match.slice(hex ? 3 : 2, -1), hex ? 16 : 10);
@@ -159,6 +159,97 @@
     };
   }
 
+  function unitLabel(value) {
+    const label = entities(value.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+    if (label.length > 300) return null;
+    const match = label.match(/^((?:0|[1-9]\d*)(?:,\d{1,2})?|[1-9]\d{0,2}(?:\.\d{3})+(?:,\d{1,2})?|[1-9]\d{0,2}(?: \d{3})+(?:,\d{1,2})?)\s*(?:kr|NOK)\s*\/\s*(kg|l)$/u);
+    if (!match) return null;
+    const amount = Number(match[1].replace(/[. ]/g, '').replace(',', '.'));
+    return finite(amount) && amount > 0 && amount <= 1e9 ? { label, amount, unit: match[2] } : null;
+  }
+
+  // The raw numeric API unitPrice has no documented unit. Only the delivered
+  // own main chain row can supply an explicit unit label. This bounded HTML
+  // walk never evaluates page code and leaves an ambiguous row unverified.
+  function ownUnitLabels(input) {
+    if (!/^\s*(?:<!doctype\s+html[^>]*>\s*)?<html(?:\s|>)/i.test(input)) return [];
+    const clean = input.replace(/<(script|style|template|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+      .replace(/<!--[\s\S]*?-->/g, '');
+    const tags = /<\/?([a-z][a-z\d:-]*)\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi;
+    const voidTags = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
+    const stack = [], rows = [];
+    let count = 0;
+    const hasClass = (attributes, prefix) => (attribute(attributes, 'class') ?? '').split(/\s+/).some(value => value.startsWith(prefix));
+    const end = (frame, at, malformed = false) => {
+      if (malformed && frame.row) frame.row.invalid = true;
+      if (frame.label) frame.row.labels.push(unitLabel(clean.slice(frame.contentStart, at)));
+      if (frame.heading) frame.section.headings.push(entities(clean.slice(frame.contentStart, at).replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim());
+    };
+    for (const match of clean.matchAll(tags)) {
+      if (++count > LIMITS.nodes || stack.length > LIMITS.depth) return [];
+      const tag = match[1].toLowerCase(), closing = /^<\//.test(match[0]);
+      if (closing) {
+        const index = stack.findLastIndex(frame => frame.tag === tag);
+        if (index < 0) continue;
+        while (stack.length > index) end(stack.pop(), match.index, stack.length > index);
+        continue;
+      }
+      const attributes = match[0].slice(match[0].indexOf(match[1]) + match[1].length, -1);
+      const parent = stack.at(-1), contextLabel = attribute(attributes, 'aria-label') ?? '';
+      const excluded = parent?.excluded || /(?:^|\s)(?:hidden|inert)(?:\s|=|$)/i.test(attributes) ||
+        attribute(attributes, 'aria-hidden') === 'true' || /(?:display\s*:\s*none|visibility\s*:\s*hidden)/i.test(attribute(attributes, 'style') ?? '') ||
+        /^kjederad-\d+$/.test(attribute(attributes, 'id') ?? '') || tag !== 'button' && /tilsvarende|lignende|relaterte|alternative|prishistorikk|prisgrunnlag|historikk|related|similar|price history/i.test(contextLabel);
+      const widget = tag === 'section' && hasClass(attributes, 'desktop_prices__') ? {} : parent?.widget;
+      const section = widget && tag === 'section' && hasClass(attributes, 'prisseksjoner_seksjon__') ? { headings: [] } : parent?.widget === widget ? parent?.section : null;
+      const startsRow = hasClass(attributes, 'desktop_kjederadHode__');
+      const row = startsRow ? { buttons: [], labels: [], section, invalid: !widget || !section || !!excluded || !!parent?.row } : parent?.row;
+      if (startsRow) { if (widget && section && !excluded) rows.push(row); if (parent?.row) parent.row.invalid = true; }
+      if (row && tag === 'button' && parent?.startsRow) {
+        const storeId = attribute(attributes, 'data-store'), rowControl = attribute(attributes, 'aria-controls');
+        const controlLabel = (attribute(attributes, 'aria-label') ?? '').replace(/\s+/g, ' ').trim();
+        if (storeId !== null || rowControl?.startsWith('kjederad-')) row.buttons.push({ storeId, rowControl,
+          ownControl: /^Vis prisgrunnlag og prishistorikk for \S/.test(controlLabel),
+          storeLabel: controlLabel.replace(/^Vis prisgrunnlag og prishistorikk for /, ''), excluded });
+      }
+      const frame = { tag, row, startsRow, excluded, widget, section, contentStart: match.index + match[0].length,
+        heading: !!section && tag === 'h3' && !excluded,
+        label: !!row && tag === 'span' && hasClass(attributes, 'desktop_butikkpris__') };
+      if (frame.label && excluded) row.invalid = true;
+      if (!voidTags.has(tag) && !/\/\s*>$/.test(match[0])) stack.push(frame);
+      else if (frame.label) row.invalid = true;
+    }
+    while (stack.length) end(stack.pop(), clean.length, true);
+    return rows;
+  }
+
+  function withOwnUnitBasis(input, product, prices, url) {
+    if (product.soldByWeight !== true) return prices;
+    const rows = ownUnitLabels(input), byStore = new Map();
+    const chainNames = { KIWI: ['KIWI'], REMA_1000: ['REMA 1000'], COOP_EXTRA: ['Extra', 'Coop Extra'], EXTRA: ['Extra', 'Coop Extra'],
+      MENY_NO: ['MENY'], MENY: ['MENY'], SPAR_NO: ['SPAR'], SPAR: ['SPAR'], ODA_NO: ['Oda'], ODA: ['Oda'],
+      EUROPRIS_NO: ['Europris'], EUROPRIS: ['Europris'], COOP_OBS: ['Obs', 'Coop Obs'], OBS: ['Obs', 'Coop Obs'],
+      COOP_PRIX: ['Prix', 'Coop Prix'], PRIX: ['Prix', 'Coop Prix'], COOP_MEGA: ['Mega', 'Coop Mega'], MEGA: ['Mega', 'Coop Mega'] };
+    for (const row of rows) {
+      if (row.section.headings.length !== 1 || !/^(?:Priser denne uken|Eldre priser)$/.test(row.section.headings[0])) continue;
+      for (const button of row.buttons) {
+        const id = positiveId(button.storeId); if (!id) continue;
+        const labels = byStore.get(id) ?? [], label = row.labels[0];
+        labels.push(!row.invalid && row.buttons.length === 1 && !button.excluded && button.ownControl &&
+          button.rowControl === 'kjederad-' + id && row.labels.length === 1 && label ? { ...label, rowControl: button.rowControl, storeLabel: button.storeLabel } : null);
+        byStore.set(id, labels);
+      }
+    }
+    return prices.map(price => {
+      const labels = byStore.get(price.storeId), label = labels?.[0];
+      const names = chainNames[price.storeCode] ?? [];
+      if (!label || labels.some(other => !other || other.amount !== label.amount || other.unit !== label.unit || !names.some(name => name.toLowerCase() === other.storeLabel.toLowerCase())) ||
+        Math.abs(label.amount - price.price) > .005 + Number.EPSILON * Math.max(1, label.amount, price.price)) return price;
+      return { ...price, unitPriceBasis: { kind: 'own-chain-row-label-v1', productId: String(product.id), sourceUrl: url,
+        storeId: String(price.storeId), storeCode: price.storeCode, rowControl: label.rowControl,
+        label: label.label, amount: label.amount, unit: label.unit, observedAt: price.observedAt, source: price.source } };
+    });
+  }
+
   function failure(kind, url, error) {
     return { ok: false, kind, sourceUrl: typeof url === 'string' ? url : null,
       ...(kind === 'product' ? { product: null, prices: [], candidates: [] } :
@@ -180,7 +271,8 @@
       const normalized = found.map(({ raw, prices }) => ({ product: normalizeProduct(raw, url), prices: prices.map(normalizePrice) }));
       const unique = new Map(normalized.map((item) => [JSON.stringify(item), item]));
       if (unique.size !== 1) throw new Error('conflicting_own_product_prices');
-      const { product, prices } = unique.values().next().value;
+      const { product, prices: rawPrices } = unique.values().next().value;
+      const prices = withOwnUnitBasis(input, product, rawPrices, url);
       const chainRows = new Map();
       for (const row of prices) {
         const key = row.storeCode + ':' + row.storeId;

@@ -2,6 +2,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {existsSync,mkdirSync,readFileSync,renameSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {decrypt,encrypt,loadKey} from './crypto.mjs';
+import {sanitizeUnitPriceBasis} from './sesum-unit-basis.mjs';
 
 const ORIGIN='https://www.sesum.no';
 const CHAIN_CODES=new Set(['KIWI','REMA_1000','COOP_EXTRA','MENY_NO','SPAR_NO','ODA_NO','EUROPRIS_NO','COOP_OBS','COOP_PRIX','COOP_MEGA']);
@@ -10,6 +11,7 @@ const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('h
 const iso=value=>typeof value==='string'&&/^\d{4}-\d\d-\d\dT/.test(value)&&/(?:Z|[+-]\d\d:\d\d)$/.test(value)&&Number.isFinite(Date.parse(value));
 const unique=items=>[...new Set(items)];
 const text=(value,max=250)=>typeof value==='string'&&value.trim()&&value.length<=max?value.trim():null;
+const DIRECT_UNIT_REPAIR='missing-direct-unit-basis-v1',DIRECT_UNIT_BUILD='sesum-collector-build-1.7.1-1';
 
 export function sesumQueryPlan(requestedQueries){
   return requestedQueries.map(requestedQuery=>{
@@ -90,7 +92,14 @@ function productResult(result,job,chains,now){
     const keys=['id','title','description','startsAt','endsAt','startDate','endDate','validFrom','validTo','valid_from','valid_to','valid_until','validUntil','memberOnly','member_only','memberProgram','member_program','customerLimit','customer_limit','limit','quantity','price','multi_buy_quantity','multi_buy_price','multi_buy_pay_for','conditions'];
     return Object.fromEntries(keys.filter(k=>Object.hasOwn(value,k)).map(k=>[k,typeof value[k]==='string'?text(value[k],2000):typeof value[k]==='boolean'||Number.isFinite(value[k])?value[k]:null]));
   };
-  const safePrice=(price,reason)=>({storeCode:chainCode(price.storeCode),sourceStoreCode:text(price.storeCode,100),storeId:typeof price.storeId==='string'?text(price.storeId,100):Number.isSafeInteger(price.storeId)?price.storeId:null,price:Number.isFinite(price.price)&&price.price>0?price.price:null,rawUnitPrice:Number.isFinite(price.rawUnitPrice)?price.rawUnitPrice:null,source:text(price.source,100),observedAt:text(price.observedAt,100),isPromo:price.isPromo===true,promotion:safePromotion(price.promotion),sourceUrl:job.url,...(reason?{reason}:{})});
+  const safePrice=(price,reason)=>{
+    const row={storeCode:chainCode(price.storeCode),sourceStoreCode:text(price.storeCode,100),storeId:typeof price.storeId==='string'?text(price.storeId,100):Number.isSafeInteger(price.storeId)?price.storeId:null,price:Number.isFinite(price.price)&&price.price>0?price.price:null,rawUnitPrice:Number.isFinite(price.rawUnitPrice)?price.rawUnitPrice:null,source:text(price.source,100),observedAt:text(price.observedAt,100),isPromo:price.isPromo===true,promotion:safePromotion(price.promotion),sourceUrl:job.url,...(reason?{reason}:{})};
+    if(product.soldByWeight===true||price.unitPriceBasis!=null){
+      const checked=sanitizeUnitPriceBasis(price.unitPriceBasis,{productId:product.id,sourceUrl:job.url,...row});
+      row.unitPriceBasis=checked.basis;row.unitPriceBasisReason=checked.reason;
+    }
+    return row;
+  };
   const prices=[],priceCandidates=Array.isArray(result.priceCandidates)?result.priceCandidates.filter(p=>p&&chains.includes(chainCode(p.storeCode))).map(p=>safePrice(p,text(p.reason,150)??'unproven_price')):[];
   const relatedProducts=Array.isArray(result.candidates)?result.candidates.filter(p=>p&&typeof p==='object'&&['string','number'].includes(typeof p.id)&&/^[1-9]\d*$/.test(String(p.id))&&Number.isSafeInteger(Number(p.id))).map(p=>{
     let sourceUrl=null;
@@ -135,6 +144,7 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
   const jobId=(kind,url,generation=0)=>digest(kind+url+':'+generation);
   const resolvedId=(run,id)=>{const seen=new Set();while(run.productAliases&&Object.hasOwn(run.productAliases,id)&&!seen.has(id)){seen.add(id);id=run.productAliases[id];}return id;};
   let indexedRun=null,productIndex=new Map(),replayTask=null;
+  const directUnitBuildRequest=job=>job.directUnitBasisRepairRequests?.[DIRECT_UNIT_BUILD]??job.retryHistory?.find(row=>row.repair===DIRECT_UNIT_REPAIR&&row.parserBuild===DIRECT_UNIT_BUILD);
   function indexProducts(run){
     if(indexedRun!==run){indexedRun=run;productIndex=new Map(Object.values(run.jobs).filter(j=>j.kind==='product').map(j=>[j.url,j.id]));}
     return productIndex;
@@ -147,6 +157,7 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
       for(const price of [...product.prices,...product.priceCandidates]){
         const previous=[...(p.prices??[]),...(p.priceCandidates??[])].find(old=>chainCode(old.storeCode)===price.storeCode&&old.observedAt===price.observedAt&&old.price===price.price);
         if(previous&&chainCode(previous.sourceStoreCode)===price.storeCode)price.sourceStoreCode=previous.sourceStoreCode;
+        if(previous?.unitPriceBasis===null&&price.unitPriceBasis===null&&['missing-own-unit-price-basis','invalid-own-unit-price-basis'].includes(previous.unitPriceBasisReason))price.unitPriceBasisReason=previous.unitPriceBasisReason;
       }
       return {product,fetchedAt};
     }catch{return null;}
@@ -193,6 +204,8 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
       const sorted=[...rows].sort((a,b)=>time(b)-time(a)),successful=sorted.find(reusable);
       const changed=sorted.find(j=>(j.callbackPending||j.observationError||j.status==='partial')&&(!successful||time(j)>time(successful)));
       const selectedRepair=sorted.find(j=>priority.has(j.id)),winner=changed??selectedRepair??successful??sorted.find(j=>j.status==='pending')??sorted[0];
+      const consumedUnitRepair=rows.map(directUnitBuildRequest).find(Boolean);
+      if(consumedUnitRepair)winner.directUnitBasisRepairRequests={...(winner.directUnitBasisRepairRequests??{}),[DIRECT_UNIT_BUILD]:{repair:DIRECT_UNIT_REPAIR,requestedAt:consumedUnitRepair.requestedAt,observationFingerprint:consumedUnitRepair.observationFingerprint}};
       if(selectedRepair&&winner!==selectedRepair){
         winner.mergedRepairIds=unique([...(winner.mergedRepairIds??[]),selectedRepair.id]);
         if(['partial','blocked'].includes(winner.status)){winner.status='pending';winner.deliveredUntil=null;winner.retryAt=null;winner.attempts=0;}
@@ -230,7 +243,8 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
   }
   function observation(run,job){
     const p=job.productObservation,{prices=[],priceCandidates=[],relatedProducts=[],...metadata}=p;
-    return {runId:run.id,jobId:job.id,familyIds:[...job.familyIds],sourceUrl:job.url,fetchedAt:job.observationFetchedAt??job.fetchedAt,collectionStatus:job.status,callbackError:job.observationError??null,productObservationFingerprint:digest(metadata),product:structuredClone(p),parsedPriceCount:prices.length,unprovenPriceCount:priceCandidates.length,relatedProductCount:relatedProducts.length};
+    const checked=checkedObservation(job),repair=directUnitRepair(run,job,checked);
+    return {runId:run.id,jobId:job.id,familyIds:[...job.familyIds],sourceUrl:job.url,fetchedAt:job.observationFetchedAt??job.fetchedAt,collectionStatus:job.status,callbackError:job.observationError??null,productObservationFingerprint:digest(metadata),savedObservationFingerprint:checked?digest(checked):null,...(repair?{directUnitBasisRepair:repair}:{}),product:structuredClone(p),parsedPriceCount:prices.length,unprovenPriceCount:priceCandidates.length,relatedProductCount:relatedProducts.length};
   }
   function mergeObservation(previous,incoming){
     if(!previous)return incoming;
@@ -264,20 +278,35 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
     return run;
   }
   function refresh(){if(!enabled)return status();load();start(snapshot());return status();}
+  function directUnitRepair(run,job,checked=checkedObservation(job)){
+    if(job.kind!=='product'||job.status!=='complete'||!checked||checked.product.soldByWeight!==true||job.observationError||job.callbackPending||callbackInFlight.has(job)||job.replayFamilyIds?.length||job.deliveredUntil&&Date.parse(job.deliveredUntil)>now().getTime()||job.observationCollectorBuild===DIRECT_UNIT_BUILD)return null;
+    if(!checked.product.prices.some(price=>chains.includes(price.storeCode)&&price.price>0&&price.observedAt&&price.source&&!price.unitPriceBasis))return null;
+    const observationFingerprint=digest(checked);
+    if(directUnitBuildRequest(job))return null;
+    return {repair:DIRECT_UNIT_REPAIR,runId:run.id,jobId:job.id,observationFingerprint,parserBuild:DIRECT_UNIT_BUILD};
+  }
   function retry(input){
     if(!enabled)throw Error('Sesum-innhenting er ikke aktivert.');
     load();const run=state.run,evidence=text(input?.evidence,2000),ids=input?.jobIds;
     if(!run||input?.runId!==undefined&&input.runId!==run.id)throw Error('Ukjent eller utgått Sesum-kjøring.');
     if(!evidence||!Array.isArray(ids)||!ids.length||ids.length>10000)throw Error('Oppgi Sesum-jobber og konkret begrunnelse.');
-    const selected=unique(ids).map(id=>{
+    const direct=input?.repair===DIRECT_UNIT_REPAIR;
+    if(input?.repair!==undefined&&!direct)throw Error('Ukjent Sesum-reparasjonsmodus.');
+    if(direct&&(evidence.length<20||input.runId!==run.id||input.parserBuild!==DIRECT_UNIT_BUILD||!input.observationFingerprints||typeof input.observationFingerprints!=='object'||Array.isArray(input.observationFingerprints)))throw Error('En målrettet enhetsprisreparasjon krever konkret begrunnelse, gjeldende runId, observationFingerprints og testet parserBuild.');
+    const selected=[...new Map(unique(ids).map(id=>{
       if(!text(id,200)||!Object.hasOwn(run.jobs,resolvedId(run,id)))throw Error('Ukjent Sesum-jobb.');
-      const job=run.jobs[resolvedId(run,id)];if(!['partial','blocked'].includes(job.status))throw Error('Bare partial/blocked Sesum-jobber kan prøves på nytt.');
-      return job;
-    });
+      const job=run.jobs[resolvedId(run,id)];
+      if(direct){const eligible=directUnitRepair(run,job);if(!eligible||input.observationFingerprints[id]!==eligible.observationFingerprint)throw Error('Bare en gjeldende fullført løsvektjobb uten eget enhetsprisbelegg kan repareres mot riktig observasjonsfingerprint.');}
+      else if(!['partial','blocked'].includes(job.status))throw Error('Bare partial/blocked Sesum-jobber kan prøves på nytt.');
+      return [job.id,job];
+    })).values()];
     const requestedAt=now().toISOString();
     for(const job of selected){
-      job.retryHistory=[...(job.retryHistory??[]),{requestedAt,evidence,previousStatus:job.status,previousAttempts:job.attempts,previousError:job.error??null,previousErrors:job.errors??[],previousObservationError:job.observationError??null,previousCallbackPending:job.callbackPending??null,previousCompletedAt:job.completedAt??null}].slice(-20);
-      job.status='pending';job.attempts=0;job.deliveredUntil=null;job.retryAt=null;job.error=null;job.errors=[];job.completedAt=null;job.observationError=null;job.callbackPending=null;job.replayFamilyIds=[];job.replayError=null;job.replayRetryAt=null;
+      const repair=direct?directUnitRepair(run,job):null;
+      if(repair)job.directUnitBasisRepairRequests={...(job.directUnitBasisRepairRequests??{}),[DIRECT_UNIT_BUILD]:{repair:repair.repair,requestedAt,observationFingerprint:repair.observationFingerprint}};
+      job.retryHistory=[...(job.retryHistory??[]),{requestedAt,evidence,previousStatus:job.status,previousAttempts:job.attempts,previousError:job.error??null,previousErrors:job.errors??[],previousObservationError:job.observationError??null,previousCallbackPending:job.callbackPending??null,previousCompletedAt:job.completedAt??null,...(repair?{repair:repair.repair,observationFingerprint:repair.observationFingerprint,parserBuild:repair.parserBuild}:{})}].slice(-20);
+      job.status='pending';job.deliveredUntil=null;job.completedAt=null;
+      if(!direct){job.attempts=0;job.retryAt=null;job.error=null;job.errors=[];job.observationError=null;job.callbackPending=null;job.replayFamilyIds=[];job.replayError=null;job.replayRetryAt=null;}
     }
     run.repairPriority=unique([...selected.map(job=>job.id),...(run.repairPriority??[])]);
     run.scheduler={...run.scheduler,repairNormalSlots:0};
@@ -426,8 +455,8 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
       job.status=input.status==='ok'&&!job.errors.length&&(job.endReached||next.length>0)?'complete':'partial';
     }else{
       const product=productResult(result,job,chains,now());
-      if(job.productObservation)(job.observationHistory??=[]).push({product:structuredClone(job.productObservation),fetchedAt:job.observationFetchedAt??job.fetchedAt,status:job.status,callbackError:job.observationError??null});
-      job.productObservation=product;job.observationFetchedAt=input.fetchedAt;job.observationStatus=input.status;job.observationError=null;
+      if(job.productObservation)(job.observationHistory??=[]).push({product:structuredClone(job.productObservation),fetchedAt:job.observationFetchedAt??job.fetchedAt,status:job.status,callbackError:job.observationError??null,...(job.observationCollectorBuild?{collectorBuild:job.observationCollectorBuild}:{})});
+      job.productObservation=product;job.observationFetchedAt=input.fetchedAt;job.observationStatus=input.status;job.observationCollectorBuild=collectorBuild;job.observationError=null;
       job.priceChains=[];job.priceReceipts=[];job.deliveredUntil=null;job.callbackPending={product:structuredClone(product),fetchedAt:input.fetchedAt,sourceStatus:input.status,familyIds:[...job.familyIds]};
       save();applied=await applyObservation(run,job,job.callbackPending);
     }
@@ -454,7 +483,10 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
     if(!enabled)return {enabled:false,runId:null,items:[]};
     load();const rows=new Map(Object.entries(state.observations));
     if(state.run)for(const job of Object.values(state.run.jobs))if(job.productObservation){const row=observation(state.run,job);rows.set(job.productObservation.id,mergeObservation(rows.get(job.productObservation.id),row));}
-    const items=[...rows.values()].filter(row=>familyId===null||row.familyIds.includes(familyId)).sort((a,b)=>a.sourceUrl.localeCompare(b.sourceUrl));
+    const items=[...rows.values()].filter(row=>familyId===null||row.familyIds.includes(familyId)).sort((a,b)=>a.sourceUrl.localeCompare(b.sourceUrl)).map(({directUnitBasisRepair,...row})=>{
+      const job=row.runId===state.run?.id?state.run.jobs[resolvedId(state.run,row.jobId)]:null,repair=job?directUnitRepair(state.run,job):null;
+      return {...row,...(repair&&row.savedObservationFingerprint===repair.observationFingerprint?{directUnitBasisRepair:repair}:{})};
+    });
     return {enabled:true,runId:state.run?.id??null,items:structuredClone(items),coverageNote:'Registrerte kildeobservasjoner, inkludert uavklarte priser og separate tilsvarende-forslag. Ingen produktgodkjenning, ny prisdato eller lokal lagerstatus følger av innhentingen.'};
   }
   return {work,receive,refresh,retry,status,catalog,replayPending};

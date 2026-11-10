@@ -85,6 +85,109 @@ test('opaque source identifiers in an EAN field remain distinct from actual barc
   assert.equal(parsed.prices[0].price,price.price);assert.equal(parsed.prices[0].observedAt,price.observedAt);
 });
 
+const variableProduct = { ...product, name: 'Synthetic loose product', weight: null, weightUnit: null, soldByWeight: true };
+const ownRow = (label, { id = 2, chain = id === 9 ? 'REMA 1000' : 'KIWI', control = 'kjederad-' + id, rowClass = 'desktop_kjederadHode__synthetic', priceClass = 'desktop_butikkpris__synthetic', attrs = '', buttonAttrs = '', content = '' } = {}) =>
+  `<div class="${rowClass}" ${attrs}><button data-store="${id}" aria-controls="${control}" aria-label="Vis prisgrunnlag og prishistorikk for ${chain}" ${buttonAttrs}><span class="${priceClass}">${label}</span></button>${content}</div>`;
+const priceWidget = (content, heading = 'Priser denne uken') => `<section class="desktop_prices__synthetic"><section class="prisseksjoner_seksjon__synthetic"><h3>${heading}</h3>${content}</section></section>`;
+const variablePage = (content, prices = [price], details = variableProduct) => core.parseProduct(html({ product: details, prices }, priceWidget(content)), productUrl);
+
+test('an own main chain row preserves explicit kg/l labels with exact product, store and actual receipt provenance', () => {
+  const observedAt = '2026-11-09T12:30:00.123456+00:00';
+  for (const [label, amount, unit] of [['49,40 kr/kg', 49.4, 'kg'], ['49,4 kr/l', 49.4, 'l'],
+    ['1&nbsp;234,50 kr/kg', 1234.5, 'kg'], ['1.234,50 NOK/l', 1234.5, 'l'], ['1&#8239;234 kr/kg', 1234, 'kg']]) {
+    const quote = { ...price, price: amount, unitPrice: 999, observedAt, isPromo: true, promotion: { member_only: true } };
+    const result = variablePage(ownRow(label), [quote]);
+    assert.equal(result.ok, true, label);
+    assert.deepEqual(result.prices[0].unitPriceBasis, { kind: 'own-chain-row-label-v1', productId: '101', sourceUrl: productUrl,
+      storeId: '2', storeCode: 'KIWI', rowControl: 'kjederad-2', label: label.replace(/&nbsp;|&#8239;/g, ' '), amount, unit, observedAt, source: quote.source });
+    assert.equal(result.prices[0].price, amount);
+    assert.equal(result.prices[0].rawUnitPrice, 999, 'suspect numeric unitPrice is preserved without supplying the basis');
+    assert.equal(result.prices[0].observedAt, observedAt, 'submillisecond source timestamp is not rewritten to fetch time');
+    assert.deepEqual(result.prices[0].promotion, { member_only: true });
+    assert.equal(result.prices[0].isPromo, true);
+    assert.equal('directUnitVerified' in result.prices[0], false, 'capturing a label is not a review approval');
+    assert.equal(result.product.weight, null);
+  }
+});
+
+test('raw unit numbers, names, hero text, history, related cards and script strings never supply own unit proof', () => {
+  const named = { ...variableProduct, name: 'Synthetic pr kg – 49,40 kr/kg' };
+  const source = { ...price, unitPrice: 49.4 };
+  const unrelated = '<h1>49,40 kr/kg</h1><p>Løsvekt</p><span class="desktop_butikkpris__synthetic">49,40 kr/kg</span>' +
+    ownRow('49,40 kr/kg', { rowClass: 'related_kjederadHode__synthetic' }) +
+    '<div id="kjederad-2"><span class="desktop_butikkpris__synthetic">49,40 kr/kg</span></div>' +
+    '<script>globalThis.sesumUnitExecuted = true; const unrelated = ' + JSON.stringify(ownRow('49,40 kr/kg')) + ';</script>' +
+    '<template>' + ownRow('49,40 kr/kg') + '</template>';
+  const result = variablePage(unrelated, [source], named);
+  assert.equal(result.ok, true);
+  assert.equal(result.prices[0].unitPriceBasis, undefined);
+  assert.equal(result.prices[0].price, source.price);
+  assert.equal(globalThis.sesumUnitExecuted, undefined);
+  assert.equal(variablePage('', [source], named).prices[0].unitPriceBasis, undefined, 'RSC JSON alone has no displayed own basis');
+  const embedded = '0:' + JSON.stringify({ product: { ...named, description: ownRow('49,40 kr/kg') }, prices: [source] }) + '\n';
+  assert.equal(core.parseProduct(embedded, productUrl).prices[0].unitPriceBasis, undefined, 'markup inside a JSON-only response is not delivered HTML');
+  const fixed = variablePage(ownRow('49,40 kr/kg'), [source], product);
+  assert.equal(fixed.prices[0].unitPriceBasis, undefined, 'the unchanged fixed-package contract is not reclassified');
+});
+
+test('a main row must match its exact store control and literal amount/unit without discarding the raw quote', () => {
+  const invalidRows = [
+    ownRow('49,40 kr/kg', { id: 9 }), ownRow('49,40 kr/kg', { control: 'kjederad-9' }), ownRow('49,40 kr/kg', { chain: 'REMA 1000' }),
+    ownRow('49,40 kr/kg', { buttonAttrs: 'hidden' }), ownRow('49,40 kr/kg', { attrs: 'hidden' }),
+    ownRow('49,40 kr/kg', { attrs: 'aria-hidden="true"' }), ownRow('49,40 kr/kg', { attrs: 'style="display:none"' }),
+    ownRow('49,40 kr/kg', { priceClass: 'history_butikkpris__synthetic' }),
+    ownRow('49,40 kr/kg').replace('Vis prisgrunnlag og prishistorikk for KIWI', 'Related product price'),
+    ownRow('49,40 kr/kg').replace('</span>', ''),
+    ...['49,40', '49.40 kr/kg', '49,400 kr/kg', '1 23,40 kr/kg', '1,234.50 kr/kg', '49,40 kr/stk', '49,40 EUR/kg', '0 kr/kg', '-49,40 kr/kg', '49,40 kr/kg medlem', '49,41 kr/kg'].map(label => ownRow(label))
+  ];
+  for (const content of invalidRows) {
+    const result = variablePage(content);
+    assert.equal(result.ok, true, content);
+    assert.equal(result.prices[0].unitPriceBasis, undefined, content);
+    assert.equal(result.prices[0].price, price.price);
+    assert.equal(result.prices[0].observedAt, price.observedAt);
+  }
+  assert.equal(variablePage(ownRow('49,40 kr/kg'), [{ ...price, price: 49.404 }]).prices[0].unitPriceBasis.amount, 49.4, 'only normal displayed half-øre rounding is allowed');
+});
+
+test('duplicate and nested main-row ambiguity holds only the affected chain while identical labels agree', () => {
+  const second = { ...price, storeId: 9, storeCode: 'REMA_1000', price: 65 };
+  const validSecond = ownRow('65,00 kr/kg', { id: 9 });
+  for (const badFirst of [ownRow('49,40 kr/kg') + ownRow('49,40 kr/l'),
+    ownRow('49,40 kr/kg') + ownRow('49,40'),
+    ownRow('49,40 kr/kg', { content: '<button data-store="2" aria-controls="kjederad-2">Other</button>' }),
+    ownRow('49,40 kr/kg', { content: ownRow('49,40 kr/kg') })]) {
+    const result = variablePage(badFirst + validSecond, [price, second]);
+    assert.equal(result.ok, true);
+    assert.equal(result.prices[0].unitPriceBasis, undefined);
+    assert.equal(result.prices[1].unitPriceBasis.amount, 65);
+    assert.equal(result.prices[1].unitPriceBasis.storeCode, 'REMA_1000');
+  }
+  const identical = variablePage(ownRow('49,40 kr/kg') + ownRow('49,4 kr/kg'));
+  assert.equal(identical.prices[0].unitPriceBasis.amount, 49.4);
+});
+
+test('identical chain-row markup outside the own main price widget or inside history/related contexts cannot supply a basis', () => {
+  const raw = ownRow('49,40 kr/kg');
+  const unproven = [raw, '<section class="desktop_prices__synthetic">' + raw + '</section>',
+    priceWidget(raw, 'Tilsvarende varer'), priceWidget('<section class="desktop_prices__nested">' + raw + '</section>'),
+    priceWidget('<div id="kjederad-2">' + raw + '</div>'),
+    priceWidget('<section aria-label="Prishistorikk">' + raw + '</section>'),
+    priceWidget('<section aria-label="Relaterte produkter">' + raw + '</section>'),
+    '<section aria-label="Related products">' + priceWidget(raw) + '</section>'];
+  for (const content of unproven) {
+    const result = core.parseProduct(html({ product: variableProduct, prices: [price] }, content), productUrl);
+    assert.equal(result.ok, true);
+    assert.equal(result.prices[0].unitPriceBasis, undefined, content);
+    assert.equal(result.prices[0].observedAt, price.observedAt);
+  }
+  const ownWithUnrelated = core.parseProduct(html({ product: variableProduct, prices: [price] },
+    priceWidget(raw + '<div id="kjederad-2"><h3>Historiske priser</h3>' + ownRow('2,00 kr/kg') + '</div>') + ownRow('1,00 kr/kg') + '<section aria-label="Prishistorikk">' + priceWidget(ownRow('2,00 kr/kg')) + '</section>'), productUrl);
+  assert.equal(ownWithUnrelated.prices[0].unitPriceBasis.amount, 49.4, 'unrelated rows cannot conflict with the genuine main widget');
+  const olderSection = core.parseProduct(html({ product: variableProduct, prices: [price] }, priceWidget(raw, 'Eldre priser')), productUrl);
+  assert.equal(olderSection.prices[0].unitPriceBasis.amount, 49.4, 'weekly UI labels do not replace actual receipt freshness');
+});
+
 test('unexpected or conflicting own product schema cannot select a cheap unrelated row', () => {
   assert.equal(core.parseProduct(html({ product: { ...product, id: 999 }, prices: [price] }), productUrl).ok, false);
   assert.equal(core.parseProduct(html([{ product, prices: [price] }, { product, prices: [{ ...price, price: 1 }] }]), productUrl).ok, false);

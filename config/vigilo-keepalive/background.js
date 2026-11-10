@@ -314,7 +314,7 @@ async function wakeSesumCollector(tabId) {
   let bridge;
   try { bridge = await bounded(chrome.tabs.sendMessage(tabId,{type:'familien-collector-ping'})); } catch { /* repair after an extension update */ }
   if (!bridge?.ok) await chrome.scripting.executeScript({target:{tabId},files:['collector-bridge.js']});
-  const [main] = await bounded(chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:() => globalThis.__familienSesumCollector === 'sesum-collector-1.7.0' && globalThis.__familienSesumCollectorBuild === 'sesum-collector-build-1.7.0-4'}));
+  const [main] = await bounded(chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:() => globalThis.__familienSesumCollector === 'sesum-collector-1.7.1' && globalThis.__familienSesumCollectorBuild === 'sesum-collector-build-1.7.1-1'}));
   if (!main?.result) await chrome.scripting.executeScript({target:{tabId},world:'MAIN',files:['sesum-core.js','collector-sesum.js']});
   await bounded(chrome.tabs.sendMessage(tabId,{type:'familien-collector-wake'}));
 }

@@ -163,7 +163,7 @@ test('unknown weight mode remains null and requires an explicit fixed-package re
  f.approve({fixedPackVerified:true});assert.equal(f.prices.overlay().quote('sesum:KIWI:123').price.grossPackPrice,7.9);
 });
 test('pending is lightweight, omits parked receipts, and a compiled overlay is reused while freshness decays',()=>{
- const f=fixture();f.ingest();assert.deepEqual(Object.keys(f.prices.pending()[0]),['sourceKey','sourceFingerprint','name','familyIds','receiptAt','hasReviewedDonor']);
+ const f=fixture();f.ingest();assert.deepEqual(Object.keys(f.prices.pending()[0]),['sourceKey','sourceFingerprint','name','familyIds','receiptAt','basisReviewNeeded','hasReviewedDonor']);assert.equal(f.prices.pending()[0].basisReviewNeeded,false);
  f.approve();assert.equal(f.prices.pending().length,0);const index=f.prices.overlay().index();assert.equal(f.prices.overlay().index(),index,'compiled compact index is reused across views');
  f.clock.at='2026-11-12T12:00:00Z';assert.equal(f.prices.overlay().index(),index);assert.equal(f.prices.overlay().quote('sesum:KIWI:123').price.fresh,false,'clock is applied per reader call');
  const old=fixture();old.ingest(old.source({prices:[{storeCode:'KIWI',price:6,observedAt:'2026-01-01T12:00:00Z'}]}));assert.equal(old.prices.pending().length,0);

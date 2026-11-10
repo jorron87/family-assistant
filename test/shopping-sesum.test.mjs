@@ -18,6 +18,78 @@ const search=(job,{products=[],next=[],end=true}={})=>({ok:true,kind:'search',so
 const product=(job,{observedAt='2026-11-09T10:00:00Z',price=7.9}={})=>({ok:true,kind:'product',sourceUrl:job.url,product:{id:'123',name:'Synthetic tomatoes 390 g',ean:'12345678',weight:390,weightUnit:'g'},prices:[{storeCode:'EXTRA',price,observedAt,source:'receipt'}]});
 const saved=f=>JSON.parse(decrypt(readFileSync(join(f.dataDir,'sesum-collector.json.enc')),f.options.encryptionKey));
 const persist=(f,state)=>writeFileSync(join(f.dataDir,'sesum-collector.json.enc'),encrypt(Buffer.from(JSON.stringify(state)),f.options.encryptionKey));
+const DIRECT_BUILD='sesum-collector-build-1.7.1-1';
+const variableProduct=(job,{basis=true,price=109,observedAt='2026-11-09T10:00:00.000000+00:00',proofChanges={}}={})=>{
+  const result=product(job,{price,observedAt});Object.assign(result.product,{name:'Synthetic whole ginger root',weight:null,weightUnit:null,soldByWeight:true,ean:null});
+  Object.assign(result.prices[0],{storeId:'9',rawUnitPrice:999,isPromo:false,promotion:null});
+  if(basis)result.prices[0].unitPriceBasis={kind:'own-chain-row-label-v1',productId:'123',sourceUrl:job.url,storeId:'9',storeCode:'EXTRA',rowControl:'kjederad-9',label:'109,00 kr/kg',amount:109,unit:'kg',observedAt,source:'receipt',...proofChanges};
+  return result;
+};
+const repairInput=row=>({repair:row.directUnitBasisRepair.repair,runId:row.directUnitBasisRepair.runId,jobIds:[row.jobId],observationFingerprints:{[row.jobId]:row.directUnitBasisRepair.observationFingerprint},parserBuild:DIRECT_BUILD,evidence:'The saved own variable-weight row predates the tested exact own-row unit-label parser; reread only this selected product.'});
+
+test('own unit label evidence survives encrypted reload, callback retry and exact-URL family replay at original times',async t=>{
+  const f=fixture(t,{familyCount:2});let calls=0;const inputs=[],client=createSesumCollector({...f.options,receivePrices:input=>{inputs.push(input);if(++calls===1)throw Error('Temporary local receipt failure');return {matched:0,needsReview:1,blocked:0};}});
+  let work=client.work(),seed=work.jobs[0];await client.receive(response(work,seed,search(seed,{products:[productUrl]})));work=client.work();const detail=work.jobs[0],actual=variableProduct(detail);
+  await assert.rejects(client.receive(response(work,detail,actual)),/Temporary local/);assert.deepEqual(inputs[0].products[0].prices[0].unitPriceBasis,{...actual.prices[0].unitPriceBasis,storeCode:'COOP_EXTRA'});
+  f.advance(60001);const restored=createSesumCollector({...f.options,receivePrices:input=>{inputs.push(input);return {needsReview:1};}});assert.equal((await restored.replayPending()).applied,1);
+  work=restored.work();seed=work.jobs[0];await restored.receive(response(work,seed,search(seed,{products:[productUrl]})));
+  const replay=inputs.at(-1);assert.deepEqual(replay.familyIds,['family-1']);assert.equal(replay.fetchedAt,when);assert.equal(replay.products[0].prices[0].observedAt,actual.prices[0].observedAt);assert.deepEqual(replay.products[0].prices[0].unitPriceBasis,inputs[0].products[0].prices[0].unitPriceBasis);
+  const catalog=restored.catalog().items[0];assert.equal(catalog.product.prices[0].unitPriceBasis.amount,109);assert.equal(catalog.product.prices[0].rawUnitPrice,999);assert.equal(catalog.directUnitBasisRepair,undefined);assert.ok(catalog.savedObservationFingerprint);
+});
+
+test('an invalid optional unit proof holds only that quote basis and never persists untrusted nested fields',async t=>{
+  for(const proofChanges of [{productId:'999'},{sourceUrl:'https://www.sesum.no/produkt/999-related'},{storeId:'4'},{rowControl:'kjederad-4'},{storeCode:'KIWI'},{label:'99,00 kr/kg'},{unit:'l'},{observedAt:'2026-11-09T11:00:00Z'},{source:'another receipt'},{token:'must-not-persist'}]){
+    const f=fixture(t);let work=f.client.work(),seed=work.jobs[0];await f.client.receive(response(work,seed,search(seed,{products:[productUrl]})));work=f.client.work();const detail=work.jobs[0],result=variableProduct(detail,{proofChanges});
+    result.prices.push({storeId:'4',storeCode:'KIWI',price:150,observedAt:'2026-11-09T10:00:00Z',source:'receipt',unitPriceBasis:{kind:'own-chain-row-label-v1',productId:'123',sourceUrl:detail.url,storeId:'4',storeCode:'KIWI',rowControl:'kjederad-4',label:'150,00 kr/kg',amount:150,unit:'kg',observedAt:'2026-11-09T10:00:00Z',source:'receipt'}});
+    await f.client.receive(response(work,detail,result));const prices=f.received[0].products[0].prices;assert.equal(prices[0].price,109);assert.equal(prices[0].unitPriceBasis,null);assert.equal(prices[0].unitPriceBasisReason,'invalid-own-unit-price-basis');assert.equal(prices[1].unitPriceBasis.amount,150);assert.ok(!JSON.stringify(saved(f)).includes('must-not-persist'));
+  }
+});
+
+test('a finite complete-variable repair preserves progress, aliases, attempts and authentication pause until a real reread',async t=>{
+  const f=fixture(t,{familyCount:2});let work=f.client.work(),seed=work.jobs[0];await f.client.receive(response(work,seed,search(seed,{products:[productUrl]})));work=f.client.work();const detail=work.jobs[0];await f.client.receive(response(work,detail,variableProduct(detail,{basis:false})));
+  work=f.client.work();seed=work.jobs[0];await f.client.receive({runId:work.runId,jobId:seed.id,status:'error',fetchedAt:when,error:{code:'auth_required',retryAfterMs:600000}});
+  const old=saved(f),before=old.run.jobs[detail.id];before.attempts=2;before.error={code:'old-recovered-error',message:'Retain actual history'};old.run.productAliases={olderAlias:detail.id};persist(f,old);
+  const client=createSesumCollector(f.options),catalog=client.catalog().items[0],input=repairInput(catalog),pause=client.status().pauseUntil;input.jobIds.push('olderAlias');input.observationFingerprints.olderAlias=input.observationFingerprints[detail.id];
+  const receipt=client.retry(input);assert.deepEqual(receipt.retried,[detail.id]);assert.equal(receipt.pauseUntil,pause);assert.deepEqual(client.work().jobs,[]);
+  const pending=saved(f),job=pending.run.jobs[detail.id];assert.equal(pending.run.id,old.run.id);assert.deepEqual(pending.run.jobs[seed.id],old.run.jobs[seed.id]);assert.equal(job.attempts,2);assert.deepEqual(job.error,before.error);assert.deepEqual(job.productObservation,before.productObservation);assert.deepEqual(job.appliedFamilyIds,before.appliedFamilyIds);assert.equal(job.retryHistory.at(-1).previousCompletedAt,before.completedAt);assert.equal(job.retryHistory.at(-1).observationFingerprint,catalog.savedObservationFingerprint);assert.equal(pending.pauseUntil,pause);
+  assert.throws(()=>client.retry(input));f.advance(600001);const restored=createSesumCollector(f.options),next=restored.work();assert.equal(next.jobs[0].id,detail.id);assert.equal(next.jobs.length,1,'the repair consumes the ordinary source call budget');
+  const fetchedAt='2026-11-09T12:10:00.001Z';await restored.receive({...response(next,next.jobs[0],variableProduct(next.jobs[0])),fetchedAt,collectorBuild:DIRECT_BUILD});
+  const repaired=saved(f).run.jobs[detail.id];assert.equal(repaired.attempts,2);assert.deepEqual(repaired.observationHistory[0].product,before.productObservation);assert.equal(repaired.observationHistory[0].fetchedAt,when);assert.equal(repaired.productObservation.prices[0].observedAt,'2026-11-09T10:00:00.000000+00:00');assert.equal(repaired.observationFetchedAt,fetchedAt);assert.equal(restored.catalog().items[0].directUnitBasisRepair,undefined);assert.equal(restored.status().jobCountsByKind.search.complete,1);assert.throws(()=>restored.retry(input));
+});
+
+test('complete repair validation is atomic and excludes searches, fixed or unknown weight, valid proof and in-flight work',async t=>{
+  const f=fixture(t);let work=f.client.work(),seed=work.jobs[0];await f.client.receive(response(work,seed,search(seed,{products:[productUrl]})));work=f.client.work();const detail=work.jobs[0];await f.client.receive(response(work,detail,variableProduct(detail,{basis:false})));
+  const row=f.client.catalog().items[0],good=repairInput(row),before=saved(f);
+  for(const patch of [{repair:'unknown-mode'},{runId:undefined},{runId:'wrong-run'},{parserBuild:'untested-build'},{observationFingerprints:{[detail.id]:'stale'}},{jobIds:[detail.id,seed.id],observationFingerprints:{...good.observationFingerprints,[seed.id]:'not-an-own-product'}},{evidence:''}]){assert.throws(()=>f.client.retry({...good,...patch}));assert.deepEqual(saved(f),before,'an invalid selected batch never mutates even its valid first job');}
+  for(const change of ['fixed','unknown','basis','callback','replay','reservation']){
+    const state=structuredClone(before),job=state.run.jobs[detail.id];
+    if(change==='fixed')job.productObservation.soldByWeight=false;if(change==='unknown')job.productObservation.soldByWeight=null;if(change==='basis')job.productObservation=variableProduct(detail).product,job.productObservation.prices=variableProduct(detail).prices;
+    if(change==='callback')job.callbackPending={product:job.productObservation,fetchedAt:when,familyIds:['family-0']};if(change==='replay')job.replayFamilyIds=['family-0'];if(change==='reservation')job.deliveredUntil='2026-11-09T12:05:00Z';persist(f,state);
+    const client=createSesumCollector(f.options);assert.equal(client.catalog().items[0].directUnitBasisRepair,undefined,change);assert.throws(()=>client.retry(good),change);assert.deepEqual(saved(f),state,change);
+  }
+});
+
+test('a tested reread that still lacks a label stays held without offering an automatic repair loop or refreshing its price',async t=>{
+  const f=fixture(t);let work=f.client.work(),seed=work.jobs[0];await f.client.receive(response(work,seed,search(seed,{products:[productUrl]})));work=f.client.work();const detail=work.jobs[0];await f.client.receive(response(work,detail,variableProduct(detail,{basis:false})));
+  const input=repairInput(f.client.catalog().items[0]);f.client.retry(input);f.advance(60000);work=f.client.work();await f.client.receive({...response(work,work.jobs[0],variableProduct(work.jobs[0],{basis:false})),fetchedAt:'2026-11-09T12:01:00Z',collectorBuild:DIRECT_BUILD});
+  const row=f.client.catalog().items[0];assert.equal(row.directUnitBasisRepair,undefined);assert.equal(row.product.prices[0].unitPriceBasis,null);assert.equal(row.product.prices[0].unitPriceBasisReason,'missing-own-unit-price-basis');assert.equal(row.product.prices[0].observedAt,'2026-11-09T10:00:00.000000+00:00');assert.deepEqual(f.client.work().jobs,[]);assert.throws(()=>f.client.retry({...input,observationFingerprints:{[detail.id]:row.savedObservationFingerprint}}));
+  f.client.refresh();assert.equal(f.client.catalog().items[0].directUnitBasisRepair,undefined,'archived earlier-run observations never advertise a current-run repair');
+});
+
+test('an older cached collector cannot reopen the same finite repair after a new capture time or retry-history eviction',async t=>{
+  const f=fixture(t);let work=f.client.work(),seed=work.jobs[0];await f.client.receive(response(work,seed,search(seed,{products:[productUrl]})));work=f.client.work();const detail=work.jobs[0];await f.client.receive(response(work,detail,variableProduct(detail,{basis:false})));
+  const old=f.client.catalog().items[0],input=repairInput(old);f.client.retry(input);f.advance(60000);work=f.client.work();await f.client.receive({...response(work,work.jobs[0],variableProduct(work.jobs[0],{basis:false})),fetchedAt:'2026-11-09T12:01:00Z',collectorBuild:'sesum-collector-build-1.7.0-3'});
+  const row=f.client.catalog().items[0];assert.notEqual(row.savedObservationFingerprint,old.savedObservationFingerprint);assert.equal(row.directUnitBasisRepair,undefined,'an older worker still consumes the one explicitly requested enrichment attempt');assert.equal(row.product.prices[0].unitPriceBasisReason,'missing-own-unit-price-basis');assert.equal(row.product.prices[0].observedAt,'2026-11-09T10:00:00.000000+00:00');assert.equal(saved(f).run.jobs[detail.id].observationHistory[0].fetchedAt,when);
+  const state=saved(f);state.run.jobs[detail.id].retryHistory=Array.from({length:20},(_,i)=>({requestedAt:when,evidence:'Independent later diagnostic history '+i,previousStatus:'partial'}));persist(f,state);
+  const restored=createSesumCollector(f.options),after=restored.catalog().items[0];assert.equal(after.directUnitBasisRepair,undefined);assert.deepEqual(restored.work().jobs,[]);const before=saved(f);assert.throws(()=>restored.retry({...input,observationFingerprints:{[detail.id]:after.savedObservationFingerprint}}));assert.deepEqual(saved(f),before,'repeated same-build requests neither enqueue work nor erase prior source evidence');
+});
+
+test('exact-URL migration preserves a consumed repair when a newer successful duplicate becomes canonical',async t=>{
+  const f=fixture(t);let work=f.client.work(),seed=work.jobs[0];await f.client.receive(response(work,seed,search(seed,{products:[productUrl]})));work=f.client.work();const detail=work.jobs[0];await f.client.receive(response(work,detail,variableProduct(detail,{basis:false})));
+  f.client.retry(repairInput(f.client.catalog().items[0]));f.advance(60000);work=f.client.work();await f.client.receive({...response(work,work.jobs[0],variableProduct(work.jobs[0],{basis:false})),fetchedAt:'2026-11-09T12:01:00Z',collectorBuild:'sesum-collector-build-1.7.0-3'});
+  const state=saved(f),copy={...structuredClone(state.run.jobs[detail.id]),id:'newer-legacy-copy',generation:7,createdAt:'2026-11-09T12:02:00Z',fetchedAt:'2026-11-09T12:02:00Z',observationFetchedAt:'2026-11-09T12:02:00Z',retryHistory:[]};delete copy.directUnitBasisRepairRequests;state.run.jobs[copy.id]=copy;delete state.run.productDedupeVersion;persist(f,state);f.advance(120000);
+  const restored=createSesumCollector(f.options);assert.deepEqual(restored.work({peek:true}).jobs,[]);assert.equal(saved(f).run.productAliases[detail.id],copy.id);assert.equal(restored.catalog().items[0].jobId,copy.id);assert.equal(restored.catalog().items[0].directUnitBasisRepair,undefined,'changing canonical IDs cannot create another same-build enrichment attempt');assert.ok(saved(f).run.mergedProductJobs[detail.id].job.observationHistory.length);
+});
 
 test('one global source batch survives reload, releases after every receipt, and recovers after reservation expiry',async t=>{
   const f=fixture(t,{familyCount:12,cycleCalls:4,requireSingleBatch:true}),first=f.client.work();assert.equal(first.jobs.length,4);
