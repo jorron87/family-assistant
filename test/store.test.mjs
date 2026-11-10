@@ -14,6 +14,19 @@ function fixture(fn) {
   }
 }
 
+test('a campaign waiting for a future retry counts as blocked shopping even with no active shopping work',()=>fixture(dir=>{
+  const store=createStore(dir),campaign={do:'shopping-sesum-offer-review',sourceKey:'sesum:KIWI:123',familyId:'synthetic-family',status:'blocked',reason:'Primary campaign customer limit is unresolved.',retryAt:new Date(Date.now()+3600000).toISOString()};
+  // The shopping integration tests exercise the real future-retry queue. This
+  // boundary test verifies the store aggregates its durable completion result.
+  store.shopping.completion=()=>({complete:false,work:[],blockedStores:[],blockedRoutes:[],blockedCampaigns:[campaign]});
+  const report=store.completionReport();
+  assert.equal(report.shopping.complete,false);assert.deepEqual(report.shopping.work,[]);assert.deepEqual(report.shopping.blockedCampaigns,[campaign]);
+  assert.equal(report.counts.shoppingPending,0);assert.equal(report.counts.shoppingBlocked,1);assert.equal(report.complete,false);
+  assert.equal(store.changeCompletion().counts.shoppingBlocked,1,'change completion reports the same unresolved shopping blocker');
+  store.shopping.completion=()=>({complete:true,work:[],blockedStores:[],blockedRoutes:[]});
+  assert.equal(store.completionReport().counts.shoppingBlocked,0,'older shopping providers without campaign blockers remain compatible');
+}));
+
 test('retired Vigilo consent pages stay archived without blocking current completion', () => fixture(dir => {
   const store=createStore(dir);
   store.collectorIngest({source:'vigilo',kind:'supplemental-error',section:'consents',detail:'HTTP 404'});

@@ -35,7 +35,7 @@ const SHELF_CHOICES=[[1,'1 mnd'],[3,'3 mnd'],[6,'6 mnd'],[9,'9 mnd'],[12,'1 år'
 const LOCATIONS=[['all','Alt'],['frozen','Fryser'],['pantry','Tørrvarer'],['chilled','Kjøl']];
 const TIER_LABEL={excellent:'Svært bra pris',good:'Bra pris',small:'Liten rabatt'};
 const BASIS_TEXT={'documented-purchases':'ut fra registrerte kjøp, også utenfor Oda','household-estimate':'etter det dere har oppgitt','planned-amount':'etter planlagt årsmengde','oda-lower-bound':'minst dette, ut fra kjøpene hos Oda','oda-share-estimate':'anslått ut fra Oda-kjøpene og hvor stor del av handelen de er'};
-const HELD_TEXT={member:'krever medlemskap vi ikke har registrert','needs-review':'venter på at en vare sjekkes','stale-prices':'venter på ferske priser'};
+const HELD_TEXT={member:'krever medlemskap vi ikke har registrert','needs-review':'venter på at en vare sjekkes','stale-prices':'venter på ferske priser','sesum-campaign-changed':'sjekkes på nytt','sesum-offer-needs-review':'har vilkår som ikke er avklart','stale-sesum-offer-proof':'venter på ny kontroll av tilbudet','sesum-offer-missing-primary-proof':'har vilkår som ikke er avklart'};
 
 export function refreshDraftChoices(edits,previous=[],next=[]) {
   const before=new Map(previous.map(x=>[x.watchId,x])),after=new Map(next.map(x=>[x.watchId,x]));
@@ -568,7 +568,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     tick.onchange=()=>act(()=>api('/list',{action:tick.checked?'check':'uncheck',id:entry.id}),tick.checked&&entry.watchId?'Lagt på lager.':null);
     const text=el('div',undefined,'shop-list-text'),qty=entry.packs&&entry.packAmount?`${entry.packs} × ${packLabel(entry.packAmount,entry.unit)} `:'';
     text.append(productName(qty+entry.name,{key:entry.productKey,watchId:entry.watchId}));
-    const facts=[entry.cartError,entry.reason,entry.detail,entry.unitPrice?`${price(entry.unitPrice)}/${entry.unit}`:null,entry.saving?`Spar ${kr(entry.saving)}`:null,entry.cheaper&&!entry.places?.length?`Billigere nå: ${price(entry.cheaper.unitPrice)}/${entry.unit} hos ${entry.cheaper.storeName}`:null,entry.expired?'Tilbudet er over':entry.validTo?`Til ${dayLabel(entry.validTo)}`:null].filter(Boolean);
+    const facts=[entry.cartError,entry.reason,entry.detail,entry.offerHeldReason?'Tilbudet sjekkes på nytt':null,entry.unitPrice?`${price(entry.unitPrice)}/${entry.unit}`:null,entry.saving?`Spar ${kr(entry.saving)}`:null,entry.cheaper&&!entry.places?.length?`Billigere nå: ${price(entry.cheaper.unitPrice)}/${entry.unit} hos ${entry.cheaper.storeName}`:null,entry.expired?'Tilbudet er over':entry.validTo?`Til ${dayLabel(entry.validTo)}`:null].filter(Boolean);
     if(facts.length)text.append(el('span',facts.join(' · '),'shop-sub'+(entry.expired?' shop-expired':'')));
     appendPills(text,entry);
     const basis=comparisonBlock(entry);

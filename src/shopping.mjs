@@ -7,6 +7,7 @@ import {createLibraryExplorer,familyDetail} from './library-explorer.mjs';
 import {withinPriceHorizon} from './shopping-library.mjs';
 import {createSesumPrices} from './sesum-prices.mjs';
 import {createSesumDiscovery} from './sesum-discovery.mjs';
+import {campaignFingerprint,offerTermsFingerprint,validateCampaignOffer} from './sesum-campaigns.mjs';
 import {productTextHash} from './product-library.mjs';
 import {annualNeed,chainName,commonPacks,dealScore,packsFor,dealTier,defaultShelfLifeMonths,estimateStock,packBreakdown,planQuantities,shelfLifeMonths,shelfWithDate} from './shopping-planning.mjs';
 
@@ -183,6 +184,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   s.sesumPrices??={};
   s.sesumDiscovery??={};
   s.sesumFamilyReviews??={};
+  s.sesumOfferReviews??={};
   let sesumPrices;
   const discovery=createSesumDiscovery(s.sesumDiscovery,{save,now,reader:()=>libraryPrices?.reader?.()??null,source:key=>sesumPrices?.sourceRecord(key)??null});
   const reviewedReader=()=>discovery.overlay(libraryPrices?.reader?.()??null);
@@ -200,7 +202,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     for(const link of linkStates(w,reader)){
       if(link.state!=='ok')continue;
       for(const m of reader.members(link.groupId,{all:includeParked})){
-        if(m.status!=='approved'||!m.reviewCurrent||!allChains&&!chains.has(m.product.store)||found.has(m.productKey)||link.excludeProductKeys?.includes(m.productKey))continue;
+        if(m.status!=='approved'||!m.reviewCurrent||!allChains&&!chains.has(m.product.store)||found.has(m.productKey)||[m.productKey,m.product.nativeIdentity?.key,m.product.donorProductKey].some(key=>key&&link.excludeProductKeys?.includes(key)))continue;
         if(link.brands?.length&&!link.brands.some(b=>normalized(m.product.brand).includes(normalized(b))))continue;
         if((link.requires??[]).some(key=>m.product.attributes?.[key]!==true))continue;
         found.set(m.productKey,m);
@@ -241,17 +243,17 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
         native.set(k,{watchId:w.id,store:p.store,id:p.id,productKey:m.productKey,name:p.name,ean:p.ean,brand:p.brand,sourceUrl:p.sourceUrl,status:'approved',approved:true,unit:w.unit,packAmount,price:packAmount?m.price.grossPackPrice??m.unitPrice*packAmount:null,unitPrice:m.unitPrice,lastChecked:m.price.receiptAt,priceSource:'library',priceSourceUrl:m.price.sourceUrl??p.sourceUrl,origin:'library',groupId:m.groupId,image:p.image??null});
       }
     }
-    const quotes=[];
+    const quotes=[],campaigns=Object.values(s.offers).some(o=>o.sesumCampaign)?sesumCampaignContexts():new Map();
     for(const p of native.values())if(p.approved&&(!variablePack(p.name)||p.priceSource==='library')&&p.unitPrice>0&&Number.isFinite(p.unitPrice)&&freshPrice(p.lastChecked,at)){
       const store=s.settings.stores.find(x=>x.chainCode===p.store);
       quotes.push({...p,storeId:store?.id??null,storeName:p.store==='ODA_NO'?'Oda':store?.name.replace(/\s*[–-]\s*Kassal.*$/,'')??chainName(p.store),chainCode:p.store,sourceUrl:p.priceSourceUrl??p.sourceUrl??null,kind:'catalog'});
     }
     for(const o of Object.values(s.offers)){
       const store=s.settings.stores.find(x=>x.id===o.storeId),w=s.watches[o.watchId];
-      if(!store||!w||o.unit!==w.unit||!o.comparable||o.validFrom>today||o.validTo<today||o.bestBefore&&o.bestBefore<today||!freshPrice(o.observedAt,at)||o.memberOnly&&!store.memberEligible)continue;
+      if(!store||!w||o.unit!==w.unit||!o.comparable||o.validFrom>today||o.validTo<today||o.bestBefore&&o.bestBefore<today||!freshPrice(o.observedAt,at)||o.memberOnly&&!store.memberEligible||campaignOfferState(o,campaigns))continue;
       quotes.push({...o,offerId:o.id,storeName:store.name,chainCode:store.chainCode??null,unitPrice:o.price/o.packAmount,lastChecked:o.observedAt,kind:'offer'});
     }
-    return {entries:[...native.values()],reviewedNative:entries,quotes,libraryStatus:library.status,reader,excluded:new Set([...native.values()].filter(e=>e.status==='excluded').map(key))};
+    return {entries:[...native.values()],reviewedNative:entries,quotes,libraryStatus:library.status,reader,campaigns,excluded:new Set([...native.values()].filter(e=>e.status==='excluded').map(key))};
   }
   const quotesFor=(w,prices=currentPrices())=>prices.quotes.filter(p=>p.watchId===w.id&&p.unit===w.unit).sort((a,b)=>a.unitPrice-b.unitPrice||String(a.storeName).localeCompare(String(b.storeName)));
   function comparisonReference(w,a,candidate,prices=currentPrices()) {
@@ -326,7 +328,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     if(s.watches[id]?.stockAmount===next.stockAmount&&input.stockConfirmed!==true)next.stockCheckedAt=s.watches[id].stockCheckedAt;
     return update(()=>s.watches[id]=next);
   }
-  function offer(input) {
+  function buildOffer(input,{campaignReview=false}={}) {
     const watch=s.watches[input.watchId];if(!watch)throw Error('Ukjent overvåkning.');
     const store=s.settings.stores.find(x=>x.id===input.storeId);if(!store)throw Error('Butikken er ikke valgt.');
     const entry={id:hash(`${required(input.storeId,'Butikk')}\0${required(input.externalId,'Tilbuds-ID')}`),externalId:input.externalId,storeId:input.storeId,watchId:watch.id,name:required(input.name,'Varenavn'),price:positive(input.price,'tilbudspris'),packAmount:positive(input.packAmount,'pakningsmengde'),unit:input.unit,validFrom:day(input.validFrom),validTo:day(input.validTo),observedAt:input.observedAt??now().toISOString(),sourceUrl:url(input.sourceUrl),evidence:required(input.evidence,'Kildebelegg'),conditions:text(input.conditions,1000),memberOnly:input.memberOnly===true,bestBefore:input.bestBefore==null?null:day(input.bestBefore),maxPacks:input.maxPacks==null?null:positive(input.maxPacks,'maks kundeantall'),bundlePacks:positive(input.bundlePacks??1,'antall i pakketilbud'),comparable:input.comparable===true,comparisonNote:required(input.comparisonNote,'Sammenligningsgrunnlag')};
@@ -335,8 +337,21 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     if(typeof entry.quotedPriceIncludesVat!=='boolean')throw Error('Momsgrunnlag må oppgis som true eller false.');
     if(!entry.quotedPriceIncludesVat){const rate=positive(input.vatRate,'momssats');if(rate>1)throw Error('Oppgi momssats som andel, for eksempel 0.15.');entry.priceBeforeVat=entry.price;entry.vatRate=rate;entry.price=round(entry.price*(1+rate));}
     entry.priceIncludesVat=true;
-    return update(()=>s.offers[entry.id]=entry);
+    if(!campaignReview&&/(^|\.)sesum\.no$/i.test(new URL(entry.sourceUrl).hostname))throw Error('Sesum alene bekrefter ikke tilbudsvilkår; bruk shopping-sesum-offer-review med primærbelegg.');
+    const previous=s.offers[entry.id];
+    if(previous?.sesumCampaign){
+      entry.sesumCampaign=structuredClone(previous.sesumCampaign);
+      if(input.observedAt==null)entry.observedAt=previous.observedAt;
+      if(previous.campaignFreshProof)entry.campaignFreshProof=structuredClone(previous.campaignFreshProof);
+      if(!campaignReview&&input.observedAt&&Date.parse(entry.observedAt)>Date.parse(previous.observedAt)&&offerTermsFingerprint(entry,store.chainCode)===offerTermsFingerprint(previous,store.chainCode)){
+        const receipt=input.sourceReceipt;
+        if(!receipt||typeof receipt.evidence!=='string'||receipt.evidence.trim().length<10||receipt.evidence.length>6000||url(receipt.url)!==entry.sourceUrl||/(^|\.)sesum\.no$/i.test(new URL(receipt.url).hostname)||!freshPrice(receipt.observedAt)||Date.parse(entry.observedAt)>Date.parse(receipt.observedAt))throw Error('Ny prisferskhet for Sesum-tilbudet krever sourceReceipt fra faktisk primærlesing.');
+        entry.campaignFreshProof={offerTermsFingerprint:offerTermsFingerprint(entry,store.chainCode),sourceUrl:entry.sourceUrl,observedAt:new Date(receipt.observedAt).toISOString(),evidence:receipt.evidence.trim()};
+      }
+    }
+    return entry;
   }
+  function offer(input) {const entry=buildOffer(input);return update(()=>s.offers[entry.id]=entry);}
   function review(input) {
     if(!s.settings.stores.some(x=>x.id===input.storeId)||!['ok','blocked'].includes(input.status))throw Error('Ugyldig butikkontroll.');
     const entry={storeId:input.storeId,status:input.status,checkedAt:now().toISOString(),evidence:required(input.evidence,'Kontrollbelegg'),sourceUrl:url(input.sourceUrl),nextCheck:day(input.nextCheck)};
@@ -358,7 +373,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const products=[...byProduct.values()].map(p=>({...p,spent:round(p.spent),quantity:round(p.quantity),orders:p.orderIds.size,orderIds:undefined,baselineUnitPrice:p.baselineAmount>0?round(p.baselineTotal/p.baselineAmount):null})).sort((a,b)=>b.spent-a.spent);
     return {from,to:today,days:Math.max(1,(Date.parse(today)-Date.parse(from))/86400000+1),orderCount:selected.length,orderTotal:round(selected.reduce((n,o)=>n+o.grossAmount,0)),productTotal:round(selected.reduce((n,o)=>n+o.productAmount,0)),unallocatedDiscount:round(selected.reduce((n,o)=>n+(o.unallocatedDiscount??0),0)),categories:[...byCategory].map(([name,amount])=>({name,amount:round(amount)})).sort((a,b)=>b.amount-a.amount),products,orders:selected.map(({orderNumber,deliveryDate,grossAmount,sourceUrl,source,fees,discounts})=>({orderNumber,deliveryDate,grossAmount,sourceUrl,source,fees,discounts}))};
   }
-  const offerFingerprint=o=>`${o.price}|${o.packAmount}|${o.validTo}`;
+  const offerFingerprint=o=>o.sesumCampaign?offerTermsFingerprint(o,o.sesumCampaign.sourceKey.split(':')[1])+'|'+o.sesumCampaign.campaignFingerprint:`${o.price}|${o.packAmount}|${o.validTo}`;
   function deals(a=analysis()) {
     const at=now().getTime(),today=shoppingDay(now()),horizon=shoppingDay(new Date(at+7*86400000)),result=[],covered=[],held=[],prices=currentPrices();
     const approvedWatches=new Set(catalog.entries().filter(p=>p.status==='approved').map(p=>p.watchId));
@@ -369,6 +384,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       const decision=s.dealDecisions[o.id];
       if(decision&&decision.fingerprint===offerFingerprint(o))continue;
       const hold=reason=>held.push({offerId:o.id,watchId:w.id,watchName:w.name,storeName:store.name,name:o.name,reason});
+      const campaignHold=campaignOfferState(o,prices.campaigns);if(campaignHold){hold(campaignHold);continue;}
       if(o.memberOnly&&!store.memberEligible){hold('member');continue;}
       if(w.marketCalibration?.status==='needs-review'){hold('needs-review');continue;}
       if(w.catalogManaged&&!approvedWatches.has(w.id)){hold('needs-review');continue;}
@@ -447,12 +463,13 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const reader=libReader(),familyMembers=new Map();
     const alreadyInFamily=p=>{const w=s.watches[p.watchId];if(!reader||!w)return false;if(!familyMembers.has(w.id))familyMembers.set(w.id,linkedMembers(w,reader,{allChains:true}));return familyMembers.get(w.id).has(`kassal:${p.store}:${p.id}`);};
     const named=x=>x.watchId?{...x,familyId:x.watchId,familyName:x.watchName}:x;
-    return [...stock,...catalog.pending().filter(p=>s.watches[p.watchId]?.enabled!==false&&!priceTooOld(p)&&!alreadyInFamily(p)).map(p=>({do:'shopping-product-review',watchId:p.watchId,watchName:s.watches[p.watchId]?.name,productId:p.id,store:p.store,name:p.name,fingerprint:p.fingerprint,sourceUrl:p.sourceUrl})),...feedWork(),...s.settings.stores.filter(x=>!x.facebookGroup&&(!s.reviews[x.id]||s.reviews[x.id].nextCheck<=today)).map(x=>({do:'shopping-review',storeId:x.id,name:x.name,url:x.url,lastReview:s.reviews[x.id]??null})),...marketRefreshDue(today),...sesumWork(),...libraryWork(),...listFamilyWork(),...unlinkedOrderLines(),...routes].map(named);
+    return [...stock,...catalog.pending().filter(p=>s.watches[p.watchId]?.enabled!==false&&!priceTooOld(p)&&!alreadyInFamily(p)).map(p=>({do:'shopping-product-review',watchId:p.watchId,watchName:s.watches[p.watchId]?.name,productId:p.id,store:p.store,name:p.name,fingerprint:p.fingerprint,sourceUrl:p.sourceUrl})),...feedWork(),...s.settings.stores.filter(x=>!x.facebookGroup&&(!s.reviews[x.id]||s.reviews[x.id].nextCheck<=today)).map(x=>({do:'shopping-review',storeId:x.id,name:x.name,url:x.url,lastReview:s.reviews[x.id]??null})),...marketRefreshDue(today),...sesumWork(),...sesumOfferWork(),...libraryWork(),...listFamilyWork(),...unlinkedOrderLines(),...routes].map(named);
   }
   function completion() {
     const work=queue(),blockedStores=s.settings.monitoringEnabled?s.settings.stores.filter(x=>s.reviews[x.id]?.status==='blocked').map(x=>({storeId:x.id,name:x.name,evidence:s.reviews[x.id].evidence})):[];
     const blockedRoutes=[...s.shoppingList.filter(e=>!e.checkedAt&&(e.routing==='blocked'||e.cartError)).map(({id,name,reason,cartError})=>({id,name,reason:cartError??reason})),...stockIntake.blocked().map(x=>({id:x.id,name:'Lagertelling',reason:x.note}))];
-    return {complete:!work.length&&!blockedStores.length&&!blockedRoutes.length,work,blockedStores,blockedRoutes};
+    const blockedCampaigns=s.settings.monitoringEnabled?sesumOfferWork({all:true}).filter(item=>item.status==='blocked'):[];
+    return {complete:!work.length&&!blockedStores.length&&!blockedRoutes.length&&!blockedCampaigns.length,work,blockedStores,blockedRoutes,blockedCampaigns};
   }
   function listRouteAttempt(ids) {return update(()=>{for(const e of listRouteWork())if(ids.includes(e.id)){e.routeAttempts=(e.routeAttempts??0)+1;e.routeRetryAt=null;}return true;});}
   function listRouteFinish(ids,note) {return update(()=>{for(const e of listRouteWork())if(ids.includes(e.id)){if(e.routeAttempts>=3){e.routing='blocked';e.storeName??=NEAREST;e.reason=note??'Kunne ikke sorteres automatisk. Velg butikk selv eller legg varen inn på nytt.';}else e.routeRetryAt=new Date(now().getTime()+(e.routeAttempts>=2?300000:60000)).toISOString();}return true;});}
@@ -638,14 +655,14 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const packs=Number(input.packs);if(!Number.isInteger(packs)||packs<1||packs>1000||(o.maxPacks!==null&&packs>o.maxPacks))throw Error('Ugyldig antall pakker.');
     const a=analysis(),found=deals(a),deal=[...found.opportunities,...found.covered].find(d=>d.id===o.id),w=s.watches[o.watchId];
     if(!w)throw Error('Ukjent vare.');
-    const saving=deal&&deal.referenceType!=='target'?round((deal.referencePrice-deal.unitPrice)*packs*o.packAmount):null;
+    const campaignHeld=campaignOfferState(o,found.prices.campaigns),saving=!campaignHeld&&deal&&deal.referenceType!=='target'?round((deal.referencePrice-deal.unitPrice)*packs*o.packAmount):null;
     return update(()=>{
       const previousStock={amount:w.stockAmount,checkedAt:w.stockCheckedAt,packs:w.stockPacks?{...w.stockPacks}:null},stock=estimateStock(w,rateOf(needOf(w,a)),now().getTime());
       if(!stock.known)w.stockPacks={};
       if(w.stockPacks)addCounted(w,o.packAmount,packs);
       w.stockAmount=round((stock.amount??0)+packs*o.packAmount);w.stockCheckedAt=now().toISOString();
       s.dealDecisions[o.id]=decision;
-      s.purchases.push({id:randomUUID(),offerId:o.id,watchId:w.id,name:w.name,storeId:o.storeId,packs,packAmount:o.packAmount,unit:o.unit,unitPrice:round(o.price/o.packAmount),referencePrice:deal?.referencePrice??null,total:round(o.price*packs),saving,previousStock,at:now().toISOString()});
+      s.purchases.push({id:randomUUID(),offerId:o.id,watchId:w.id,name:w.name,storeId:o.storeId,packs,packAmount:o.packAmount,unit:o.unit,unitPrice:campaignHeld?null:round(o.price/o.packAmount),referencePrice:deal?.referencePrice??null,total:campaignHeld?null:round(o.price*packs),saving,previousStock,at:now().toISOString()});
       const cutoff=shoppingDay(new Date(now().getTime()-30*86400000));
       for(const [id,entry] of Object.entries(s.dealDecisions))if(entry.validTo<cutoff)delete s.dealDecisions[id];
       return {saved:true,saving};
@@ -817,6 +834,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const byWatch=new Map();for(const e of catalog.entries())if(e.status==='approved'&&e.image){const list=byWatch.get(e.watchId)??[];list.push(e);byWatch.set(e.watchId,list);}
     const products=odaProducts(priceContext);
     const decorate=({undoStock,boughtOffer,imageUrl,...entry})=>{const o=entry.offerId?s.offers[entry.offerId]:null,w=s.watches[entry.watchId],best=w?quotesFor(w,priceContext)[0]:null;
+      const campaignHeld=!entry.checkedAt&&o?campaignOfferState(o,priceContext.campaigns):null;
+      if(campaignHeld)return {...entry,unitPrice:null,saving:null,cheaper:null,offerHeldReason:campaignHeld,variants:[],others:[],places:[],savings:null,odaReturn:null,image:entry.watchId?watchImage(entry.watchId,entry.storeName,byWatch):null,sourceUrl:o.sourceUrl,validTo:null,expired:false};
       const cheaper=!entry.checkedAt&&best&&entry.unitPrice>best.unitPrice?{storeName:best.storeName,unitPrice:round(best.unitPrice),sourceUrl:best.sourceUrl}:null;
       const reference=!entry.checkedAt&&w&&o?comparisonReference(w,a,{kind:'offer',offerId:o.id,chainCode:s.settings.stores.find(x=>x.id===o.storeId)?.chainCode,unitPrice:o.price/o.packAmount},priceContext):null;
       const saving=!entry.checkedAt&&o?reference===null?null:round(Math.max(0,reference-o.price/o.packAmount)*entry.packs*o.packAmount):entry.saving;
@@ -878,6 +897,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const base={need:input.need==='now'?'now':'later',routing:null,routeAttempts:0,reason:null,odaProductId:null,id:randomUUID(),addedAt:now().toISOString(),checkedAt:null,offerId:null,watchId:null,detail:null,storeId:null,storeName:null,packs:null,packAmount:null,unit:null,unitPrice:null,saving:null};
     if(input.offerId!=null){
       const o=s.offers[input.offerId];if(!o)throw Error('Tilbudet finnes ikke lenger.');
+      if(campaignOfferState(o))throw Error('Tilbudsvilkårene må sjekkes på nytt før tilbudet kan legges til.');
       const packs=Number(input.packs);if(!Number.isInteger(packs)||packs<1||packs>1000||(o.maxPacks!==null&&packs>o.maxPacks))throw Error('Ugyldig antall pakker.');
       const w=s.watches[o.watchId],store=s.settings.stores.find(x=>x.id===o.storeId),found=deals(),deal=[...found.opportunities,...found.belowTrip,...found.covered].find(d=>d.id===o.id);
       const saving=deal&&deal.referenceType!=='target'?round((deal.referencePrice-deal.unitPrice)*packs*o.packAmount):null;
@@ -1239,10 +1259,10 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   // A flyer offer is fresh evidence by itself, so it shows even when every library
   // row for that chain is parked. Only a watch's reviewed links place it in a family.
   function explorerOffers() {
-    const today=shoppingDay(now()),reader=libReader();
+    const today=shoppingDay(now()),reader=libReader(),campaigns=Object.values(s.offers).some(o=>o.sesumCampaign)?sesumCampaignContexts():new Map();
     return Object.values(s.offers).flatMap(o=>{
       const w=s.watches[o.watchId],store=s.settings.stores.find(x=>x.id===o.storeId);
-      if(o.validFrom>today||o.validTo<today||!o.comparable||!w||w.enabled===false||!store)return [];
+      if(o.validFrom>today||o.validTo<today||!o.comparable||!w||w.enabled===false||!store||campaignOfferState(o,campaigns))return [];
       const linked=linkStates(w,reader).filter(l=>l.state==='ok').map(l=>l.groupId),groups=linked.length?linked:['followed:'+w.id];
       return [{id:o.id,name:o.name,storeName:store.chainCode?chainName(store.chainCode):cleanStore(store.name),price:o.price,packAmount:o.packAmount,unit:o.unit,unitPrice:round(o.price/o.packAmount),validTo:o.validTo,memberOnly:o.memberOnly,conditions:o.conditions??null,maxPacks:o.maxPacks,bundlePacks:o.bundlePacks,comparisonNote:o.comparisonNote,sourceUrl:o.sourceUrl,groups}];
     });
@@ -1330,6 +1350,109 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     });
   }
   const sesumRequirements=()=>new Map(sesumFamilies().map(f=>[f.familyId,hash(JSON.stringify([f.requirementsFingerprint,s.watches[f.familyId]?.note??null]))]));
+  const campaignKey=(sourceKey,familyId)=>sourceKey+'\0'+familyId;
+  function sesumCampaignContexts(){
+    const claimedSources=new Set(Object.values(s.offers).map(offer=>offer.sesumCampaign?.sourceKey).filter(Boolean));
+    const reader=libReader(),requirements=sesumRequirements(),native=catalog.entries(),sources=sesumPrices.approvedSources().filter(source=>source.receipt.isPromo===true||source.receipt.promotion!=null||claimedSources.has(source.sourceKey)),result=new Map();
+    if(!reader)return result;
+    const nativeByKey=new Map(native.map(e=>[e.watchId+'\0'+catalogKey(e),e]));
+    for(const w of Object.values(s.watches)){
+      if(w.enabled===false)continue;
+      const members=linkedMembers(w,reader);
+      for(const source of sources){
+        const p=reader.product(source.sourceKey),stores=s.settings.stores.filter(store=>store.chainCode===source.source.store);
+        if(!p||!stores.length||p.unit!==w.unit||reader.active?.(source.sourceKey)===false||sesumFamilyDecision(source,w.id,requirements)?.status==='excluded')continue;
+        const anchor=p.nativeIdentity?.key??p.donorProductKey??source.productKey,entry=nativeByKey.get(w.id+'\0'+anchor);
+        if(nativeHoldsMember(p,source.sourceKey,w.id,entry?[entry]:[]))continue;
+        const own=entry?.status==='approved'&&entry.store===source.source.store&&entry.unit===w.unit&&Math.abs(entry.packAmount-source.packAmount)<=1e-6*Math.max(entry.packAmount,source.packAmount);
+        if(!members.has(source.sourceKey)&&!own)continue;
+        const context={...source,familyId:w.id,familyName:w.name,familyFingerprint:requirements.get(w.id),storeIds:stores.map(store=>store.id)};
+        context.campaignFingerprint=campaignFingerprint(context);result.set(campaignKey(source.sourceKey,w.id),context);
+      }
+    }
+    return result;
+  }
+  const currentCampaignReview=(review,context)=>review&&review.sourceFingerprint===context.sourceFingerprint&&review.familyFingerprint===context.familyFingerprint&&review.campaignFingerprint===context.campaignFingerprint;
+  function campaignOfferState(offer,contexts){
+    const claim=offer.sesumCampaign;if(!claim){try{return /(^|\.)sesum\.no$/i.test(new URL(offer.sourceUrl).hostname)?'sesum-offer-needs-review':null;}catch{return null;}}
+    const context=(contexts??sesumCampaignContexts()).get(campaignKey(claim.sourceKey,offer.watchId)),review=s.sesumOfferReviews[campaignKey(claim.sourceKey,offer.watchId)];
+    if(!context||claim.sourceFingerprint!==context.sourceFingerprint||claim.familyFingerprint!==context.familyFingerprint||claim.campaignFingerprint!==context.campaignFingerprint)return 'sesum-campaign-changed';
+    const store=s.settings.stores.find(s=>s.id===offer.storeId);
+    if(!currentCampaignReview(review,context)||review.status!=='registered'||review.offerId!==offer.id||!store||store.chainCode!==context.source.store||review.offerTermsFingerprint!==offerTermsFingerprint(offer,store.chainCode))return 'sesum-offer-needs-review';
+    const freshProof=offer.campaignFreshProof?.offerTermsFingerprint===review.offerTermsFingerprint&&offer.campaignFreshProof.sourceUrl===offer.sourceUrl?Date.parse(offer.campaignFreshProof.observedAt):0;
+    if(!Number.isFinite(Date.parse(review.latestPrimaryReadAt))||Date.parse(offer.observedAt)>Math.max(Date.parse(review.latestPrimaryReadAt),freshProof))return 'sesum-offer-missing-primary-proof';
+    if(!freshPrice(offer.observedAt))return 'stale-sesum-offer-proof';
+    if(offer.memberOnly&&!store.memberEligible)return 'member';
+    return null;
+  }
+  function sesumOfferCandidates(familyId){
+    const contexts=sesumCampaignContexts(),today=shoppingDay(now()),items=[];
+    for(const context of contexts.values()){
+      if(familyId&&context.familyId!==familyId)continue;
+      const review=s.sesumOfferReviews[campaignKey(context.sourceKey,context.familyId)],linked=Object.values(s.offers).filter(o=>o.watchId===context.familyId&&o.sesumCampaign?.sourceKey===context.sourceKey);
+      if(context.receipt.isPromo!==true&&context.receipt.promotion==null&&!linked.length)continue;
+      const current=currentCampaignReview(review,context),offer=current&&review.offerId?s.offers[review.offerId]:null,hold=offer?campaignOfferState(offer,contexts):null,claim=offer?.sesumCampaign;
+      const bound=claim?.sourceKey===context.sourceKey&&offer.watchId===context.familyId&&claim.sourceFingerprint===context.sourceFingerprint&&claim.familyFingerprint===context.familyFingerprint&&claim.campaignFingerprint===context.campaignFingerprint;
+      const settled=current&&(review.status==='not-actionable'||review.status==='registered'&&offer&&bound&&(offer.validTo<today||hold===null||hold==='member'));
+      const chain=offer?s.settings.stores.find(s=>s.id===offer.storeId)?.chainCode:null;
+      items.push({...structuredClone(context),status:settled?review.status:current&&review.status==='blocked'?'blocked':'pending',reason:settled?null:hold??(current&&review.status==='blocked'?review.reason:'review-campaign-conditions'),review:review?structuredClone(review):null,offerId:offer?.id??null,offerTermsFingerprint:offer&&chain===context.source.store?offerTermsFingerprint(offer,chain):null});
+    }
+    return {items};
+  }
+  function sesumOfferWork({all=false}={}){
+    const at=now().getTime();
+    return sesumOfferCandidates().items.filter(item=>!['registered','not-actionable'].includes(item.status)&&(all||item.status!=='blocked'||!item.review.retryAt||Date.parse(item.review.retryAt)<=at)).map(item=>({do:'shopping-sesum-offer-review',watchId:item.familyId,familyId:item.familyId,familyName:item.familyName,sourceKey:item.sourceKey,sourceFingerprint:item.sourceFingerprint,familyFingerprint:item.familyFingerprint,campaignFingerprint:item.campaignFingerprint,offerTermsFingerprint:item.offerTermsFingerprint,status:item.status,reason:item.reason,retryAt:item.review?.retryAt??null}));
+  }
+  function sesumOfferReview(input){
+    if(!input||!['registered','not-actionable','blocked'].includes(input.status))throw Error('Ugyldig Sesum-tilbudsvurdering.');
+    const context=sesumCampaignContexts().get(campaignKey(input.sourceKey,input.familyId));
+    if(!context||input.sourceFingerprint!==context.sourceFingerprint||input.familyFingerprint!==context.familyFingerprint||input.campaignFingerprint!==context.campaignFingerprint)throw Error('Sesum-kampanjen, varen eller familiens godkjenning er endret; les gjeldende belegg.');
+    if(typeof input.evidence!=='string'||input.evidence.length>6000||input.evidence.trim().length<10)throw Error('Konkret kampanjebelegg på 10–6000 tegn kreves.');
+    const evidence=input.evidence.trim();
+    const key=campaignKey(context.sourceKey,context.familyId),previous=s.sesumOfferReviews[key],record={sourceKey:context.sourceKey,familyId:context.familyId,sourceFingerprint:context.sourceFingerprint,familyFingerprint:context.familyFingerprint,campaignFingerprint:context.campaignFingerprint,status:input.status,evidence,reviewedAt:now().toISOString()};
+    let entry=null;
+    if(input.status==='registered'){
+      if(!!input.offer===!!input.offerId)throw Error('Oppgi enten et eksisterende offerId eller ett fullstendig tilbud.');
+      entry=input.offer?buildOffer(input.offer,{campaignReview:true}):s.offers[input.offerId];
+      if(!entry||entry.watchId!==context.familyId||entry.comparable!==true)throw Error('Tilbudet må gjelde den faktisk godkjente varefamilien.');
+      const existing=s.offers[entry.id];
+      if(existing?.sesumCampaign&&(existing.sesumCampaign.sourceKey!==context.sourceKey||existing.watchId!==context.familyId))throw Error('Tilbudet er allerede bundet til en annen Sesum-kilde eller varefamilie; bruk et eget externalId.');
+      const store=s.settings.stores.find(s=>s.id===entry.storeId);
+      const proof=validateCampaignOffer({campaign:context,offer:entry,chainCode:store?.chainCode,conditionsVerified:input.conditionsVerified,termsEvidence:input.termsEvidence,sourceReceipts:input.sourceReceipts,now:now()});
+      record.offerId=entry.id;record.offerTermsFingerprint=offerTermsFingerprint(entry,store.chainCode);record.termsEvidence=proof.termsEvidence;record.sourceReceipts=proof.sourceReceipts;record.latestPrimaryReadAt=proof.latestPrimaryReadAt;
+      entry={...entry,sesumCampaign:{sourceKey:context.sourceKey,sourceFingerprint:context.sourceFingerprint,familyFingerprint:context.familyFingerprint,campaignFingerprint:context.campaignFingerprint}};
+    }else if(input.status==='blocked'){
+      record.reason=required(input.reason,'Uavklart kampanjevilkår');
+      record.retryAt=input.retryAt??new Date(now().getTime()+6*3600000).toISOString();
+      if(!Number.isFinite(Date.parse(record.retryAt))||Date.parse(record.retryAt)<=now().getTime()||Date.parse(record.retryAt)>now().getTime()+7*86400000)throw Error('Ny vurdering må være innen sju dager og i fremtiden.');
+    }else{
+      if(!['expired','wrong-variant','not-a-real-offer'].includes(input.reason)||input.resolutionVerified!==true)throw Error('Et faktisk påvist avslagsgrunnlag kreves; ukjente vilkår må blokkeres.');
+      if(!Array.isArray(input.sourceReceipts)||!input.sourceReceipts.length||input.sourceReceipts.length>20||input.sourceReceipts.some(r=>!r||typeof r.evidence!=='string'||r.evidence.trim().length<10||r.evidence.length>6000||!Number.isFinite(Date.parse(r.observedAt))||Date.parse(r.observedAt)>now().getTime()||!freshPrice(r.observedAt)||!/^https:\/\//.test(r.url??'')))throw Error('Et konkret, ferskt kildebelegg for avslaget kreves.');
+      if(!input.sourceReceipts.some(r=>!/(^|\.)sesum\.no$/i.test(new URL(url(r.url)).hostname)))throw Error('Et primært kildebelegg må avklare kampanjen.');
+      if(input.reason==='expired'){
+        const ends=['endsAt','ends_at','endDate','end_date','validTo','valid_to','validUntil','valid_until'].map(key=>context.receipt.promotion?.[key]).filter(value=>value!==null&&value!==undefined);
+        if(ends.length){
+          if(ends.some(value=>typeof value!=='string'||!Number.isFinite(Date.parse(value))||(/^\d{4}-\d\d-\d\d$/.test(value)?day(value)>=shoppingDay(now()):Date.parse(value)>now().getTime())))throw Error('Kampanjens kjente slutt er ikke dokumentert utløpt.');
+        }else if(!input.resolvedValidTo||day(input.resolvedValidTo)>=shoppingDay(now()))throw Error('Ukjent slutt må avklares med primærbelegg og resolvedValidTo før utløp kan registreres.');
+        if(input.resolvedValidTo)record.resolvedValidTo=day(input.resolvedValidTo);
+      }
+      record.reason=input.reason;record.resolutionVerified=true;record.sourceReceipts=input.sourceReceipts.map(r=>({url:url(r.url),observedAt:new Date(r.observedAt).toISOString(),evidence:text(r.evidence,6000)}));
+    }
+    return update(()=>{
+      const same=r=>JSON.stringify(Object.fromEntries(Object.entries(r).filter(([key])=>key!=='reviewedAt')));
+      if(previous&&same(previous)===same(record)&&(!entry||JSON.stringify(entry)===JSON.stringify(s.offers[entry.id])))return structuredClone(previous);
+      if(previous)(s.sesumOfferReviewHistory??=[]).push(structuredClone(previous));
+      if(entry){
+        const prior=s.offers[entry.id],decision=s.dealDecisions[entry.id],chain=s.settings.stores.find(store=>store.id===entry.storeId)?.chainCode;
+        // Adding reviewed source provenance alone must not undo a household's
+        // existing decline or purchase of the unchanged ordinary offer.
+        if(prior&&!prior.sesumCampaign&&decision?.fingerprint===offerFingerprint(prior)&&offerTermsFingerprint(prior,chain)===offerTermsFingerprint(entry,chain))s.dealDecisions[entry.id]={...decision,fingerprint:offerFingerprint(entry)};
+        s.offers[entry.id]=entry;
+      }
+      s.sesumOfferReviews[key]=record;
+      return {...record,offerId:entry?.id??null};
+    });
+  }
   const sesumFamilyDecision=(p,id,requirements)=>{
     const row=s.sesumFamilyReviews[p.sourceKey]?.[id];
     return row?.sourceFingerprint===p.sourceFingerprint&&row.familyFingerprint===requirements.get(id)?row:null;
@@ -1361,5 +1484,5 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const bridge=sesumPrices.review({...input,status:'approved',productKey:registration.productKey,productFingerprint:registration.productFingerprint,equivalenceEvidence:input.identityEvidence});
     return {registration,bridge};
   }
-  return {sesumFamilies,sesumReceivePrices:input=>sesumPrices.ingest(input),sesumCandidates,sesumRegister,sesumPriceReview,sesumPriceStatus:()=>({...sesumPrices.status(),discovery:discovery.status()}),familyReopen,listFamily,listFamilyWork,explorer,productInfo,libraryAudit,libraryAuditAck,libraryLinkCandidates,libraryLink,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
+  return {sesumFamilies,sesumReceivePrices:input=>sesumPrices.ingest(input),sesumCandidates,sesumRegister,sesumPriceReview,sesumOfferCandidates,sesumOfferReview,sesumPriceStatus:()=>({...sesumPrices.status(),discovery:discovery.status()}),familyReopen,listFamily,listFamilyWork,explorer,productInfo,libraryAudit,libraryAuditAck,libraryLinkCandidates,libraryLink,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
 }

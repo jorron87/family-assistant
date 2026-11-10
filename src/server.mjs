@@ -105,6 +105,8 @@ async function handle(req, res) {
       }
       if(path==='/api/shopping/sesum/status'&&method==='GET')return send(res,200,sesumStatus());
       if(path==='/api/shopping/sesum/candidates'&&method==='GET')return send(res,200,store.shopping.sesumCandidates(new URL(req.url,`http://${host}`).searchParams.get('familyId')??undefined));
+      if(path==='/api/shopping/sesum/offers'&&method==='GET')return send(res,200,store.shopping.sesumOfferCandidates(new URL(req.url,`http://${host}`).searchParams.get('familyId')??undefined));
+      if(path==='/api/shopping/sesum/offer-review'&&method==='POST')return send(res,200,store.shopping.sesumOfferReview(await json(req)));
       if(path==='/api/shopping/sesum/catalog'&&method==='GET')return send(res,200,sesum.catalog({familyId:new URL(req.url,`http://${host}`).searchParams.get('familyId')}));
       if(path==='/api/shopping/sesum/receive'&&method==='POST')return send(res,200,await sesum.receive(await json(req)));
       if(path==='/api/shopping/sesum/review'&&method==='POST')return send(res,200,store.shopping.sesumPriceReview(await json(req)));
