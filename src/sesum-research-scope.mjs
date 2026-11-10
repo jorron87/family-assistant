@@ -12,3 +12,13 @@ export function groupPlacementWork(rows,identity){
  for(const row of rows){const key=identity(row),prior=groups.get(key);if(prior)prior.relatedSources.push(row);else groups.set(key,{...row,relatedSources:[]});}
  return [...groups.values()].map(row=>row.relatedSources.length?{...row,sourceCount:row.relatedSources.length+1}:row);
 }
+
+// A review is reusable only on the exact same source, registration and whole
+// family basis. Newer holds and explicit reopen tombstones always win.
+export function placementProof(source,familySetFingerprint,registrationFingerprint,latest,history=[]){
+ const same=r=>r?.sourceKey===source.sourceKey&&r.sourceFingerprint===source.sourceFingerprint&&r.registrationFingerprint===registrationFingerprint&&r.familySetFingerprint===familySetFingerprint;
+ if(same(latest))return latest;
+ if(!latest||!['reviewed','no-active-family'].includes(latest.status)||latest.reviewedAllFamilies!==true||latest.sourceFingerprint!==source.sourceFingerprint||latest.registrationFingerprint!==registrationFingerprint)return null;
+ const previous=[...history].reverse().find(r=>r.historyProofVersion===2&&same(r));
+ return previous?.reviewedAllFamilies===true&&['reviewed','no-active-family'].includes(previous.status)?previous:null;
+}

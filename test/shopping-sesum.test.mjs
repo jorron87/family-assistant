@@ -27,13 +27,13 @@ const variableProduct=(job,{basis=true,price=109,observedAt='2026-11-09T10:00:00
 };
 const repairInput=row=>({repair:row.directUnitBasisRepair.repair,runId:row.directUnitBasisRepair.runId,jobIds:[row.jobId],observationFingerprints:{[row.jobId]:row.directUnitBasisRepair.observationFingerprint},parserBuild:DIRECT_BUILD,evidence:'The saved own variable-weight row predates the tested exact own-row unit-label parser; reread only this selected product.'});
 
-test('targeted collection retains off-scope search receipts without scheduling irrelevant product requests',async t=>{
+test('targeted collection prioritizes category hits without dropping unrecognized product requests',async t=>{
  const f=fixture(t,{targetedQueries:true,queryOverrides:{'family-0':['tomatoes']},researchTerms:{'family-0':['tomatoes']}});
  let work=f.client.work(),job=work.jobs[0];assert.equal(new URL(job.url).searchParams.get('q'),'tomatoes');
  await f.client.receive(response(work,job,search(job,{products:[productUrl,'https://www.sesum.no/produkt/456-whole-chicken']})));
  f.advance(6000);work=f.client.work();job=work.jobs[0];assert.equal(job.url,productUrl);await f.client.receive(response(work,job,product(job)));
- const status=f.client.status();assert.equal(status.status,'complete');assert.equal(status.deferredSearchJobs,1);assert.equal(status.manifest[0].productCount,1);assert.equal(Object.values(saved(f).run.jobs).length,3,'original source observations and pending off-scope jobs are retained');
- const restored=createSesumCollector(f.options);assert.equal(restored.status().deferredSearchJobs,1);assert.deepEqual(restored.work().jobs,[]);
+ const status=f.client.status();assert.equal(status.status,'collecting');assert.equal(status.deferredSearchJobs,0);assert.equal(status.deprioritizedProductJobs,1);assert.equal(status.manifest[0].productCount,2);assert.equal(Object.values(saved(f).run.jobs).length,3,'original source observations and pending off-scope jobs are retained');
+ const restored=createSesumCollector(f.options);assert.equal(restored.status().deferredSearchJobs,0);assert.equal(restored.work().jobs[0].url,'https://www.sesum.no/produkt/456-whole-chicken');
 });
 test('targeted discovery does not stop price collection for an explicitly reviewed native Sesum identity',async t=>{
  const f=fixture(t,{targetedQueries:true,queryOverrides:{'family-0':['tomatoes']},researchTerms:{'family-0':['tomatoes']}}),url='https://www.sesum.no/produkt/456-opaque-brand';

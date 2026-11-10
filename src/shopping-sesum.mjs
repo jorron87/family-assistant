@@ -370,14 +370,14 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,r
     return {selected,scheduler};
   }
   function scopeActive(run,job){
-    if(!config.targetedQueries)return true;
-    if(job.kind==='search')return run.families.some(f=>f.queries.includes(new URL(job.url).searchParams.get('q')));
-    const productId=new URL(job.url).pathname.match(/^\/produkt\/(\d+)/)?.[1];
-    if(followedScopeIds.has(productId))return true;
-    const slug=new URL(job.url).pathname.replace(/^\/produkt\/\d+-?/,'').replace(/[-/]/g,' ');
-    if(!slug.trim())return true;
-    let name=job.productObservation?.name;try{name??=decodeURIComponent(slug);}catch{return true;}
-    return researchScope({name},run.families,config.researchTerms).candidate;
+    if(!config.targetedQueries||job.kind==='product')return true;
+    return run.families.some(f=>f.queries.includes(new URL(job.url).searchParams.get('q')));
+  }
+  function sourcePriority(run,job){
+    if(!config.targetedQueries||job.kind==='search')return 0;
+    const id=new URL(job.url).pathname.match(/^\/produkt\/(\d+)/)?.[1];if(followedScopeIds.has(id))return 0;
+    let name=job.productObservation?.name;try{name??=decodeURIComponent(new URL(job.url).pathname.replace(/^\/produkt\/\d+-?/,'').replace(/[-/]/g,' '));}catch{return 0;}
+    return researchScope({name},run.families,config.researchTerms).candidate?0:1;
   }
   function work({peek=false}={}){
     if(!enabled)return {enabled:false,jobs:[],limits:{minSpacingMs,cycleCalls}};
@@ -385,7 +385,7 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,r
     if(state.pauseUntil&&Date.parse(state.pauseUntil)>at)return {enabled:true,runId:run.id,jobs:[],pauseUntil:state.pauseUntil,limits:{minSpacingMs,cycleCalls}};
     const active=config.requireSingleBatch===true?Object.values(run.jobs).filter(j=>j.status==='pending'&&j.deliveredUntil&&Date.parse(j.deliveredUntil)>at):[];
     if(active.length)return {enabled:true,runId:run.id,jobs:[],reason:'active-source-batch',retryAt:active.map(j=>j.deliveredUntil).sort()[0],limits:{minSpacingMs,cycleCalls}};
-    const ready=Object.values(run.jobs).filter(j=>scopeActive(run,j)&&j.status==='pending'&&!j.callbackPending&&(!j.retryAt||Date.parse(j.retryAt)<=at)&&(!j.deliveredUntil||Date.parse(j.deliveredUntil)<=at)).sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
+    const ready=Object.values(run.jobs).filter(j=>scopeActive(run,j)&&j.status==='pending'&&!j.callbackPending&&(!j.retryAt||Date.parse(j.retryAt)<=at)&&(!j.deliveredUntil||Date.parse(j.deliveredUntil)<=at)).sort((a,b)=>sourcePriority(run,a)-sourcePriority(run,b)||a.createdAt.localeCompare(b.createdAt));
     const {selected:jobs,scheduler}=fairSelection(run,ready);
     if(!peek){for(const job of jobs)job.deliveredUntil=new Date(at+5*60000).toISOString();if(jobs.length){run.scheduler=scheduler;save();}}
     return {enabled:true,runId:run.id,jobs:jobs.map(({id,kind,url,familyIds})=>({id,kind,url,familyIds})),limits:{minSpacingMs,cycleCalls}};
@@ -539,7 +539,7 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,r
       return {familyId:f.familyId,name:f.name,unit:f.unit,fingerprint:f.fingerprint,collectionStatus,collectionOutcome,requestedQueries:f.requestedQueries??f.queries,queryPlan:f.queryPlan??null,queries:f.queries,completedZeroMatchQueries,searchPages:search.length,productCount:products.length,productsCollected:products.filter(j=>j.status==='complete'&&!j.replayFamilyIds?.includes(f.familyId)).length,unresolvedItems:[...own.filter(j=>j.status!=='complete').map(j=>({jobId:j.id,kind:j.kind,status:j.status,url:j.url,reason:j.observationError??j.error??j.errors??null})),...own.filter(j=>j.replayFamilyIds?.includes(f.familyId)).map(j=>({jobId:j.id,kind:'replay',status:'pending',url:j.url,reason:j.replayError??'family-observation-replay-pending'})),...unsearchableTerms.map(term=>({kind:'query',status:'partial',term,reason:'single-term-exceeds-source-limit-64'}))],chains:chains.map(code=>({chainCode:code,collectionStatus,collectionOutcome:collectionStatus!=='complete'?collectionStatus:!products.length?'no_matches':products.some(j=>j.priceChains?.includes(code))?'prices_collected':'no_chain_prices',observedProducts:products.filter(j=>j.priceChains?.includes(code)).length,freshProducts:products.filter(j=>!j.replayFamilyIds?.includes(f.familyId)&&freshChains(j).includes(code)).length,reviewStatus:products.length?'see_price_integration':'no_candidates',freshnessStatus:products.some(j=>!j.replayFamilyIds?.includes(f.familyId)&&freshChains(j).includes(code))?'has_fresh_candidates':'missing_fresh_price'}))};
     });
     const metadataReplayPendingCount=metadataPending().length;
-    return {deferredSearchJobs:allJobs.length-jobs.length,discoveryScope:config.targetedQueries?'targeted':'unrestricted',enabled:true,status:run.status,runId:run.id,startedAt:run.startedAt,finishedAt:run.finishedAt,planCurrent,nextRefreshAt,refreshDue,pauseUntil:state.pauseUntil,implementationReceipt:state.implementationReceipt??null,metadataReplayPendingCount,replayPendingCount:jobs.filter(j=>j.callbackPending||j.replayFamilyIds?.length).length+metadataReplayPendingCount,replayPendingFamilyCount:jobs.reduce((n,j)=>n+(j.callbackPending?.familyIds.length??j.replayFamilyIds?.length??0),0),familyCount:manifest.length,familyCounts:Object.fromEntries(['pending','partial','blocked','matches_collected','no_matches'].map(outcome=>[outcome,manifest.filter(f=>f.collectionOutcome===outcome).length])),chainCodes:chains,jobCounts:Object.fromEntries(['pending','complete','partial','blocked'].map(status=>[status,jobs.filter(j=>j.status===status).length])),jobCountsByKind:Object.fromEntries(['search','product'].map(kind=>[kind,Object.fromEntries(['pending','complete','partial','blocked'].map(status=>[status,jobs.filter(j=>j.kind===kind&&j.status===status).length]))])),manifest,coverageNote:'Fullførte søk beskriver innhentingen, ikke komplett kjedesortiment, godkjent ekvivalens eller lokal lagerstatus.'};
+    return {deprioritizedProductJobs:jobs.filter(j=>j.kind==='product'&&sourcePriority(run,j)>0).length,deferredSearchJobs:allJobs.length-jobs.length,discoveryScope:config.targetedQueries?'targeted':'unrestricted',enabled:true,status:run.status,runId:run.id,startedAt:run.startedAt,finishedAt:run.finishedAt,planCurrent,nextRefreshAt,refreshDue,pauseUntil:state.pauseUntil,implementationReceipt:state.implementationReceipt??null,metadataReplayPendingCount,replayPendingCount:jobs.filter(j=>j.callbackPending||j.replayFamilyIds?.length).length+metadataReplayPendingCount,replayPendingFamilyCount:jobs.reduce((n,j)=>n+(j.callbackPending?.familyIds.length??j.replayFamilyIds?.length??0),0),familyCount:manifest.length,familyCounts:Object.fromEntries(['pending','partial','blocked','matches_collected','no_matches'].map(outcome=>[outcome,manifest.filter(f=>f.collectionOutcome===outcome).length])),chainCodes:chains,jobCounts:Object.fromEntries(['pending','complete','partial','blocked'].map(status=>[status,jobs.filter(j=>j.status===status).length])),jobCountsByKind:Object.fromEntries(['search','product'].map(kind=>[kind,Object.fromEntries(['pending','complete','partial','blocked'].map(status=>[status,jobs.filter(j=>j.kind===kind&&j.status===status).length]))])),manifest,coverageNote:'Fullførte søk beskriver innhentingen, ikke komplett kjedesortiment, godkjent ekvivalens eller lokal lagerstatus.'};
   }
   function catalog({familyId=null}={}){
     if(familyId!==null&&!text(familyId,200))throw Error('Ugyldig Sesum-varefamilie.');

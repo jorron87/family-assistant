@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {researchScope,groupPlacementWork} from '../src/sesum-research-scope.mjs';
+import {researchScope,groupPlacementWork,placementProof} from '../src/sesum-research-scope.mjs';
 test('targeted discovery is brand independent, accent tolerant and fails open without complete family configuration',()=>{
  const f=[{familyId:'milk'},{familyId:'beans'}],terms={milk:['melk','mjølk'],beans:['kaffebønner']};
  assert.equal(researchScope({name:'New brand Kaffebonner 500g'},f,terms).candidate,true);
@@ -17,4 +17,12 @@ test('short category words do not match inside unrelated compounds',()=>{
  assert.equal(researchScope({name:'Frokostkjeks usaltet'},families,terms).candidate,false);
  assert.equal(researchScope({name:'Salt 1 kg'},families,terms).candidate,true);
  assert.equal(researchScope({name:'Norvegia Gulost'},families,terms).candidate,true);
+});
+test('review history reuses only an exact versioned basis and cannot bypass holds or reopen',()=>{
+ const source={sourceKey:'sesum:KIWI:1',sourceFingerprint:'metadata'},old={...source,registrationFingerprint:null,familySetFingerprint:'old',status:'reviewed',reviewedAllFamilies:true,historyProofVersion:2,targets:[{familyId:'one'}]},latest={...old,familySetFingerprint:'new'};
+ assert.equal(placementProof(source,'old',null,latest,[old]),old);
+ for(const hold of [null,{...latest,status:'blocked'},{...latest,sourceFingerprint:'changed'}])assert.equal(placementProof(source,'old',null,hold,[old]),null);
+ assert.equal(placementProof(source,'old',null,latest,[{...old,historyProofVersion:undefined}]),null);
+ assert.equal(placementProof(source,'old',null,latest,[old,{...old,status:'reopen'}]),null);
+ assert.equal(placementProof(source,'old','new-registration',latest,[old]),null);
 });

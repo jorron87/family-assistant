@@ -10,7 +10,7 @@ import {createSesumPrices} from './sesum-prices.mjs';
 import {createSesumDiscovery} from './sesum-discovery.mjs';
 import {createSesumCatalogue} from './sesum-catalogue.mjs';
 import {sesumCollectionCompletion} from './sesum-completion.mjs';
-import {researchScope,groupPlacementWork} from './sesum-research-scope.mjs';
+import {researchScope,groupPlacementWork,placementProof} from './sesum-research-scope.mjs';
 import {sesumCatalogueFingerprint} from './sesum-catalogue.mjs';
 import {campaignFingerprint,offerTermsFingerprint,validateCampaignOffer} from './sesum-campaigns.mjs';
 import {productTextHash} from './product-library.mjs';
@@ -573,7 +573,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       let status;try{status=sesumCollectionStatus();}catch{status=null;}
       collection=sesumCollectionCompletion(status,status?.enabled?sesumFamilies():[]);
     }
-    const scopeItems=s.settings.monitoringEnabled?sesumPlacement().items:[],researchScopeSummary={sources:scopeItems.length,deferredSearchNoise:scopeItems.filter(i=>!i.discoveryScope.candidate&&i.discoveryScope.reason!=='await-current-price').length,deferredPriceResearch:scopeItems.filter(i=>i.discoveryScope.reason==='await-current-price').length,placementTasks:work.filter(i=>i.do==='shopping-sesum-placement-review').length,coverageNote:'Name terms route discovery only; deferred observations are preserved and unreviewed, never product exclusions or complete assortment coverage.'};
+    const scopeItems=s.settings.monitoringEnabled?sesumPlacement().items:[],unresolved=scopeItems.filter(i=>!['reviewed','no-active-family'].includes(i.status)),queued=new Set(work.filter(i=>i.do==='shopping-sesum-placement-review').flatMap(i=>[i.sourceKey,...(i.relatedSources??[]).map(r=>r.sourceKey)])),blocked=new Set(blockedPlacements.flatMap(i=>[i.sourceKey,...(i.relatedSources??[]).map(r=>r.sourceKey)]));
+    const researchScopeSummary={sources:scopeItems.length,reviewedSourceRows:scopeItems.length-unresolved.length,unresolvedSourceRows:unresolved.length,queuedSourceRows:queued.size,blockedSourceRows:[...blocked].filter(k=>!queued.has(k)).length,unaccountedSourceRows:unresolved.filter(i=>!queued.has(i.sourceKey)&&!blocked.has(i.sourceKey)).length,lowerPriorityNameCandidates:unresolved.filter(i=>!i.discoveryScope.candidate&&i.discoveryScope.reason!=='await-current-price').length,awaitingCurrentPrice:unresolved.filter(i=>i.discoveryScope.reason==='await-current-price').length,placementTasks:work.filter(i=>i.do==='shopping-sesum-placement-review').length,coverageNote:'Every unresolved source is queued or explicitly blocked. Category terms and price age only rank work; they never remove it or certify relevance.'};
     return {researchScope:researchScopeSummary,complete:!work.length&&!blockedStores.length&&!blockedRoutes.length&&!blockedCampaigns.length&&!blockedFamilies.length&&!blockedPlacements.length&&!blockedCatalogue.length&&!blockedOda.length&&collection?.complete!==false,work,blockedStores,blockedRoutes,blockedCampaigns,blockedFamilies,blockedPlacements,blockedCatalogue,blockedOda,...(collection?{collection}:{})};
   }
   function listRouteAttempt(ids) {return update(()=>{for(const e of listRouteWork())if(ids.includes(e.id)){e.routeAttempts=(e.routeAttempts??0)+1;e.routeRetryAt=null;}return true;});}
@@ -1499,8 +1500,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   }
   function sesumEffectiveFamilyIds(source,families){const prior=Object.entries(s.sesumFamilyReviews[source.sourceKey]??{}).filter(([id,row])=>s.watches[id]?.enabled!==false&&s.watches[id]&&(row.status==='excluded'||row.holdExcluded===true)).map(([id])=>id);return [...new Set([...source.familyIds,...sesumResearchedFamilyIds(source,families),...prior])];}
   function currentSesumPlacement(source,semantic,registrationFingerprint){
-    const review=s.sesumPlacementReviews[source.sourceKey];
-    return review?.sourceFingerprint===source.sourceFingerprint&&review.registrationFingerprint===registrationFingerprint&&review.familySetFingerprint===semantic.familySetFingerprint?review:null;
+    return placementProof(source,semantic.familySetFingerprint,registrationFingerprint,s.sesumPlacementReviews[source.sourceKey],s.sesumPlacementReviewHistory);
   }
   function sesumResearchFamilyIds(source,semantic,registrationFingerprint){
     const review=currentSesumPlacement(source,semantic,registrationFingerprint);
@@ -1526,17 +1526,19 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       if(sourceKey&&source.sourceKey!==sourceKey)continue;
       const receiptAt=reader?.quote(source.sourceKey)?.price.receiptAt??source.receiptAt;
       if(receiptAt&&!withinPriceHorizon(receiptAt,now().getTime(),reader?.horizonDays))continue;
-      const registrationFingerprint=research.get(source.sourceKey)?.registrationFingerprint??null,review=s.sesumPlacementReviews[source.sourceKey];
-      const current=review?.sourceFingerprint===source.sourceFingerprint&&review.registrationFingerprint===registrationFingerprint&&review.familySetFingerprint===semantic.familySetFingerprint;
-      items.push({...source,rawFamilyIds:[...source.familyIds],researchedFamilyIds:sesumResearchedFamilyIds(source,semantic.families),registrationFingerprint,familySetFingerprint:semantic.familySetFingerprint,fingerprint:hash(JSON.stringify([source.sourceKey,source.sourceFingerprint,registrationFingerprint,semantic.familySetFingerprint])),status:current?review.status:'pending',reason:current?review.reason??null:'review-all-active-family-placement',retryAt:current?review.retryAt??null:null,review:review?structuredClone(review):null,...(sourceKey?{source:sesumSubjectRecord(source.sourceKey).source,registration:source.kind==='catalogue'?null:discovery.record(source.sourceKey)}:{})});
+      const registrationFingerprint=research.get(source.sourceKey)?.registrationFingerprint??null,proof=currentSesumPlacement(source,semantic,registrationFingerprint),review=proof??s.sesumPlacementReviews[source.sourceKey];
+      const current=!!proof;
+      items.push({...source,rawFamilyIds:[...source.familyIds],researchedFamilyIds:[...new Set([...sesumResearchedFamilyIds(source,semantic.families),...(current?review.targets.map(t=>t.familyId):[])])],registrationFingerprint,familySetFingerprint:semantic.familySetFingerprint,fingerprint:hash(JSON.stringify([source.sourceKey,source.sourceFingerprint,registrationFingerprint,semantic.familySetFingerprint])),status:current?review.status:'pending',reason:current?review.reason??null:'review-all-active-family-placement',retryAt:current?review.retryAt??null:null,review:review?structuredClone(review):null,...(sourceKey?{source:sesumSubjectRecord(source.sourceKey).source,registration:source.kind==='catalogue'?null:discovery.record(source.sourceKey)}:{})});
     }
+    const knownEans=new Set(sesumFamilies().flatMap(f=>f.products.filter(p=>p.source!=='sesum'&&p.reviewCurrent).flatMap(p=>Array.isArray(p.ean)?p.ean:p.ean?[p.ean]:[])));
     const terms=sesumResearchTerms(),maxAge=sesumResearchMaxPriceAgeHours(),freshIds=new Set(items.filter(i=>i.receiptAt&&now().getTime()-Date.parse(i.receiptAt)>=0&&now().getTime()-Date.parse(i.receiptAt)<=maxAge*3600000).map(i=>sesumSubjectRecord(i.sourceKey).source.id));
-    for(const item of items){item.discoveryScope=researchScope(item,semantic.families,terms);if(item.registrationFingerprint||item.researchedFamilyIds.length||item.review?.targets?.length||item.status==='blocked')item.discoveryScope={...item.discoveryScope,candidate:true,retainedKnownResearch:true};if(Number.isFinite(maxAge)&&maxAge>0&&item.discoveryScope.candidate&&!item.discoveryScope.retainedKnownResearch&&!freshIds.has(sesumSubjectRecord(item.sourceKey).source.id))item.discoveryScope={...item.discoveryScope,candidate:false,reason:'await-current-price'};}
+    for(const item of items){item.discoveryScope=researchScope(item,semantic.families,terms);const raw=sesumSubjectRecord(item.sourceKey).source;if((raw.ean??[]).some(e=>knownEans.has(e)))item.discoveryScope={...item.discoveryScope,candidate:true,reason:'reviewed-identity-candidate',reviewedIdentityCandidate:true,retainedKnownResearch:true};if(item.registrationFingerprint||item.researchedFamilyIds.length||item.review?.targets?.length||item.status==='blocked')item.discoveryScope={...item.discoveryScope,candidate:true,retainedKnownResearch:true};if(Number.isFinite(maxAge)&&maxAge>0&&item.discoveryScope.candidate&&!item.discoveryScope.retainedKnownResearch&&!freshIds.has(sesumSubjectRecord(item.sourceKey).source.id))item.discoveryScope={...item.discoveryScope,candidate:false,reason:'await-current-price'};}
     return {...semantic,items,total:items.length,hasMore:false,scope:{mode:sourceKey?'exact-source':'all-active-sources',sourceKey:sourceKey??null}};
   }
   function sesumPlacementWork({all=false}={}){
-    const rows=sesumPlacement().items.filter(item=>item.discoveryScope.candidate&&!['reviewed','no-active-family'].includes(item.status)&&(all||item.status!=='blocked'||!item.retryAt||Date.parse(item.retryAt)<=now().getTime()));
-    return groupPlacementWork(rows,item=>item.registrationFingerprint?item.sourceKey:JSON.stringify([sesumCatalogueFingerprint(sesumSubjectRecord(item.sourceKey).source),item.status,item.retryAt])).map(item=>{const project=({sourceKey,sourceFingerprint,registrationFingerprint,familySetFingerprint,fingerprint,status,reason,retryAt})=>({do:'shopping-sesum-placement-review',sourceKey,sourceFingerprint,registrationFingerprint,familySetFingerprint,fingerprint,status,reason,retryAt});return {...project(item),...(item.relatedSources.length?{relatedSources:item.relatedSources.map(project),sourceCount:item.sourceCount,fingerprint:hash(JSON.stringify([item.fingerprint,item.relatedSources.map(r=>r.fingerprint)]))}:{} )};});
+    const rows=sesumPlacement().items.filter(item=>!['reviewed','no-active-family'].includes(item.status)&&(all||item.status!=='blocked'||!item.retryAt||Date.parse(item.retryAt)<=now().getTime()));
+    const rank=i=>i.discoveryScope.candidate?0:i.discoveryScope.reason==='await-current-price'?1:2;rows.sort((a,b)=>rank(a)-rank(b));
+    return groupPlacementWork(rows,item=>item.registrationFingerprint?item.sourceKey:JSON.stringify([sesumCatalogueFingerprint(sesumSubjectRecord(item.sourceKey).source),item.status,item.retryAt])).map(item=>{const project=({sourceKey,sourceFingerprint,registrationFingerprint,familySetFingerprint,fingerprint,status,reason,retryAt,discoveryScope})=>({do:'shopping-sesum-placement-review',sourceKey,sourceFingerprint,registrationFingerprint,familySetFingerprint,fingerprint,status,reason,retryAt,discoveryScope});return {...project(item),...(item.relatedSources.length?{relatedSources:item.relatedSources.map(project),sourceCount:item.sourceCount,fingerprint:hash(JSON.stringify([item.fingerprint,item.relatedSources.map(r=>r.fingerprint)]))}:{} )};});
   }
   function sesumPlacementReview(input){
     if(!['reviewed','no-active-family','blocked','reopen'].includes(input.status))throw Error('Ugyldig global familievurdering.');
@@ -1578,7 +1580,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     return update(()=>{
       const previous=s.sesumPlacementReviews[source.sourceKey],same=value=>JSON.stringify(Object.fromEntries(Object.entries(value).filter(([key])=>key!=='reviewedAt')));
       if(previous&&input.status!=='reopen'&&same(previous)===same(record))return structuredClone(previous);
-      if(previous)(s.sesumPlacementReviewHistory??=[]).push(structuredClone(previous));
+      if(previous)(s.sesumPlacementReviewHistory??=[]).push({...structuredClone(previous),historyProofVersion:2});
+      if(input.status==='reopen')(s.sesumPlacementReviewHistory??=[]).push({...record,historyProofVersion:2});
       if(input.status==='reopen')delete s.sesumPlacementReviews[source.sourceKey];else s.sesumPlacementReviews[source.sourceKey]=record;
       if(['reviewed','no-active-family'].includes(input.status))s.sesumPlacementTargets[source.sourceKey]={sourceFingerprint:source.sourceFingerprint,targets:structuredClone(record.targets)};
       return record;
