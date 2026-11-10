@@ -31,8 +31,8 @@ import {createSesumCollector,sesumSenderAllowed} from './shopping-sesum.mjs';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 let libraryPrices;
 try{const config=readConfig('shopping-library.json');if(config.enabled===true&&typeof config.file==='string'){const file=resolve(dirname(configPath('shopping-library.json')),config.file);libraryPrices=libraryPriceProvider(file,{indexFile:join(dirname(file),'shopping-index.json'),horizonDays:config.priceHorizonDays});}}catch(error){if(error.code!=='ENOENT')throw error;}
-let sesum;
-const store = createStore(DATA_DIR,{libraryPrices,sesumCollectionStatus:()=>sesum?.status()});
+let sesum,oda;
+const store = createStore(DATA_DIR,{libraryPrices,sesumCollectionStatus:()=>sesum?.status(),odaConnected:()=>oda?.status().connected===true});
 const resources = createResources({dataDir:DATA_DIR,store});
 const googlePublisher=createGooglePublisher({store,dataDir:DATA_DIR,config:readConfig('sources.json')});
 const homeAssistant=createHomeAssistant({config:process.env.FAMILIEN_HOME_ASSISTANT_CONFIG?JSON.parse(readFileSync(process.env.FAMILIEN_HOME_ASSISTANT_CONFIG,'utf8')):readConfig('home-assistant.json'),dataDir:DATA_DIR});
@@ -55,7 +55,7 @@ const servers=[];
 const dispatchTick=()=>{if(!restarting&&!process.env.FAMILIEN_NO_DISPATCH)phoneDispatcher.tick();};
 const host = "127.0.0.1";
 const port = Number(process.env.FAMILIEN_PORT ?? 4318);
-const oda=createOda({dataDir:DATA_DIR,shopping:store.shopping,redirectUrl:`http://127.0.0.1:${port}/api/shopping/oda/callback`});
+oda=createOda({dataDir:DATA_DIR,shopping:store.shopping,redirectUrl:`http://127.0.0.1:${port}/api/shopping/oda/callback`});
 const odaCart=createOdaCart({oda,shopping:store.shopping});
 const kassal=createKassal({dataDir:DATA_DIR});
 let sesumConfig={enabled:false};
@@ -144,6 +144,7 @@ async function handle(req, res) {
     if(path==='/api/shopping/image'&&method==='GET'){const url=store.shopping.imageSource(new URL(req.url,`http://${host}`).searchParams.get('id'));const image=url?await productImages.load(url):null;if(!image)return send(res,404,{error:'Fant ikke bildet.'});res.setHeader('Cache-Control','private, max-age=86400');return send(res,200,image.bytes,image.type);}
     if(path==='/api/shopping/oda/live'&&method==='GET')return send(res,200,await odaCart.read(new URL(req.url,`http://${host}`).searchParams.has('force')));
     if(path==='/api/shopping/oda/tools'&&method==='GET')return send(res,200,await oda.tools());
+    if(path==='/api/shopping/oda/refresh-plan'&&method==='GET')return send(res,200,store.shopping.odaRefreshPlan({watchId:new URL(req.url,`http://${host}`).searchParams.get('watchId')??undefined}));
     if(path==='/api/shopping/oda/callback'&&method==='GET'){
       await oda.callback(Object.fromEntries(new URL(req.url,`http://${host}`).searchParams));
       return send(res,200,'Oda er tilkoblet. Gå tilbake til Handel og hent ordrehistorikken.','text/plain; charset=utf-8');
@@ -172,6 +173,7 @@ async function handle(req, res) {
       if(path==='/api/shopping/kassal/history')return send(res,200,await kassal.history(input));
       if(path==='/api/shopping/orders')return send(res,200,store.shopping.importOrders(input));
       if(path==='/api/shopping/settings')return send(res,200,store.shopping.settings(input));
+      if(path==='/api/shopping/oda/refresh')return send(res,200,await oda.refreshPrices(input));
       if(path==='/api/shopping/list')return send(res,200,await odaCart.list(input));
       if(path==='/api/shopping/oda/line')return send(res,200,await odaCart.change(input));
       if(path==='/api/shopping/oda/swap')return send(res,200,await odaCart.swap(input));
@@ -495,7 +497,7 @@ servers.push(createServer((req,res) => {
     if(req.method==='POST'&&/^\/api\/shopping\/(?:stock-action|stock-scan|stock-intake(?:\/[a-f0-9-]{36}\/(?:submit|files\/[0-7]))?)$/.test(kioskStock))return handle(req,res);
     return send(res,req.method==='GET'?403:405,{error:'Gjennomgang og bildeoriginaler er bare tilgjengelige på agentporten.'});
   }
-  if(/^\/(?:api\/(?:resources|collector|google)(?:[/?]|$)|google-setup|shopping-setup|api\/shopping\/oda\/(?:connect|callback|tools)|api\/shopping\/(?:sesum\/|orders|settings|offer|review|nutrition|catalog|link|feed|library-))/.test(req.url))return send(res,req.method==='GET'?403:405,{error:'Kildeoriginaler og integrasjonsoppsett er bare tilgjengelige lokalt på agentporten.'});
+  if(/^\/(?:api\/(?:resources|collector|google)(?:[/?]|$)|google-setup|shopping-setup|api\/shopping\/oda\/(?:connect|callback|tools|refresh(?:-plan)?)|api\/shopping\/(?:sesum\/|orders|settings|offer|review|nutrition|catalog|link|feed|library-))/.test(req.url))return send(res,req.method==='GET'?403:405,{error:'Kildeoriginaler og integrasjonsoppsett er bare tilgjengelige lokalt på agentporten.'});
   if (req.method !== "GET" && !(req.method === "POST" && /^(?:\/api\/shopping\/(?:watch|pantry|item|deal|list|oda\/(?:sync|search|add|cart|probe|review|line|swap))|\/api\/home-assistant\/command|\/api\/doorbell\/frame|\/api\/profile\/edit|\/api\/events\/[a-f0-9]{24}\/(?:tasks\/[a-zA-Z0-9:_-]{1,100}|visibility)|\/api\/activities\/[a-f0-9]{24}\/reaction)$/.test(new URL(req.url,`http://${host}`).pathname))) return send(res,405,{error:"Handlingen er bare tilgjengelig lokalt på agentporten."});
   return handle(req,res);
 }));

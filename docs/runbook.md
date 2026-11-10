@@ -94,6 +94,16 @@ Engrosbutikker kan ha priser uten moms. Sett `pricesIncludeVat:false` på butikk
 
 Oda-kurven endres bare når familien velger en konkret vare og mengde. Tjenesten leser kurven først, sender en relativ endring én gang og kontrollerer faktisk ettertilstand. En `uncertain`-kvittering skal sjekkes i Oda, aldri gjentas automatisk med ny handlings-ID. Kasse, betaling og automatiske kjøp inngår ikke. OAuth kan kreve ny innlogging; ikke påstå at integrasjonen er manuelt verifisert før faktisk OAuth, ordrehenting og valgt kurvhandling er testet.
 
+### Kjente Oda-varer og aktuelle priser
+
+Produktets gjennomgåtte kanoniske Oda-lenke bestemmer produkt-ID. Lenken til en priskvittering er separat og kan aldri erstatte denne identiteten. Et tidligere uttrykkelig variantvalg beholdes også når varen midlertidig mangler en fersk pris; en dyrere variant velges ikke stille som erstatning.
+
+En tilkoblet Oda-konto gir `shopping-oda-refresh` for kjente, godkjente native Oda-produkter når en pris trenger ny kontroll (etter 24 timer, før grensen på 48 timer). Les `oda-refresh-plan [FAMILIE]` og kjør `oda-refresh FIL`, for eksempel `{"watchIds":["synthetic-family"],"maxPages":5}`. Hvert kall behandler høyst ti familier og fem sider med høyst 20 treff per søk. `force:true` er et eksplisitt forskningsforsøk; bruk det målrettet, aldri i en løkke. Vanlig gjentakelse går videre til øvrige forfalte familier. Kjent gamle produkter uten pris innen bibliotekets 183-dagersgrense forblir parkert.
+
+Tjenesten bruker kun Odas lesende `product_search`, med paginering til de konkrete kjente ID-ene er funnet, faktisk søkeslutt eller sidegrensen. Bare nøyaktig produkt-ID, konsistent produktlenke, allerede gjennomgått pakning, samsvarende enhet/prisaritmetikk og uttrykkelig tilgjengelighet kan oppdatere prisen. Priskvitteringen beholder tidspunktet for den faktiske MCP-lesingen. Treff godkjenner ingen ingredienser, familie, ny pakning eller ny husholdningsvariant. Relaterte varer, manglende treff, pakningsavvik og tilgangsfeil lager ingen oppdiktet fersk pris. De får konkret restanse og normalt seks timers ny frist; fremtidig frist forblir i `completion.shopping.blockedOda`.
+
+Familievisningen skiller «Kjente varer kontrolleres» fra «Må velges selv». Førstnevnte er agentarbeid med pris/tilgjengelighet for en kjent vare, ikke et krav om at familien mapper den på nytt. Varevalg, bestillingsmengde, lager og den faktiske Oda-kurven endres ikke av oppfriskningen. Priser fra den vellykkede lesingen brukes i den samme delte prismodellen som øvrige native kvitteringer.
+
 ## Produktbibliotek: lesing av en eksplisitt fil
 
 `src/product-library.mjs` leser et generelt, gjennomgått produktbibliotek uavhengig av familiens overvåkninger. Modulen åpner ikke produksjonsarkivet, henter ingen nettadresser og endrer ingen watches, lagerverdier eller kurver. Hver CLI-kjøring krever en uttrykkelig valgt UTF-8 JSON-fil (BOM støttes, høyst 128 MB):

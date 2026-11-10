@@ -696,6 +696,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     if(groups.cheaper.length)card.append(details('draft-elsewhere',`Billigere et annet sted (${groups.cheaper.length})${yearly?` · spar opptil ${kr(yearly)} på 12 måneder`:''}`,node=>renderRows(node,groups.cheaper),'shop-why'));
     card.append(details('draft',`${groups.cheaper.length?'Resten av varene':'Se varene'} (${groups.rest.length})`,node=>renderRows(node,groups.rest),'shop-why'));
     if(draft.missing.length)card.append(details('draft-missing',`Må velges selv (${draft.missing.length})`,node=>node.append(el('p',draft.missing.join(', '),'shop-sub')),'shop-why'));
+    if(draft.refresh?.length)card.append(details('draft-refresh',`Kjente varer kontrolleres (${draft.refresh.length})`,node=>node.append(el('p','Agenten oppdaterer pris og tilgjengelighet hos Oda. Tidligere varevalg beholdes.','shop-sub'),el('p',draft.refresh.map(x=>x.name).join(', '),'shop-sub')),'shop-why'));
     if(data.oda.connected){
       go.onclick=async()=>{
         if(!armed){armed=true;refresh();return;}

@@ -14,11 +14,16 @@ test('shopping stays private, kiosk actions are limited, and order state survive
   assert.equal((await post(base+'/api/shopping/orders',input,{Origin:'https://untrusted.example'})).status,403);
   assert.equal((await post(base+'/api/shopping/orders',input)).status,200);
   const summary=await (await fetch(base+'/api/shopping')).json();assert.equal(summary.analysis.orderCount,1);assert.equal(summary.oda.connected,false);
+  assert.deepEqual(await(await fetch(base+'/api/shopping/oda/refresh-plan')).json(),[]);
+  assert.deepEqual(await(await post(base+'/api/shopping/oda/refresh',{watchIds:[]})).json(),{families:0,results:[]});
+  assert.equal((await post(base+'/api/shopping/oda/refresh',{maxPages:6})).status,422);
+  assert.equal((await post(base+'/api/shopping/oda/refresh',{}, {Origin:'https://untrusted.example'})).status,403);
   const state=await (await fetch(base+'/api/state')).json();assert.equal(state.shopping,undefined);
   const kiosk=`http://127.0.0.1:${port+1}`,mobile=`http://127.0.0.1:${port+2}`;
   for(const path of ['/shopping-setup','/api/shopping/oda/callback','/api/shopping/orders'])assert.ok([403,405].includes((await fetch(kiosk+path)).status));
   for(const path of ['settings','orders','offer','review','nutrition','market','catalog','catalog-review','link','oda/connect','kassal/configure','kassal/search','kassal/stores','kassal/ean','kassal/product','kassal/history'])assert.equal((await post(kiosk+'/api/shopping/'+path,{})).status,405);
   assert.equal((await fetch(kiosk+'/api/shopping/catalog')).status,403);
+  assert.equal((await fetch(kiosk+'/api/shopping/oda/refresh-plan')).status,403);assert.equal((await post(kiosk+'/api/shopping/oda/refresh',{})).status,405);
   for(const path of ['library-audit','library-candidates','library-search?q=mel'])assert.equal((await fetch(kiosk+'/api/shopping/'+path)).status,403);
   for(const path of ['library-link','library-audit-ack'])assert.equal((await post(kiosk+'/api/shopping/'+path,{})).status,405);
   assert.equal((await post(kiosk+'/api/shopping/stock-scan',{action:'lookup',ean:'5901234123457'})).status,200);
@@ -61,6 +66,7 @@ test('shopping stays private, kiosk actions are limited, and order state survive
   const updated=await (await fetch(kiosk+'/api/shopping/family')).json();assert.equal(updated.items.find(x=>x.id===inventoryWatch.id).stock.amount,6);assert.equal(updated.stockReports[0].result.changes[0].previous,undefined);
   const invite=await (await post(base+'/api/phone/invite',{})).json(),paired=await post(mobile+'/send/api/pair',{code:invite.code,name:'Syntetisk telefon'}),cookie=paired.headers.get('set-cookie').split(';')[0];assert.equal(paired.status,200);
   assert.equal((await post(mobile+'/send/api/shopping/catalog-review',reopen,{Cookie:cookie})).status,404);
+  assert.equal((await post(mobile+'/send/api/shopping/oda/refresh',{}, {Cookie:cookie})).status,404);assert.equal((await fetch(mobile+'/send/api/shopping/oda/refresh-plan',{headers:{Cookie:cookie}})).status,404);
   const mobileIntake=await (await post(mobile+'/send/api/shopping/stock-intake',{clientId:crypto.randomUUID(),text:'400 gram kyllingfilet',fileCount:1},{Cookie:cookie})).json();
   const phoneUpload=await fetch(mobile+`/send/api/shopping/stock-intake/${mobileIntake.id}/files/0`,{method:'POST',headers:{Cookie:cookie,'X-Family-Request':'1','X-File-Name':'freezer.png'},body:png});assert.equal(phoneUpload.status,200);
   assert.equal((await post(mobile+`/send/api/shopping/stock-intake/${mobileIntake.id}/submit`,{},{Cookie:cookie})).status,200);

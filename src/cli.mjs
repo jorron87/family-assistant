@@ -88,6 +88,8 @@ async function execute(command, args, flags) {
     case 'shopping-library-search': result=await request('/api/shopping/library-search?q='+encodeURIComponent(args[0]??'')+(args[1]?'&limit='+encodeURIComponent(args[1]):''));break;
     case 'shopping-list-route': result=await request('/api/shopping/list','POST',{action:'route',...json(args[0])});break;
     case 'oda-search': result=await request('/api/shopping/oda/search','POST',{query:args[0]});break;
+    case 'oda-refresh-plan': result=await request('/api/shopping/oda/refresh-plan'+(args[0]?'?watchId='+encodeURIComponent(args[0]):''));break;
+    case 'oda-refresh': result=await request('/api/shopping/oda/refresh','POST',json(args[0]));break;
     case 'shopping-link': result=await request('/api/shopping/link','POST',json(args[0]));break;
     case 'oda-sync': result=await request('/api/shopping/oda/sync','POST',{});break;
     case 'kassal-configure': result=await request('/api/shopping/kassal/configure','POST',json(args[0]));break;

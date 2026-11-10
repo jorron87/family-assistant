@@ -52,7 +52,7 @@ const validDate = (value, field, nullable = false) => {
   return value;
 };
 
-export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionStatus}={}) {
+export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionStatus,odaConnected}={}) {
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(join(dataDir, "attachments"), { recursive: true });
   const runDir = join(dataDir, "runs");
@@ -690,7 +690,7 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
     const shoppingStatus=shopping.completion();
     return {
       complete: !phonePending.length && !pendingItems.length && !incompleteSurfaces.length && !incompleteSources.length && !missingDrive.length && !unsyncedCalendar.length && !vigiloIssues.length && !profileReviews.length && shoppingStatus.complete,
-      counts: { phonePending:phonePending.length,pendingItems: pendingItems.length, incompleteSurfaces: incompleteSurfaces.length, incompleteSources: incompleteSources.length, missingDrive: missingDrive.length, unsyncedCalendar: unsyncedCalendar.length, vigiloIssues: vigiloIssues.length, profileReviews: profileReviews.length,shoppingPending:shoppingStatus.work.length,shoppingBlocked:shoppingStatus.blockedStores.length+shoppingStatus.blockedRoutes.length+(shoppingStatus.blockedCampaigns?.length??0)+(shoppingStatus.blockedFamilies?.length??0)+(shoppingStatus.blockedPlacements?.length??0)+(shoppingStatus.blockedCatalogue?.length??0)+(shoppingStatus.collection?.blocked?1:0),...(shoppingStatus.collection?.enabled?{shoppingCollectionPending:shoppingStatus.collection.pending?1:0,shoppingCollectionBlocked:shoppingStatus.collection.blocked?1:0}:{}) },
+      counts: { phonePending:phonePending.length,pendingItems: pendingItems.length, incompleteSurfaces: incompleteSurfaces.length, incompleteSources: incompleteSources.length, missingDrive: missingDrive.length, unsyncedCalendar: unsyncedCalendar.length, vigiloIssues: vigiloIssues.length, profileReviews: profileReviews.length,shoppingPending:shoppingStatus.work.length,shoppingBlocked:shoppingStatus.blockedStores.length+shoppingStatus.blockedRoutes.length+(shoppingStatus.blockedCampaigns?.length??0)+(shoppingStatus.blockedFamilies?.length??0)+(shoppingStatus.blockedPlacements?.length??0)+(shoppingStatus.blockedCatalogue?.length??0)+(shoppingStatus.blockedOda?.length??0)+(shoppingStatus.collection?.blocked?1:0),...(shoppingStatus.collection?.enabled?{shoppingCollectionPending:shoppingStatus.collection.pending?1:0,shoppingCollectionBlocked:shoppingStatus.collection.blocked?1:0}:{}) },
       shopping:shoppingStatus,
       phonePending,pendingItems, incompleteSurfaces, incompleteSources, missingDrive, unsyncedCalendar, vigiloIssues, profileReviews,
       cutoffAt:new Date(cutoffAt()).toISOString(), historyDays:state.reviewPolicy.historyDays,
@@ -1617,7 +1617,7 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
     save();
   }
   const phone=phoneStore(state,{save,upsertRaw,addAttachment});
-  const shopping=shoppingStore(state,{save,libraryPrices,sesumCollectionStatus,files:{write:(id,bytes)=>writeFileSync(join(dataDir,'attachments',`${id}.enc`),encrypt(bytes,key)),read:id=>decrypt(readFileSync(join(dataDir,'attachments',`${id}.enc`)),key)}});
+  const shopping=shoppingStore(state,{save,libraryPrices,sesumCollectionStatus,odaConnected,files:{write:(id,bytes)=>writeFileSync(join(dataDir,'attachments',`${id}.enc`),encrypt(bytes,key)),read:id=>decrypt(readFileSync(join(dataDir,'attachments',`${id}.enc`)),key)}});
   if(reconcileSourceReviews(state.sourceStatus,state.runs))save();
   return { shopping, repairText, backupArchive, eventHistory, event, mergeEvents, splitHomework, activityFacebook, changeCompletion, collectedItems, collectedList, sourceItems, editProfile, phone, calendarActions, calendarAction, setEventVisibility, upsertActivity, activityReaction, activityPlan, activitySource, snapshot, runHistory, profile: () => profileView(state.profile), profileFact, reviewProfile, documentStatus, reviewDocument, checkTask, upsertRaw, upsertFinding, updateSource, observeListing, markReviewed, updateSurface, reviewQueue, completionReport, addAttachment, getAttachment, linkDrive, linkCalendar, updateProfile, recordRun, beginRun, renewRun, endRun, collectorIngest, collectorConfig, collectorStatus, collectorRefresh, collectorFacebookSweep, collectedItem, activityFeedHsia, activityFeedCandidates, activityFeedNeedsDetail, activityFeedDetail, activityFeedPage, activityFeedError, activityFeedPageText, activityFeedStatus };
 }

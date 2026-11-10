@@ -12,6 +12,7 @@ import {createSesumCatalogue} from './sesum-catalogue.mjs';
 import {sesumCollectionCompletion} from './sesum-completion.mjs';
 import {campaignFingerprint,offerTermsFingerprint,validateCampaignOffer} from './sesum-campaigns.mjs';
 import {productTextHash} from './product-library.mjs';
+import {odaPriceRefreshPlan,checkedOdaPrice,createOdaPriceOverlay,mergeOdaPriceReceipt} from './oda-price-refresh.mjs';
 import {annualNeed,chainName,commonPacks,dealScore,packsFor,dealTier,defaultShelfLifeMonths,estimateStock,packBreakdown,planQuantities,shelfLifeMonths,shelfWithDate} from './shopping-planning.mjs';
 
 const hash=value=>createHash('sha256').update(value).digest('hex').slice(0,24);
@@ -155,7 +156,7 @@ export function collapseSameProduct(rows,aliases={}) {
   return out;
 }
 
-export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices,sesumCollectionStatus}={}) {
+export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices,sesumCollectionStatus,odaConnected=()=>false}={}) {
   state.shopping??={orders:{},watches:{},offers:{},reviews:{},cartReceipts:{},settings:{monitoringEnabled:false,historyFrom:null,stores:[],storageNote:'',stockUpDays:60}};
   const s=state.shopping;
   s.nutrition??={};
@@ -171,6 +172,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   s.shoppingList??=[];
   s.odaLimits??={};
   s.odaChoices??={};
+  s.odaPriceReceipts??={};s.odaRefreshAttempts??={};
   s.libraryAcks??={};s.listFamilies??={};s.sameProducts??={};s.sameProductDecisions??={};
   // One concept: a followed family holds the household's numbers and its variants.
   if(s.familySchema!==1){
@@ -206,7 +208,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     if(prior&&prior.args.length===args.length&&args.every((arg,i)=>Object.is(arg,prior.args[i])))return prior.value;
     const value=read();readContext.set(key,{args,value});return value;
   }
-  const baseLibraryReader=()=>readValue('base-library-reader',()=>libraryPrices?.reader?.()??null);
+  const odaOverlay=createOdaPriceOverlay({receipts:()=>s.odaPriceReceipts,entries:()=>catalog.entries(),now});
+  const baseLibraryReader=()=>readValue('base-library-reader',()=>odaOverlay(libraryPrices?.reader?.()??null));
   let sesumPrices;
   const sesumCatalogue=createSesumCatalogue(s.sesumCatalogue,{save,now,horizonDays:()=>baseLibraryReader()?.horizonDays??183,knownOwnReceipts:source=>Object.values(s.sesumPrices.products??{}).filter(row=>row.source.id===source.id).map(row=>({source:row.source,price:row.receipt}))});
   const discovery=createSesumDiscovery(s.sesumDiscovery,{save,now,reader:baseLibraryReader,source:key=>{const row=sesumPrices?.sourceRecord(key);return row&&sesumCatalogue.current(row.source)?row:null;}});
@@ -269,6 +272,14 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
         const packAmount=p.pack>0?p.pack:null;
         native.set(k,{watchId:w.id,store:p.store,id:p.id,productKey:m.productKey,name:p.name,ean:p.ean,brand:p.brand,sourceUrl:p.sourceUrl,status:'approved',approved:true,unit:w.unit,packAmount,price:packAmount?m.price.grossPackPrice??m.unitPrice*packAmount:null,unitPrice:m.unitPrice,lastChecked:m.price.receiptAt,priceSource:'library',priceSourceUrl:m.price.sourceUrl??p.sourceUrl,origin:'library',groupId:m.groupId,image:p.image??null});
       }
+    }
+    // A live Oda read belongs to the same reviewed native identity. It updates
+    // price/availability only; it never imports a search hit as an equivalent.
+    for(const entry of entries){
+      const receipt=s.odaPriceReceipts[entry.key],k=key(entry),p=native.get(k);
+      if(!p||entry.store!=='ODA_NO'||entry.status!=='approved'||!receipt||receipt.fingerprint!==entry.fingerprint||receipt.odaProductId!==odaProductIdFromUrl(entry.sourceUrl)||!Number.isFinite(receipt.packAmount)||receipt.packAmount<=0||Math.abs(receipt.packAmount-entry.packAmount)>1e-6*Math.max(receipt.packAmount,entry.packAmount)||receipt.unit!==entry.unit||!Number.isFinite(Date.parse(receipt.observedAt))||Date.parse(receipt.observedAt)<Date.parse(p.lastChecked??0)||typeof receipt.available!=='boolean'||!(receipt.price>0&&Number.isFinite(receipt.price)))continue;
+      const sameTime=Date.parse(receipt.observedAt)===Date.parse(p.lastChecked),conflict=receipt.conflicting||sameTime&&(p.unitPrice>0&&Math.abs(p.unitPrice-receipt.price/entry.packAmount)>1e-8||reader?.quote(catalogKey(entry))?.price.reasons.includes('conflicting-latest-prices'));
+      native.set(k,{...p,packAmount:entry.packAmount,price:receipt.available&&!conflict?receipt.price:null,unitPrice:receipt.available&&!conflict?receipt.price/entry.packAmount:null,lastChecked:receipt.observedAt,priceSource:'oda-mcp',priceSourceUrl:receipt.sourceUrl,odaAvailable:receipt.available});
     }
     for(const p of native.values()){
       const w=s.watches[p.watchId];if(!w)continue;
@@ -467,6 +478,38 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   // A row just observed without any price stays reviewable; only a receipt that
   // is known to be old parks it, and a newer receipt brings it back.
   const priceTooOld=entry=>entry.lastChecked!=null&&!withinPriceHorizon(entry.lastChecked,now().getTime(),libraryPrices?.horizonDays);
+  function odaRefreshPlan(input={}) {
+    return odaPriceRefreshPlan({entries:catalog.entries().filter(e=>!variablePack(e.name)),watches:Object.values(s.watches),prices:currentPrices().entries,attempts:s.odaRefreshAttempts,at:now().getTime(),force:input.force===true,ignoreRetry:input.ignoreRetry===true,watchId:input.watchId??null,horizonDays:libraryPrices?.horizonDays??183});
+  }
+  function odaRefreshReceive({plan,receipts,observedAt,searchComplete,searchError=null}) {
+    const current=odaRefreshPlan({force:true,watchId:plan.watchId}).find(p=>p.watchId===plan.watchId);
+    if(!current||current.fingerprint!==plan.fingerprint)throw Error('Oda-produktgrunnlaget er endret. Les oppfriskningsplanen på nytt.');
+    if(!Array.isArray(receipts)||receipts.length>1000||receipts.some(r=>!freshPrice(r.observedAt)||Date.parse(r.observedAt)>now().getTime()+60000)||typeof searchComplete!=='boolean'||observedAt!==null&&(!freshPrice(observedAt)||Date.parse(observedAt)>now().getTime()+60000)||observedAt===null&&!searchError||searchError!==null&&typeof searchError!=='string')throw Error('Ugyldig faktisk Oda-prislesing.');
+    const results=current.products.map(expected=>{
+      const matches=receipts.filter(r=>r.product?.id===expected.odaProductId).sort((a,b)=>Date.parse(b.observedAt)-Date.parse(a.observedAt));
+      const latest=matches.filter(r=>Date.parse(r.observedAt)===Date.parse(matches[0]?.observedAt)),checked=latest.map(r=>checkedOdaPrice(expected,r.product));
+      const signature=r=>JSON.stringify([r.ok,r.reason??null,r.price??null,r.available??null,r.unitPrice??null]);
+      if(checked.length>1&&checked.some(r=>signature(r)!==signature(checked[0])))return {id:expected.id,odaProductId:expected.odaProductId,ok:false,reason:'conflicting-exact-product-receipts'};
+      return {id:expected.id,odaProductId:expected.odaProductId,observedAt:matches[0]?.observedAt??null,...(checked[0]??checkedOdaPrice(expected,null))};
+    });
+    return update(()=>{
+      for(const result of results)if(result.ok){
+        const expected=current.products.find(p=>p.id===result.id),entry=catalog.entries(plan.watchId).find(p=>p.store==='ODA_NO'&&p.id===result.id);
+        const previous=s.odaPriceReceipts[entry.key],old=previous?.fingerprint===expected.fingerprint&&previous.odaProductId===expected.odaProductId&&previous.unit===expected.unit&&Number.isFinite(previous.packAmount)&&Math.abs(previous.packAmount-expected.packAmount)<=1e-6*Math.max(previous.packAmount,expected.packAmount)?previous:null;
+        const incoming={fingerprint:expected.fingerprint,odaProductId:expected.odaProductId,packAmount:expected.packAmount,unit:expected.unit,...result};
+        if(Date.parse(entry.lastChecked)===Date.parse(result.observedAt)&&entry.currentPrice>0&&Math.abs(entry.currentPrice-result.price)>1e-8)incoming.conflicting=true;
+        const merged=mergeOdaPriceReceipt(old,incoming);s.odaPriceReceipts[entry.key]=merged.receipt;
+        Object.assign(result,{available:merged.receipt.available,price:merged.receipt.price,observedAt:merged.receipt.observedAt,stored:merged.status==='stored',status:merged.status});
+        if(merged.receipt.conflicting)Object.assign(result,{ok:false,stored:false,reason:'conflicting-latest-prices'});
+        if(result.stored)catalog.observe({watchId:plan.watchId,products:[{id:entry.id,store:'ODA_NO',name:entry.name,currentPrice:result.available?result.price:null,lastChecked:result.observedAt}]});
+      }
+      const unresolved=results.filter(r=>!r.ok||!r.available);
+      const prior=s.odaRefreshAttempts[plan.watchId],superseded=results.every(r=>r.status==='superseded'||r.status==='duplicate');
+      s.odaRefreshAttempts[plan.watchId]={fingerprint:plan.fingerprint,attemptedAt:now().toISOString(),observedAt,searchComplete,searchError:searchError?.slice(0,500)??null,results:results.map(({id,odaProductId,ok,available,reason})=>({id,odaProductId,ok,available,reason})),retryAt:unresolved.length?(superseded&&prior?.fingerprint===plan.fingerprint&&prior.retryAt?prior.retryAt:new Date(now().getTime()+6*3600000).toISOString()):null};
+      return {watchId:plan.watchId,refreshed:results.filter(r=>r.stored).length,unresolved,searchComplete,searchError,retryAt:s.odaRefreshAttempts[plan.watchId].retryAt};
+    });
+  }
+  const odaRefreshWork=()=>!odaConnected()?[]:odaRefreshPlan().map(p=>({do:'shopping-oda-refresh',watchId:p.watchId,watchName:p.name,fingerprint:p.fingerprint,products:p.products.map(x=>({id:x.id,odaProductId:x.odaProductId})),reason:'refresh-known-oda-prices'}));
   const listRouteWork=()=>s.shoppingList.filter(e=>!e.checkedAt&&e.routing==='pending');
   function unlinkedOrderLines() {
     const linked=new Set(Object.values(s.watches).flatMap(w=>w.productKeys)),found=new Map(),reader=libReader();
@@ -508,7 +551,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const alreadyInFamily=p=>{const w=s.watches[p.watchId];if(!reader||!w)return false;if(!familyMembers.has(w.id))familyMembers.set(w.id,linkedMembers(w,reader,{allChains:true}));return familyMembers.get(w.id).has(`kassal:${p.store}:${p.id}`);};
     const named=x=>x.watchId?{...x,familyId:x.watchId,familyName:x.watchName}:x;
     const flyers=s.settings.stores.filter(x=>!x.facebookGroup).map(store=>({store,...flyerReviewState(store,familySetFingerprint,today)})).filter(x=>x.due).map(({store,review,requiresRescan})=>({do:'shopping-review',storeId:store.id,name:store.name,url:store.url,lastReview:review?structuredClone(review):null,familySetFingerprint,requiresRescan,reason:requiresRescan&&review?'family-checklist-changed':review?'check-due':'unreviewed',fingerprint:hash(JSON.stringify([store.id,familySetFingerprint]))}));
-    return [...stock,...catalog.pending().filter(p=>s.watches[p.watchId]?.enabled!==false&&!priceTooOld(p)&&(nativeReviewHeld(p)||!alreadyInFamily(p))).map(p=>({do:'shopping-product-review',watchId:p.watchId,watchName:s.watches[p.watchId]?.name,productId:p.id,store:p.store,name:p.name,fingerprint:p.fingerprint,sourceUrl:p.sourceUrl,...(nativeReviewHeld(p)?{reason:'reopened',reviewHold:structuredClone(p.reviewHold)}:{})})),...feedWork(),...flyers,...marketRefreshDue(today),...sesumWork(),...sesumPlacementWork(),...sesumCatalogueWork(),...sesumFamilyWork(),...sesumOfferWork(),...libraryWork(),...listFamilyWork(),...unlinkedOrderLines(),...routes].map(named);
+    return [...stock,...odaRefreshWork(),...catalog.pending().filter(p=>s.watches[p.watchId]?.enabled!==false&&!priceTooOld(p)&&(nativeReviewHeld(p)||!alreadyInFamily(p))).map(p=>({do:'shopping-product-review',watchId:p.watchId,watchName:s.watches[p.watchId]?.name,productId:p.id,store:p.store,name:p.name,fingerprint:p.fingerprint,sourceUrl:p.sourceUrl,...(nativeReviewHeld(p)?{reason:'reopened',reviewHold:structuredClone(p.reviewHold)}:{})})),...feedWork(),...flyers,...marketRefreshDue(today),...sesumWork(),...sesumPlacementWork(),...sesumCatalogueWork(),...sesumFamilyWork(),...sesumOfferWork(),...libraryWork(),...listFamilyWork(),...unlinkedOrderLines(),...routes].map(named);
   }
   function completion() {
     return inReadContext(completionInContext);
@@ -520,12 +563,13 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const blockedFamilies=s.settings.monitoringEnabled?sesumFamilyWork({all:true}).filter(item=>item.status==='blocked'):[];
     const blockedPlacements=s.settings.monitoringEnabled?sesumPlacementWork({all:true}).filter(item=>item.status==='blocked'):[];
     const blockedCatalogue=s.settings.monitoringEnabled?sesumCatalogueWork({all:true}).filter(item=>item.status==='blocked'):[];
+    const blockedOda=s.settings.monitoringEnabled&&odaConnected()?odaRefreshPlan({ignoreRetry:true}).flatMap(plan=>{const prior=s.odaRefreshAttempts[plan.watchId],due=new Set(plan.products.filter(p=>p.needsRefresh).map(p=>p.id)),remaining=prior?.fingerprint===plan.fingerprint?prior.results.filter(r=>due.has(r.id)&&(!r.ok||!r.available)):[];return remaining.length?[{watchId:plan.watchId,name:plan.name,retryAt:prior.retryAt,results:remaining}]:[];}):[];
     let collection;
     if(s.settings.monitoringEnabled&&typeof sesumCollectionStatus==='function'){
       let status;try{status=sesumCollectionStatus();}catch{status=null;}
       collection=sesumCollectionCompletion(status,status?.enabled?sesumFamilies():[]);
     }
-    return {complete:!work.length&&!blockedStores.length&&!blockedRoutes.length&&!blockedCampaigns.length&&!blockedFamilies.length&&!blockedPlacements.length&&!blockedCatalogue.length&&collection?.complete!==false,work,blockedStores,blockedRoutes,blockedCampaigns,blockedFamilies,blockedPlacements,blockedCatalogue,...(collection?{collection}:{})};
+    return {complete:!work.length&&!blockedStores.length&&!blockedRoutes.length&&!blockedCampaigns.length&&!blockedFamilies.length&&!blockedPlacements.length&&!blockedCatalogue.length&&!blockedOda.length&&collection?.complete!==false,work,blockedStores,blockedRoutes,blockedCampaigns,blockedFamilies,blockedPlacements,blockedCatalogue,blockedOda,...(collection?{collection}:{})};
   }
   function listRouteAttempt(ids) {return update(()=>{for(const e of listRouteWork())if(ids.includes(e.id)){e.routeAttempts=(e.routeAttempts??0)+1;e.routeRetryAt=null;}return true;});}
   function listRouteFinish(ids,note) {return update(()=>{for(const e of listRouteWork())if(ids.includes(e.id)){if(e.routeAttempts>=3){e.routing='blocked';e.storeName??=NEAREST;e.reason=note??'Kunne ikke sorteres automatisk. Velg butikk selv eller legg varen inn på nytt.';}else e.routeRetryAt=new Date(now().getTime()+(e.routeAttempts>=2?300000:60000)).toISOString();}return true;});}
@@ -801,7 +845,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     return {odaReturn:preferred?{productId:preferred.productId,name:preferred.name,unitPrice:round(preferred.unitPrice)}:null,variants:variantsOf(options,keep,shared),others,places,savings,familyUnit:w?.unit??(family[0]?reader.group(family[0].groupId)?.unit??null:null)};
   }
   // A linked group may hold cheaper brands. They are offered, never swapped in.
-  const defaultOda=(w,options)=>options.find(x=>x.productId===s.odaChoices[w.id])??options.find(x=>x.origin!=='library')??options[0];
+  const defaultOda=(w,options)=>s.odaChoices[w.id]!=null?options.find(x=>x.productId===s.odaChoices[w.id])??null:options.find(x=>x.origin!=='library')??options[0];
   function localBest(w,amount,found,at) {
     const normal=w.priceGuide?.referencePrice??null;
     if(!normal)return null;
@@ -987,6 +1031,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       const entry={...base,watchId:w.id,name:w.name,packs:rate?Math.max(1,Math.ceil(rate/size)):1,packAmount:size,unit:w.unit};
       const options=odaProducts().get(w.id),option=options?defaultOda(w,options):null;
       if(option)placeEntry(entry,w,option,entry.packs*size,deals(),now().getTime());
+      else entry.routing='pending';
       s.shoppingList.push(entry);return entry;
     }
     const entry={...base,name:required(input.name,'Varenavn').slice(0,120)},key=normalized(entry.name);
@@ -1011,8 +1056,9 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     }
     const a=analysis(),found=deals(a),options=odaProducts(found.prices).get(w.id);
     entry.name=w.name;
-    if(!options){entry.routing='pending';return null;}
-    const option=defaultOda(w,options),rate=rateOf(needOf(w,a)),packs=rate?Math.max(1,Math.ceil(rate/option.packAmount)):1;
+    const option=options?defaultOda(w,options):null;
+    if(!option){entry.watchId=w.id;entry.unit=w.unit;entry.routing='pending';return null;}
+    const rate=rateOf(needOf(w,a)),packs=rate?Math.max(1,Math.ceil(rate/option.packAmount)):1;
     Object.assign(entry,{watchId:w.id,packs,packAmount:option.packAmount,unit:w.unit});
     const better=placeEntry(entry,w,option,packs*option.packAmount,found,now().getTime());
     if(better?.offerId){const offerPacks=Math.max(1,Math.ceil(packs*option.packAmount/better.packAmount));return listAdd({offerId:better.offerId,packs:better.maxPacks?Math.min(better.maxPacks,offerPacks):offerPacks});}
@@ -1169,11 +1215,17 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const fromList=listOpen().filter(e=>e.storeName==='Oda'&&e.odaProductId);
     const listed=new Map();for(const e of listOpen())if(e.watchId&&e.packAmount&&!(e.storeName==='Oda'&&e.odaProductId))listed.set(e.watchId,(listed.get(e.watchId)??0)+e.packs*e.packAmount);
     const odaItems=odaProducts(found.prices);
-    const items=[],missing=[];let covered=0;
+    const items=[],missing=[],refresh=[];let covered=0;
     for(const w of Object.values(s.watches)){
       if(w.enabled===false)continue;
       const need=needOf(w,a);if(need.amount===null)continue;
-      const options=odaItems.get(w.id);if(!options){missing.push(w.name);continue;}
+      const options=odaItems.get(w.id),chosen=s.odaChoices[w.id];
+      if(!options||chosen&&!options.some(p=>p.productId===chosen)){
+        const known=catalog.entries(w.id).filter(e=>e.store==='ODA_NO'&&e.status==='approved'&&!priceTooOld(e)&&odaProductIdFromUrl(e.sourceUrl));
+        if(known.length&&(!chosen||known.some(e=>odaProductIdFromUrl(e.sourceUrl)===chosen)))refresh.push({watchId:w.id,name:w.name,reason:chosen?'chosen-variant-needs-refresh':'known-products-need-price',retryAt:s.odaRefreshAttempts[w.id]?.retryAt??null});
+        else missing.push(w.name);
+        continue;
+      }
       const best=defaultOda(w,options),normal=w.priceGuide?.referencePrice??null,reference=comparisonReference(w,a,best,found.prices),discountPct=reference?(reference-best.unitPrice)/reference*100:0;
       const dear=!!normal&&best.unitPrice>normal*1.05,tier=dear?'dear':reference&&discountPct>=8?dealTier({unitPrice:best.unitPrice,excellentPrice:w.excellentPrice,discountPct,referenceType:'market'}):'small';
       const shelf=shelfLifeMonths(w),months=Math.min(shelf,dear?Math.min(1,gapMonths):tier==='excellent'?12:tier==='good'?3:Math.min(1,gapMonths));
@@ -1190,7 +1242,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       items.push({variants:[],image:e.imageUrl?imageRef(e.imageUrl):null,watchId:e.watchId??'list:'+e.id,name:e.name,productId:e.odaProductId,productName:e.detail??e.name,packAmount:e.packAmount,unit:e.unit,packs:limit!=null?Math.min(limit,count):count,wanted:count,maxAtOda:limit,limitChecked:s.odaLimits[e.odaProductId]?.checkedAt??null,elsewhere:null,entryIds:[e.id],packPrice:e.unitPrice&&e.packAmount?round(e.unitPrice*e.packAmount):0,unitPrice:e.unitPrice,cost:e.unitPrice&&e.packAmount?round(e.unitPrice*e.packAmount*count):0,tier:'small',stockKnown:true,storage:null});
     }
     items.sort((x,y)=>y.cost-x.cost);
-    return {nextAround:estimated<today?today:estimated,items,missing,covered,total:round(items.reduce((n,x)=>n+x.cost,0))};
+    return {nextAround:estimated<today?today:estimated,items,missing,refresh,covered,total:round(items.reduce((n,x)=>n+x.cost,0))};
   }
   function link(input) {
     const key=required(input.productKey,'Produktnøkkel');if(!orders().some(o=>o.products.some(p=>p.productKey===key)))throw Error('Ukjent produkt.');
@@ -1297,7 +1349,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const reader=libReader(),w=input.watchId&&Object.hasOwn(s.watches,input.watchId)?s.watches[input.watchId]:null;
     if(!reader)return {available:false,product:null,groups:[],watchName:w?.name??null};
     let key=input.key&&reader.product(input.key)?input.key:null;
-    if(!key&&w){const options=odaProducts().get(w.id);if(options){const o=defaultOda(w,options),found=`kassal:${o.store}:${o.id}`;if(reader.product(found))key=found;}}
+    if(!key&&w){const options=odaProducts().get(w.id),o=options?defaultOda(w,options):null;if(o){const found=`kassal:${o.store}:${o.id}`;if(reader.product(found))key=found;}}
     if(!key)return {available:true,product:null,groups:[],watchName:w?.name??null};
     const p=reader.product(key),price=reader.quote(key).price,store=s.settings.stores.find(x=>x.chainCode===p.store);
     const peersOf=m=>{
@@ -1758,5 +1810,5 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       for(const [id,row] of Object.entries(rows))if(source&&row.sourceFingerprint===source.sourceFingerprint&&(row.registrationFingerprint??null)===registrationFingerprint&&semantic.has(id)&&row.familyFingerprint===legacy.get(id))rows[id]={...row,legacyFamilyFingerprint:row.familyFingerprint,familyFingerprint:semantic.get(id)};
     }
   }
-  return {sesumFamilies,sesumPlacement,sesumReceivePrices,sesumReceiveMetadata:input=>sesumCatalogue.ingest(input),sesumCandidates,sesumRegister,sesumPriceReview,sesumOfferCandidates,sesumOfferReview,sesumPriceStatus:()=>({...sesumPrices.status(),discovery:discovery.status(),catalogue:sesumCatalogue.status()}),familyReopen,listFamily,listFamilyWork,explorer,productInfo,libraryAudit,libraryAuditAck,libraryLink,libraryLinkCandidates,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
+  return {odaRefreshPlan,odaRefreshReceive,sesumFamilies,sesumPlacement,sesumReceivePrices,sesumReceiveMetadata:input=>sesumCatalogue.ingest(input),sesumCandidates,sesumRegister,sesumPriceReview,sesumOfferCandidates,sesumOfferReview,sesumPriceStatus:()=>({...sesumPrices.status(),discovery:discovery.status(),catalogue:sesumCatalogue.status()}),familyReopen,listFamily,listFamilyWork,explorer,productInfo,libraryAudit,libraryAuditAck,libraryLink,libraryLinkCandidates,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
 }

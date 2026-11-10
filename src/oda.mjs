@@ -18,7 +18,7 @@ export function cartQuantity(cart,productId) {
   const walk=value=>{if(!value||typeof value!=='object')return;if(value.product?.id===productId&&typeof value.quantity==='number'){total+=value.quantity;return;}for(const child of Object.values(value))if(child&&typeof child==='object')walk(child);};
   walk(cart.groups);return total;
 }
-export function createOda({dataDir,shopping,redirectUrl,makeClient=()=>new Client({name:'Family Assistant shopping',version:'1.0.0'}),makeTransport=options=>new StreamableHTTPClientTransport(endpoint,options)}) {
+export function createOda({dataDir,shopping,redirectUrl,now=()=>new Date(),makeClient=()=>new Client({name:'Family Assistant shopping',version:'1.0.0'}),makeTransport=options=>new StreamableHTTPClientTransport(endpoint,options)}) {
   const path=join(dataDir,'oda-oauth.json.enc');let auth,key,authorizationUrl=null,client=null,transport=null,busy=false,lastError=null;
   const read=()=>{if(!auth){key=loadKey(dataDir);auth=existsSync(path)?JSON.parse(decrypt(readFileSync(path),key).toString('utf8')):{};}return auth;};
   const persist=()=>{const temp=path+'.tmp';writeFileSync(temp,encrypt(Buffer.from(JSON.stringify(auth)),key));renameSync(temp,path);};
@@ -80,6 +80,30 @@ export function createOda({dataDir,shopping,redirectUrl,makeClient=()=>new Clien
     return call('product_search',{queries:[query],page:1,size:10});
   });}
   async function tools() {return exclusive(async()=>{const c=await connect();if(!c)throw Error('Fullfør Oda-innloggingen i nettleseren.');return c.listTools();});}
+  async function refreshPrices(input={}) {return exclusive(async()=>{
+    const maxPages=input.maxPages??5;
+    if(!Number.isInteger(maxPages)||maxPages<1||maxPages>5||input.watchIds!==undefined&&(!Array.isArray(input.watchIds)||input.watchIds.length>10||input.watchIds.some(id=>typeof id!=='string')))throw Error('Velg høyst ti varefamilier og én til fem sider.');
+    const plans=shopping.odaRefreshPlan({force:input.force===true}).filter(p=>!input.watchIds||input.watchIds.includes(p.watchId)).slice(0,10);
+    if(!plans.length)return {families:0,results:[]};
+    const queries=[...new Set(plans.map(p=>p.query))],collected=new Map(queries.map(query=>[query,{receipts:[],complete:false,observedAt:null}]));
+    let pending=queries,searchError=null;
+    try {
+    for(let page=1;page<=maxPages&&pending.length;page++){
+      const response=await call('product_search',{queries:pending,page,size:20}),observedAt=now().toISOString();
+      if(!Array.isArray(response.result)||response.result.length!==pending.length)throw Error('Oda returnerte en ukjent prissøkliste.');
+      const seen=new Set(),more=[];
+      for(const row of response.result){
+        if(!pending.includes(row.query)||seen.has(row.query)||!Array.isArray(row.products)||row.products.length>20||typeof row.hasMore!=='boolean')throw Error('Oda returnerte en ukjent prissøkside.');
+        seen.add(row.query);const target=collected.get(row.query);target.receipts.push(...row.products.map(product=>({product,observedAt})));target.observedAt=observedAt;target.complete=!row.hasMore;
+        const wanted=plans.filter(p=>p.query===row.query).flatMap(p=>p.products.map(x=>x.odaProductId));
+        if(row.hasMore&&wanted.some(id=>!target.receipts.some(r=>r.product.id===id)))more.push(row.query);
+      }
+      pending=more;
+    }
+    }catch{searchError='Oda MCP kunne ikke leses fullstendig. Kontroller tilkoblingen før neste forsøk.';}
+    const results=plans.map(plan=>shopping.odaRefreshReceive({plan,...collected.get(plan.query),searchComplete:collected.get(plan.query).complete,searchError}));
+    return {families:results.length,results};
+  });}
   // Adds a large quantity, reads what Oda says, and always takes it back out.
   // This only runs on an explicit family request; it never places an order.
   async function probeLimit(input) {return exclusive(async()=>{
@@ -141,5 +165,5 @@ export function createOda({dataDir,shopping,redirectUrl,makeClient=()=>new Clien
     }catch{shopping.cartReceipt(requestId,{status:'uncertain'});throw Error('Kurvhandlingen kunne ikke bekreftes. Kontroller handlekurven hos Oda; handlingen gjentas ikke automatisk.');}
   });}
   function status(){const configured=existsSync(path);let connected=!!client;try{connected||=configured&&!!read().tokens;}catch{lastError='Oda-oppsettet kunne ikke leses. Kontroller oppsettet lokalt.';}return {configured,connected,busy,error:lastError};}
-  return {changeCart,swapInCart,probeLimit,tools,authorize,callback,sync,search,addToCart,status,close,cart:()=>exclusive(()=>call('get_cart'))};
+  return {refreshPrices,changeCart,swapInCart,probeLimit,tools,authorize,callback,sync,search,addToCart,status,close,cart:()=>exclusive(()=>call('get_cart'))};
 }
