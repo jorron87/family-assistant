@@ -53,3 +53,22 @@ test('HTTP or unrelated-host product metadata cannot become a cart ID through na
   const f=fixture(t,{canonicalUrl}),view=f.shop.familyView();assert.equal(f.provider.reader().byOdaId(701),null);assert.equal(view.odaDraft.items.length,0);assert.ok(view.odaDraft.missing.includes(f.w.name));
  }
 });
+
+test('composite reads resolve the Oda price overlay once and observe the next actual receipt immediately',t=>{
+ const f=fixture(t),g=f.data.groups[0];
+ f.shop.libraryLink({familyId:f.w.id,evidence:'Reviewed synthetic plain-oil group and fixed litre package.',variants:[{groupId:g.id,groupFingerprint:groupMetadataFingerprint(g),evidence:'Actual complete synthetic recipe and plain form.'}]});
+ for(let n=0;n<20;n++)f.shop.watch({id:'extra-'+n,name:'Synthetic extra family '+n,unit:'l',storage:'pantry'});
+ f.shop.sesumReceivePrices({familyIds:[f.w.id],fetchedAt:NOW,products:[{id:'171',name:f.p.name,brand:f.p.brand,ean:[],weight:1000,weightUnit:'ml',soldByWeight:false,sourceUrl:'https://www.sesum.no/produkt/171-synthetic-plain-oil',prices:[{storeCode:'KIWI',price:22,observedAt:NOW,source:'receipt_realtime',isPromo:false,promotion:null}]}]});
+ const row=f.shop.sesumCandidates(f.w.id)[0],donor=row.donors.find(d=>d.productKey===f.p.productKey);
+ f.shop.sesumPriceReview({sourceKey:row.sourceKey,sourceFingerprint:row.sourceFingerprint,productKey:f.p.productKey,productFingerprint:donor.productFingerprint,status:'approved',packAmount:1,unit:'l',equivalenceEvidence:'Both synthetic labels document the same plain oil and fixed litre package.',packEvidence:'Actual fixed1000ml source and independently reviewed1l donor package.'});
+ const receive=price=>f.shop.odaRefreshReceive({plan:f.shop.odaRefreshPlan({force:true})[0],receipts:[{observedAt:f.clock.at,product:{id:f.odaId,name:f.p.name,description:'1 l',price:price.toFixed(2),unitPrice:price.toFixed(2),unitName:'liter',url:f.p.sourceUrl,availability:{isAvailable:true}}}],observedAt:f.clock.at,searchComplete:true});
+ receive(26);
+ const original=f.provider.reader;let calls=0;f.provider.reader=(...args)=>{calls++;return original(...args);};
+ for(const read of [()=>f.shop.familyView(),()=>f.shop.view(),()=>f.shop.sesumCandidates(f.w.id),()=>f.shop.sesumPlacement(row.sourceKey),()=>f.shop.sesumFamilies(),()=>f.shop.sesumPriceStatus(),()=>f.shop.odaRefreshPlan({force:true}),()=>f.shop.libraryAudit(),()=>f.shop.productInfo({key:f.p.productKey,watchId:f.w.id})]){
+  calls=0;read();assert.ok(calls<=1,`one composite read resolved the base library ${calls} times`);
+ }
+ f.clock.at='2026-11-10T12:01:00Z';receive(25);
+ assert.equal(f.shop.familyView().odaDraft.items.find(x=>x.watchId===f.w.id).unitPrice,25);
+ assert.equal(f.shop.productInfo({key:f.p.productKey,watchId:f.w.id}).product.price.grossPackPrice,25);
+ f.clock.at='2026-11-13T12:00:00Z';assert.equal(f.shop.familyView().odaDraft.items.length,0,'per-read reuse never preserves expired prices across calls');
+});
