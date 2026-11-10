@@ -19,6 +19,8 @@ Kampanjer på godkjente Sesum-varer gir egen `shopping-sesum-offer-review` til d
 
 Godkjent Sesum-identitet er også adskilt fra husholdningens familievalg. Kontroller `shopping-sesum-family-review` etter både priskobling og ny registrering: en vare i en ny bibliotekgruppe krever fortsatt eksplisitt `shopping-family-set`, et konkret scoped avslag eller blokkert restanse. Kildeinnsamling, produktgodkjenning og familiedekning er ulike fullføringskrav.
 
+`shopping-sesum-placement-review` lar agenten undersøke hver aktuell kildevare mot alle aktive familiekrav, også uten treff i familiens kildesøk. `shopping-sesum-placement` viser hele det gjeldende settet. En eksplisitt researchkvittering ruter arbeidet videre og endrer ingen familiegodkjenning, pris, råhint eller handlekurv. Ukjent plassering forblir en varig blokkert restanse.
+
 Et privat gjennomgått produktbibliotek kan kobles til med `config/shopping-library.json` etter eksempelfilen. Aktiver først etter kontroll av egen fil og egne watch-godkjenninger. Fellesprismodellen bruker da nyere kvitteringer fra identiske godkjente native produkter i alle handlevisninger. Biblioteket godkjenner ingen familievalg, oppretter ingen overvåkninger og endrer ingen kurv; se runbookens avsnitt om felles aktuell pris.
 
 Bibliotekleserens `compare` kan også vise versjonert råvarescore fra dokumentert ingrediensinnhold, uten ekstra oppsett eller nettinnhenting. Den gjelder bare støttede kategorier med gyldig produktreview. Manglende mengde eller ulikt målegrunnlag forblir synlig; score er ingen samlet helsevurdering og aktiverer ingen kjøpshandling. Se runbookens avsnitt om dokumentert råvarekvalitet.

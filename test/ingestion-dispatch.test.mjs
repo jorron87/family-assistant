@@ -23,6 +23,7 @@ test('new Sesum discovery launches the existing shopping agent with research and
     const d=createIngestionDispatcher({store,root:'.',dataDir:dir,clock:()=>Date.parse('2026-11-09T12:00:00Z'),readConfig:()=>({enabled:true,minGapMinutes:0}),alive:()=>true,launch:input=>{launch=input;return {pid:123};}});
     d.tick();assert.equal(d.status().workerScope,'handel');assert.match(launch.prompt,/shopping-sesum-discovery/);assert.match(launch.prompt,/shopping-sesum-register/);assert.match(launch.prompt,/shopping-sesum-catalog/);assert.match(launch.prompt,/familyFingerprints/);assert.match(launch.prompt,/Manglende EAN eller gjennomgått donor er aldri automatisk avslag/);assert.match(launch.prompt,/shopping-sesum-offer-review/);assert.match(launch.prompt,/conditionsVerified:true/);assert.match(launch.prompt,/bare arbeid som faktisk krever nettleseren/);assert.match(launch.prompt,/En faktisk eksplisitt sikkerhetsstopp/);
     assert.match(launch.prompt,/shopping-sesum-family-review/);assert.match(launch.prompt,/registrationFingerprint/);assert.match(launch.prompt,/vanlige web-\/søkeverktøy/);assert.match(launch.prompt,/aldri bare søkeutdrag/);
+    assert.match(launch.prompt,/shopping-sesum-placement-review/);assert.match(launch.prompt,/reviewedAllFamilies:true/);assert.match(launch.prompt,/noActiveFamilyVerified:true/);
     rows=[];launch.onExit(0);assert.equal(lease,null);assert.equal(d.status().running,false);
   }finally{assert.ok(dir.startsWith(join(tmpdir(),'familien-dispatch-sesum-')));rmSync(dir,{recursive:true,force:true});}
 });
@@ -44,6 +45,15 @@ test('new source family research changes wake dispatch while ordinary receipt re
   row.observedAt='2026-11-10T12:00:00Z';row.fetchedAt='2026-11-10T13:00:00Z';assert.equal(changeSignal(store).signature,initial.signature);
   row.registrationFingerprint='product-groups-b';row.fingerprint='research-b';const changed=changeSignal(store);assert.equal(changed.count,1);assert.notEqual(changed.signature,initial.signature);
   row.familyFingerprint='family-b';assert.notEqual(changeSignal(store).signature,changed.signature);
+});
+
+test('all-family placement wakes on semantic source/product/family-set change without price-date churn',()=>{
+  const row={do:'shopping-sesum-placement-review',sourceKey:'sesum:KIWI:123',sourceFingerprint:'source',registrationFingerprint:null,familySetFingerprint:'set-a'};
+  const store={snapshot:()=>({rawItems:{},events:{}}),reviewQueue:()=>({items:[]}),completionReport:()=>({profileReviews:[],missingDrive:[],unsyncedCalendar:[]}),activityFacebook:()=>[],activityFeedStatus:()=>({changedPages:[]}),shopping:{queue:()=>[row]}};
+  const initial=changeSignal(store);assert.equal(initial.count,1);assert.equal(initial.shoppingOnly,true);
+  row.observedAt='2026-11-10T12:00:00Z';row.fetchedAt='2026-11-10T13:00:00Z';assert.equal(changeSignal(store).signature,initial.signature);
+  row.registrationFingerprint='current-reviewed-product-groups';const product=changeSignal(store);assert.notEqual(product.signature,initial.signature);
+  row.familySetFingerprint='set-b';assert.notEqual(changeSignal(store).signature,product.signature);
 });
 
 test('an edit to an already pending source item changes the dispatch signal',()=>{

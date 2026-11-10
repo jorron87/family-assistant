@@ -159,7 +159,10 @@ for(const genericCoop of [false,true])test(`a scoped negative removes only its f
   f.clock.at='2026-11-10T12:02:00Z';receive(18);f.reload();
   assert.equal(item(f.w.id).prices.current,independentPrice);assert.equal(item(second.id).prices.current,36);assert.equal(family(f.w.id).sourceDecision.status,'excluded');assert.equal(family(f.w.id).registrationFingerprint,registrationFingerprint,'price/date changes do not undo a scoped decision');
   f.shop.watch({...f.shop.view().watches.find(row=>row.id===f.w.id),note:'The household explicitly expanded its accepted whole-bean variant requirement.'});
-  assert.equal(family(f.w.id).sourceDecision,null);assert.equal(item(f.w.id).prices.current,36,'actual changed requirements reopen the source decision');
+  assert.equal(family(f.w.id).sourceDecision,null);assert.equal(item(f.w.id).prices.current,independentPrice,'actual changed requirements reopen review while the prior explicit negative keeps a conservative price hold');
+  assert.ok(f.shop.queue().some(row=>row.do==='shopping-sesum-family-review'&&row.sourceKey===key&&row.familyId===f.w.id));
+  const current=family(f.w.id);f.shop.sesumPriceReview({sourceKey:key,sourceFingerprint:candidate().sourceFingerprint,status:'reopen',familyIds:[f.w.id],familyFingerprints:{[f.w.id]:current.requirementsFingerprint},registrationFingerprint:current.registrationFingerprint,equivalenceEvidence:'The current household requirement and actual source were explicitly reviewed; the earlier family exclusion is now reopened.'});
+  assert.equal(item(f.w.id).prices.current,36,'only a concrete current scoped decision releases the earlier source/native hold');
 });
 
 test('a scoped native-alias exclusion quarantines only its derived market history and automatic guide',t=>{
