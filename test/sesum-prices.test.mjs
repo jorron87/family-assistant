@@ -56,6 +56,23 @@ test('price/date changes preserve a bridge; changed source metadata invalidates 
  f.ingest(f.source({name:'Krydrede tomater 390 g'}));assert.equal(f.prices.candidates()[0].status,'pending');assert.equal(f.prices.overlay().product('sesum:KIWI:123'),null);
  assert.throws(()=>f.approve({sourceFingerprint:before}),/source metadata changed/);
 });
+
+test('an older replay adds family hints to the latest changed source without rolling back metadata, prices or review',()=>{
+ const f=fixture(),old=f.source();f.ingest(old);f.approve();
+ const key='sesum:KIWI:123';f.clock.at='2026-11-09T12:12:00Z';
+ f.prices.ingest({familyIds:['family:current'],fetchedAt:f.clock.at,products:[f.source({name:'Changed actual variant 390 g',sourceUrl:'https://www.sesum.no/produkt/123-changed-variant',nonEanCodes:['source-v2'],prices:[{storeCode:'KIWI',price:11,observedAt:'2026-11-09T12:11:00Z',source:'RECEIPT'}]})]});
+ const latest=structuredClone(f.state.products[key]),revision=f.prices.revision();
+ const result=f.prices.ingest({familyIds:['family:new'],fetchedAt:NOW,products:[old]});
+ assert.equal(result.observed,1);assert.equal(f.prices.revision(),revision+1);
+ assert.deepEqual(f.state.products[key],{...latest,familyIds:[...latest.familyIds,'family:new']});
+ const [candidate]=f.prices.candidates('family:new');
+ assert.equal(candidate.sourceFingerprint,latest.fingerprint);assert.equal(candidate.source.name,'Changed actual variant 390 g');
+ assert.equal(candidate.source.sourceUrl,'https://www.sesum.no/produkt/123-changed-variant');assert.deepEqual(candidate.source.nonEanCodes,['source-v2']);
+ assert.equal(candidate.price.price,11);assert.equal(candidate.price.observedAt,'2026-11-09T12:11:00.000Z');
+ assert.equal(candidate.status,'pending','an old approved bridge cannot approve the newer metadata or the new family hint');
+ const repeated=f.prices.ingest({familyIds:['family:new'],fetchedAt:NOW,products:[old]});
+ assert.equal(repeated.observed,0);assert.equal(f.prices.revision(),revision+1);assert.deepEqual(f.state.products[key],{...latest,familyIds:[...latest.familyIds,'family:new']});
+});
 test('changed donor metadata or a noncurrent donor membership cannot lend identity or prices',()=>{
  const f=fixture();f.ingest();f.approve();const donorFingerprint=sesumDonorFingerprint(f.p);
  f.p.ingredients='Tomater, sukker';f.p.textHash=productTextHash(f.p);
@@ -93,6 +110,39 @@ test('promotional prices with unverified conditions are held, and only bounded s
  const f=fixture();f.ingest(f.source({token:'secret-token',cookies:'secret-cookie',prices:[{storeCode:'KIWI',price:5,observedAt:RECEIPT,source:'RECEIPT',isPromo:true,promotion:{title:'Member campaign',member_only:true,accessToken:'secret-promotion-token'}}]}));f.approve();
  const quote=f.prices.overlay().quote('sesum:KIWI:123').price;assert.ok(quote.reasons.includes('unverified-promotion-conditions'));assert.equal(f.prices.overlay().members('tomatoes').filter(m=>m.eligible).length,0);
  assert.equal(JSON.stringify(f.state).includes('secret'),false);assert.equal(f.prices.candidates()[0].price.promotion.member_only,true);
+});
+
+test('an attached promotion is held despite a false flag, including previously stored receipts',()=>{
+ const f=fixture();f.ingest();f.approve();
+ assert.equal(f.prices.overlay().quote(f.productKey).price.grossPackPrice,7.9);
+ const source=f.source({prices:[{storeCode:'KIWI',price:5,observedAt:'2026-11-09T12:06:00Z',source:'RECEIPT',isPromo:false,promotion:{valid_from:'2026-11-09T00:00:00Z',valid_until:'2026-11-16T00:00:00Z',multi_buy_quantity:null}}]});
+ f.ingest(source);
+ const original=f.prices.sourceRecord('sesum:KIWI:123');
+ assert.equal(original.price.isPromo,false);assert.equal(original.price.price,5);
+ const rebuilt=createSesumPrices(f.state,{reader:f.reader,now:()=>new Date(NOW)});
+ for(const key of ['sesum:KIWI:123',f.productKey]){
+  const quote=rebuilt.overlay().quote(key).price;
+  assert.equal(quote.grossPackPrice,5,'the actual receipt remains evidence, not an obtainable ordinary price');
+  assert.ok(quote.reasons.includes('unverified-promotion-conditions'));
+ }
+ assert.equal(rebuilt.overlay().members('tomatoes').some(m=>m.eligible),false,'the newer held receipt suppresses older ordinary prices for the same physical chain SKU');
+ assert.ok(rebuilt.candidates()[0].price.reasons.includes('unverified-promotion-conditions'));
+ assert.deepEqual(rebuilt.sourceRecord('sesum:KIWI:123'),original,'read-time guards do not rewrite the original receipt');
+ f.clock.at='2026-11-09T12:11:00Z';
+ f.ingest(f.source({prices:[{storeCode:'KIWI',price:8,observedAt:f.clock.at,source:'RECEIPT',isPromo:false,promotion:null},{storeCode:'REMA_1000',price:10,observedAt:RECEIPT,source:'RECEIPT',isPromo:false,promotion:null}]}));
+ assert.equal(f.prices.overlay().quote(f.productKey).price.reasons.length,0,'a later actual ordinary receipt without promotion is usable again');
+ assert.equal(f.prices.candidates().find(r=>r.source.store==='REMA_1000').price.reasons.length,0,'another chain remains independent');
+});
+
+test('equal-time duplicate source identities cannot erase unresolved campaign conditions',()=>{
+ const f=fixture(),promotion={valid_from:'2026-11-09T00:00:00Z',valid_until:'2026-11-16T00:00:00Z'};
+ f.ingest(f.source({prices:[{storeCode:'KIWI',price:7.9,observedAt:RECEIPT,source:'RECEIPT',isPromo:false,promotion}]}));
+ const bridge=f.approve();
+ f.ingest(f.source({id:'124',sourceUrl:'https://www.sesum.no/produkt/124-same-physical-tomatoes'}));
+ const row=f.prices.candidates().find(x=>x.sourceKey==='sesum:KIWI:124');
+ f.prices.review({...bridge,sourceKey:row.sourceKey,sourceFingerprint:row.sourceFingerprint});
+ for(const key of [f.productKey,'sesum:KIWI:123','sesum:KIWI:124'])assert.ok(f.prices.overlay().quote(key).price.reasons.includes('unverified-promotion-conditions'));
+ assert.equal(f.prices.overlay().members('tomatoes').some(m=>m.eligible),false);
 });
 test('native provider overrides require the existing native approval and exact text/package guards',()=>{
  const f=fixture();f.ingest();f.approve();

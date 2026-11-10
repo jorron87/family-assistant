@@ -44,6 +44,7 @@ function promo(value){
  }
  return out;
 }
+const receiptReasons=receipt=>[...new Set([...receipt.reasons,...(receipt.isPromo===true||receipt.promotion!=null?['unverified-promotion-conditions']:[])])];
 const alias=code=>({EXTRA:'COOP_EXTRA',MENY:'MENY_NO',SPAR:'SPAR_NO',ODA:'ODA_NO',EUROPRIS:'EUROPRIS_NO',OBS:'COOP_OBS',PRIX:'COOP_PRIX',MEGA:'COOP_MEGA'}[code]??code);
 const CHAINS=new Set(['KIWI','REMA_1000','COOP_EXTRA','MENY_NO','SPAR_NO','ODA_NO','EUROPRIS_NO','COOP_OBS','COOP_PRIX','COOP_MEGA']);
 function packOf(source){
@@ -136,7 +137,7 @@ function newerReceipt(previous,incoming){
 const currentGroups=(reader,key)=>(reader?.groupsOf(key)??[]).filter(row=>row.s==='approved'&&row.r&&reader.group(row.groupId));
 const donorAllowed=(row,key,donor)=>!key.startsWith('sesum:')||key===row.sourceKey&&donor?.source==='sesum'&&donor.nativeDiscovery===true&&donor.sourceFingerprint===row.fingerprint&&!donor.donorProductKey;
 function quoteOf(row,bridge){
- const receipt=row.receipt,reasons=[...receipt.reasons];
+ const receipt=row.receipt,reasons=receiptReasons(receipt);
  if(!positive(bridge.packAmount))reasons.push('unknown-canonical-pack-amount');
  return {grossPackPrice:receipt.price,grossUnitPrice:null,unit:bridge.unit,directUnitVerified:false,receiptAt:receipt.observedAt,reasons,sourceUrl:row.source.sourceUrl,availabilityScope:'chain',priceIncludesVat:true,priceSource:'sesum',sourceProductKey:row.sourceKey};
 }
@@ -148,6 +149,7 @@ function chooseQuote(previous,incoming){
  if(unproven(previous)&&Number.isFinite(b)&&!unproven(incoming))return incoming;
  if(!Number.isFinite(b)||Number.isFinite(a)&&b<a)return previous;
  if(Number.isFinite(a)&&a===b&&previous.grossPackPrice!==incoming.grossPackPrice)return {...incoming,grossPackPrice:null,reasons:[...new Set([...(previous.reasons??[]),...incoming.reasons,'conflicting-latest-prices'])]};
+ if(Number.isFinite(a)&&a===b)return {...incoming,reasons:[...new Set([...previous.reasons,...incoming.reasons])]};
  return incoming;
 }
 
@@ -202,7 +204,14 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
   const rows=normalizedRows(input.products,fetchedAt,at),staged=new Map();
   for(const item of rows){
    const previous=staged.get(item.sourceKey)??sourceRow(item.sourceKey),changed=previous&&previous.fingerprint!==item.fingerprint;
-   if(previous&&Date.parse(item.fetchedAt)<Date.parse(previous.fetchedAt))continue;
+   if(previous&&Date.parse(item.fetchedAt)<Date.parse(previous.fetchedAt)){
+    // A replay can discover another family without being a newer source read.
+    // Keep the latest complete source evidence, including changed metadata and
+    // unknown/conflicting prices; only append the newly discovered hints.
+    const familyIds=[...new Set([...previous.familyIds,...input.familyIds])];
+    if(familyIds.length!==previous.familyIds.length)staged.set(item.sourceKey,{...previous,familyIds});
+    continue;
+   }
    staged.set(item.sourceKey,{...item,familyIds:[...new Set([...(previous?.familyIds??[]),...input.familyIds])],firstSeen:previous?.firstSeen??fetchedAt,receipt:changed?item.receipt:newerReceipt(previous?.receipt,item.receipt)});
   }
   if(staged.size){for(const [key,row] of staged)state.products[key]=row;state.revision++;save();}
@@ -222,7 +231,7 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
    }
    donors.sort((a,b)=>(Number(b.match.ean)+Number(b.match.name)+Number(b.match.brand)+Number(b.match.pack))-(Number(a.match.ean)+Number(a.match.name)+Number(a.match.brand)+Number(a.match.pack))||a.productKey.localeCompare(b.productKey));
    const bridge=state.bridges[row.sourceKey]??null,current=validBridge(row,bridge,base);
-   return {sourceKey:row.sourceKey,sourceFingerprint:row.fingerprint,source:clone(source),price:clone(row.receipt),familyIds:[...row.familyIds],status:current?'approved':bridge?.status==='excluded'&&bridge.sourceFingerprint===row.fingerprint?'excluded':'pending',bridge:bridge?clone(bridge):null,donors};
+   return {sourceKey:row.sourceKey,sourceFingerprint:row.fingerprint,source:clone(source),price:{...clone(row.receipt),reasons:receiptReasons(row.receipt)},familyIds:[...row.familyIds],status:current?'approved':bridge?.status==='excluded'&&bridge.sourceFingerprint===row.fingerprint?'excluded':'pending',bridge:bridge?clone(bridge):null,donors};
   });
  }
  function review(input){
@@ -284,6 +293,7 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
    if(!identity&&Number.isFinite(ownTime)&&Number.isFinite(selectedTime)){
     if(ownTime<selectedTime)quote={...original,reasons:[...new Set([...original.reasons,'superseded-price-receipt'])]};
     else if(ownTime===selectedTime&&(selected.reasons.includes('conflicting-latest-prices')||selected.grossPackPrice!==original.grossPackPrice))quote={...original,grossPackPrice:null,reasons:[...new Set([...original.reasons,...selected.reasons,'conflicting-latest-prices'])]};
+    else if(ownTime===selectedTime)quote={...original,reasons:[...new Set([...original.reasons,...selected.reasons])]};
    }
    const product={...donor,store:row.source.store,id:row.source.id,source:'sesum',productKey:row.sourceKey,sourceUrl:row.source.sourceUrl,ean:row.source.ean[0]??donor.ean??null,available:group.donor.store!==row.source.store||group.donor.available!==false,donorProductKey:bridge.productKey,sourceFingerprint:row.fingerprint,metadataFingerprint:hash([row.fingerprint,bridge.productFingerprint]),quote};
    out.products[row.sourceKey]=product;

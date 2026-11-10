@@ -4,5 +4,6 @@
   "minSpacingMs": 1500,
   "cycleCalls": 4,
   "refreshHours": 24,
+  "requireSingleBatch": false,
   "queryOverrides": {}
 }

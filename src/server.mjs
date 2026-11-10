@@ -98,7 +98,11 @@ async function handle(req, res) {
       const extension=path==='/api/shopping/sesum/work'||path==='/api/shopping/sesum/receive';
       if(!sesumSenderAllowed(req.headers,{extension,write:method==='POST'}))return send(res,403,{error:'Ugyldig Sesum-avsender.'});
       if(method==='POST'&&!String(req.headers['content-type']??'').toLowerCase().startsWith('application/json'))return send(res,403,{error:'Sesum krever JSON.'});
-      if(path==='/api/shopping/sesum/work'&&method==='GET')return send(res,200,sesum.work({peek:new URL(req.url,`http://${host}`).searchParams.get('peek')==='1'}));
+      if(path==='/api/shopping/sesum/work'&&method==='GET'){
+        const peek=new URL(req.url,`http://${host}`).searchParams.get('peek')==='1';
+        if(!peek)await sesum.replayPending();
+        return send(res,200,sesum.work({peek}));
+      }
       if(path==='/api/shopping/sesum/status'&&method==='GET')return send(res,200,sesumStatus());
       if(path==='/api/shopping/sesum/candidates'&&method==='GET')return send(res,200,store.shopping.sesumCandidates(new URL(req.url,`http://${host}`).searchParams.get('familyId')??undefined));
       if(path==='/api/shopping/sesum/catalog'&&method==='GET')return send(res,200,sesum.catalog({familyId:new URL(req.url,`http://${host}`).searchParams.get('familyId')}));

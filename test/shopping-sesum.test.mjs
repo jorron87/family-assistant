@@ -16,6 +16,112 @@ function fixture(t,{familyCount=1,...config}={}){
 const response=(work,job,result,status='ok')=>({runId:work.runId,jobId:job.id,status,fetchedAt:when,result});
 const search=(job,{products=[],next=[],end=true}={})=>({ok:true,kind:'search',sourceUrl:job.url,productUrls:products,nextUrls:next,endReached:end,errors:[]});
 const product=(job,{observedAt='2026-11-09T10:00:00Z',price=7.9}={})=>({ok:true,kind:'product',sourceUrl:job.url,product:{id:'123',name:'Synthetic tomatoes 390 g',ean:'12345678',weight:390,weightUnit:'g'},prices:[{storeCode:'EXTRA',price,observedAt,source:'receipt'}]});
+const saved=f=>JSON.parse(decrypt(readFileSync(join(f.dataDir,'sesum-collector.json.enc')),f.options.encryptionKey));
+const persist=(f,state)=>writeFileSync(join(f.dataDir,'sesum-collector.json.enc'),encrypt(Buffer.from(JSON.stringify(state)),f.options.encryptionKey));
+
+test('one global source batch survives reload, releases after every receipt, and recovers after reservation expiry',async t=>{
+  const f=fixture(t,{familyCount:12,cycleCalls:4,requireSingleBatch:true}),first=f.client.work();assert.equal(first.jobs.length,4);
+  const restored=createSesumCollector(f.options);
+  for(const peek of [false,true]){const blocked=restored.work({peek});assert.deepEqual(blocked.jobs,[]);assert.equal(blocked.reason,'active-source-batch');}
+  await restored.receive(response(first,first.jobs[0],search(first.jobs[0])));assert.deepEqual(restored.work().jobs,[],'other three jobs still reserve the batch');
+  for(const job of first.jobs.slice(1))await restored.receive(response(first,job,search(job)));
+  const second=restored.work();assert.equal(second.jobs.length,4);assert.ok(second.jobs.every(j=>!first.jobs.some(old=>old.id===j.id)));
+  f.advance(5*60000+1);const recovered=createSesumCollector(f.options).work();assert.equal(recovered.jobs.length,4,'expired reservations do not block the run forever');
+});
+
+test('same exact product URL across query generations replays its successful observation to a new family without refetch',async t=>{
+  const f=fixture(t,{familyCount:2});let work=f.client.work(),seed=work.jobs[0];
+  await f.client.receive(response(work,seed,search(seed,{products:[productUrl]})));work=f.client.work();const detail=work.jobs[0];
+  await f.client.receive(response(work,detail,product(detail)));
+  const second=f.client.work(),secondSeed=second.jobs[0];await f.client.receive(response(second,secondSeed,search(secondSeed)));
+  const state=saved(f),copy={id:'older-generation-copy',kind:'product',url:productUrl,generation:7,familyIds:['family-1'],status:'pending',attempts:0,createdAt:when};
+  state.run.jobs[copy.id]=copy;delete state.run.productDedupeVersion;persist(f,state);f.received.length=0;f.advance(3600000);
+  const restored=createSesumCollector(f.options);assert.equal(restored.work({peek:true}).jobs.length,0);
+  assert.equal(restored.status().replayPendingCount,1);assert.equal(restored.status().status,'collecting');assert.equal(f.received.length,0,'peek queues evidence but never consumes replay');
+  const result=await restored.replayPending();assert.equal(result.applied,1);assert.equal(result.pending,0);assert.equal(f.received.length,1);
+  assert.deepEqual(f.received[0].familyIds,['family-1']);assert.equal(f.received[0].fetchedAt,when);assert.equal(f.received[0].products[0].prices[0].observedAt,'2026-11-09T10:00:00Z');assert.equal(f.received[0].products[0].prices[0].sourceStoreCode,'EXTRA');
+  assert.equal(restored.status().jobCountsByKind.product.complete,1);assert.equal(restored.status().status,'complete');
+  assert.equal(saved(f).run.productAliases[copy.id],detail.id);assert.deepEqual(saved(f).run.mergedProductJobs[copy.id].job,copy);
+  assert.equal((await restored.receive(response(work,{...detail,id:copy.id},product(detail)))).duplicate,true);
+});
+
+test('a newer validated source change with failed callback outranks an older successful duplicate and retries locally',async t=>{
+  const f=fixture(t,{familyCount:2});let work=f.client.work(),seed=work.jobs[0];await f.client.receive(response(work,seed,search(seed,{products:[productUrl]})));work=f.client.work();const detail=work.jobs[0];await f.client.receive(response(work,detail,product(detail)));
+  const state=saved(f),old=state.run.jobs[detail.id],newTime='2026-11-09T12:01:00Z',changed=structuredClone(old.productObservation);changed.name='Synthetic source changed contents 390 g';changed.prices[0].price=9;
+  state.run.jobs.repair={id:'repair',kind:'product',url:productUrl,generation:7,status:'pending',familyIds:['family-0'],attempts:0,createdAt:when,retryHistory:[{evidence:'Selected concrete source repair'}]};state.run.repairPriority=['repair'];
+  state.run.jobs.changed={...structuredClone(old),id:'changed',generation:8,status:'pending',familyIds:['family-1'],productObservation:changed,observationFetchedAt:newTime,observationStatus:'ok',observationError:'Previous callback failed',appliedFamilyIds:[],deliveredUntil:null,priceChains:[],priceReceipts:[]};delete state.run.productDedupeVersion;persist(f,state);f.advance(120000);
+  let calls=0;const inputs=[],options={...f.options,receivePrices:input=>{inputs.push(input);if(++calls===1)throw Error('Local apply unavailable');return {matched:0,needsReview:1,blocked:0};}},restored=createSesumCollector(options);
+  const first=await restored.replayPending();assert.equal(first.failed,1);assert.equal(restored.status().jobCountsByKind.product.complete,0);assert.equal(restored.status().replayPendingCount,1);
+  assert.equal(saved(f).run.productAliases.repair,'changed','selected older repairs follow the newer actual source evidence');assert.ok(saved(f).run.repairPriority.includes('changed'));assert.deepEqual(saved(f).run.mergedProductJobs.repair.job.retryHistory,[{evidence:'Selected concrete source repair'}]);
+  assert.equal(inputs[0].products[0].name,changed.name);assert.equal(inputs[0].fetchedAt,newTime);assert.equal(restored.work({peek:true}).jobs.some(j=>j.kind==='product'),false,'local callback failure cannot cause a remote product reread');
+  assert.equal((await restored.replayPending()).applied,0,'persistent local backoff is respected');
+  f.advance(60001);const reloaded=createSesumCollector(options);assert.equal((await reloaded.replayPending()).applied,1);
+  assert.equal(reloaded.status().jobCountsByKind.product.complete,1);assert.equal(inputs[1].products[0].name,changed.name);assert.equal(inputs[1].fetchedAt,newTime);
+  assert.equal((await reloaded.receive(response(work,detail,product(detail)))).duplicate,true,'an older in-flight alias cannot replace the newer source change');
+  f.advance(60000);const newer=product(detail,{price:10});newer.product.name='A still newer actual own product';
+  await reloaded.receive({...response(work,detail,newer),fetchedAt:'2026-11-09T12:03:00Z'});
+  assert.equal(inputs.at(-1).products[0].name,newer.product.name,'a completed canonical job must still accept a newer actual alias receipt');
+  assert.equal(reloaded.catalog().items[0].fetchedAt,'2026-11-09T12:03:00Z');assert.ok(saved(f).run.mergedProductJobs[detail.id]);
+});
+
+test('a newer partial duplicate retains its repair evidence instead of becoming complete through an older receipt',async t=>{
+  const f=fixture(t);let work=f.client.work(),seed=work.jobs[0];await f.client.receive(response(work,seed,search(seed,{products:[productUrl]})));work=f.client.work();const detail=work.jobs[0];await f.client.receive(response(work,detail,product(detail)));
+  const state=saved(f);state.run.jobs.partial={id:'partial',kind:'product',url:productUrl,generation:9,familyIds:['family-0'],status:'partial',attempts:2,createdAt:when,fetchedAt:'2026-11-09T12:01:00Z',errors:['source_schema_changed']};delete state.run.productDedupeVersion;persist(f,state);f.advance(120000);
+  const restored=createSesumCollector(f.options);await restored.replayPending();const status=restored.status();assert.equal(status.jobCountsByKind.product.complete,0);assert.equal(status.jobCountsByKind.product.partial,1);
+  assert.deepEqual(saved(f).run.jobs.partial.errors,['source_schema_changed']);assert.equal(f.received.length,1,'the older success is preserved as evidence, not reapplied over a later partial read');
+  restored.retry({jobIds:['partial'],evidence:'Verified source parser repair.'});assert.equal(restored.work().jobs[0].id,'partial');
+});
+
+test('local replay is serialized, bounded by the cycle budget and resumes with original evidence after reload',async t=>{
+  const f=fixture(t,{familyCount:2,cycleCalls:2}),urls=[productUrl,'https://www.sesum.no/produkt/124-other-synthetic'];let work=f.client.work();
+  for(const [i,job] of work.jobs.entries())await f.client.receive(response(work,job,search(job,{products:i?[]:urls})));
+  work=f.client.work();for(const job of work.jobs){const result=product(job);result.product.id=new URL(job.url).pathname.match(/\/(\d+)/)[1];await f.client.receive(response(work,job,result));}
+  const state=saved(f);for(const job of Object.values(state.run.jobs).filter(j=>j.kind==='product'))state.run.jobs['copy-'+job.id]={id:'copy-'+job.id,kind:'product',url:job.url,generation:2,status:'pending',familyIds:['family-1'],attempts:0,createdAt:when};
+  delete state.run.productDedupeVersion;persist(f,state);
+  const inputs=[];let release;const gate=new Promise(resolve=>{release=resolve;}),options={...f.options,config:{...f.options.config,cycleCalls:1},receivePrices:async input=>{inputs.push(input);await gate;return {needsReview:1};}},restored=createSesumCollector(options);
+  const first=restored.replayPending(),concurrent=restored.replayPending();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(inputs.length,1,'two normal work callers share one bounded local replay batch');release();
+  assert.equal((await first).pending,1);assert.equal((await concurrent).pending,1);assert.equal(inputs.length,1);
+  const reloaded=createSesumCollector(options);assert.equal((await reloaded.replayPending()).pending,0);assert.equal(inputs.length,2);
+  assert.ok(inputs.every(input=>input.fetchedAt===when&&input.products[0].prices[0].observedAt==='2026-11-09T10:00:00Z'));
+  assert.ok(inputs.every(input=>JSON.stringify(input.familyIds)==='["family-1"]'));assert.equal(reloaded.status().status,'complete');
+});
+
+for(const recordedEdges of [true,false])test(`a reused completed search ${recordedEdges?'propagates known descendants':'re-reads unknown legacy descendants'} for a newly attached family`,async t=>{
+  const f=fixture(t);f.setFamilies([{familyId:'family-0',name:'Synthetic family 0',unit:'kg',queries:['shared']}]);
+  let work=f.client.work();const seed=work.jobs[0];await f.client.receive(response(work,seed,search(seed,{products:[productUrl]})));work=f.client.work();await f.client.receive(response(work,work.jobs[0],product(work.jobs[0])));
+  f.setFamilies([{familyId:'family-0',name:'Synthetic family 0',unit:'kg',queries:['shared']},{familyId:'family-1',name:'Synthetic family 1',unit:'kg',queries:['shared']}]);f.client.work({peek:true});
+  const state=saved(f);for(const job of Object.values(state.run.jobs))if(job.kind==='search'&&job.generation>0)delete state.run.jobs[job.id];
+  if(!recordedEdges)delete state.run.jobs[seed.id].productJobIds;
+  const page={id:'late-page',kind:'search',url:sesumUrl(seed.url+'&page=2','search'),generation:0,familyIds:['family-1'],status:'pending',attempts:0,createdAt:when};state.run.jobs[page.id]=page;persist(f,state);
+  const restored=createSesumCollector(f.options);await restored.receive(response({runId:work.runId},page,search(page,{next:[seed.url],end:false})));
+  if(!recordedEdges){assert.equal(saved(f).run.jobs[seed.id].rescanReason,'missing-search-product-edges');assert.equal(restored.status().status,'collecting');const reread=restored.work();assert.equal(reread.jobs[0].id,seed.id);await restored.receive(response(reread,reread.jobs[0],search(reread.jobs[0],{products:[productUrl]})));}
+  assert.equal(f.received.length,2);assert.deepEqual(f.received[1].familyIds,['family-1']);assert.equal(f.received[1].fetchedAt,when);assert.equal(restored.status().jobCountsByKind.product.complete,1);assert.equal(restored.status().status,'complete');
+});
+
+test('different observed slugs and a new full run keep independent source fetches',async t=>{
+  const f=fixture(t,{cycleCalls:2}),other=productUrl+'-changed';let work=f.client.work();await f.client.receive(response(work,work.jobs[0],search(work.jobs[0],{products:[productUrl,other]})));
+  work=f.client.work();assert.equal(work.jobs.length,2);assert.equal(new Set(work.jobs.map(j=>j.url)).size,2,'same numeric ID is not proof that changed source URLs have unchanged metadata');
+  for(const job of work.jobs)await f.client.receive(response(work,job,product(job)));
+  const previous=work.runId;f.client.refresh();work=f.client.work();assert.notEqual(work.runId,previous);await f.client.receive(response(work,work.jobs[0],search(work.jobs[0],{products:[productUrl]})));
+  assert.equal(f.client.work().jobs[0].kind,'product','a full refresh does not replay an older run as a new observation');
+});
+
+test('a selected repair keeps priority when its exact-URL duplicate has an older complete receipt',async t=>{
+  const f=fixture(t);let work=f.client.work(),seed=work.jobs[0];await f.client.receive(response(work,seed,search(seed,{products:[productUrl]})));work=f.client.work();const detail=work.jobs[0];await f.client.receive(response(work,detail,product(detail)));
+  const state=saved(f),repair={id:'selected-repair',kind:'product',url:productUrl,generation:3,familyIds:['family-0'],status:'pending',attempts:0,createdAt:when,retryHistory:[{evidence:'Verified concrete parser repair',previousStatus:'partial'}]};
+  state.run.jobs[repair.id]=repair;state.run.repairPriority=[repair.id];delete state.run.productDedupeVersion;persist(f,state);
+  const restored=createSesumCollector(f.options);await restored.replayPending();assert.equal(restored.work().jobs[0].id,repair.id);assert.deepEqual(saved(f).run.jobs[repair.id].retryHistory,repair.retryHistory);
+});
+
+test('a newly attached family refetches an old complete product whose validated observation is missing',async t=>{
+  const f=fixture(t,{familyCount:2});let work=f.client.work();await f.client.receive(response(work,work.jobs[0],search(work.jobs[0],{products:[productUrl]})));work=f.client.work();const detail=work.jobs[0];await f.client.receive(response(work,detail,product(detail)));
+  const state=saved(f);delete state.run.jobs[detail.id].productObservation;persist(f,state);
+  const restored=createSesumCollector(f.options);work=restored.work();const second=work.jobs[0];assert.equal(second.kind,'search');await restored.receive(response(work,second,search(second,{products:[productUrl]})));
+  assert.equal(restored.status().jobCountsByKind.product.pending,1);assert.equal(restored.status().replayPendingCount,0);assert.equal(restored.status().status,'collecting');assert.equal(saved(f).run.jobs[detail.id].rescanReason,'missing-validated-product-observation');
+  work=restored.work();assert.equal(work.jobs[0].id,detail.id);await restored.receive(response(work,work.jobs[0],product(work.jobs[0])));
+  assert.deepEqual(f.received.at(-1).familyIds,['family-0','family-1']);assert.equal(restored.status().status,'complete');
+});
 
 test('source queries stay within 64 characters without losing core words or the original descriptor plan',()=>{
   const requested='  Kjøttdeig av ren storfe med lavt fettinnhold til gryter og hverdagsmiddager uten tilsatt smak · uten dokumentert frysemerking  ';
@@ -155,11 +261,12 @@ test('repair priority persists but a one-job budget still gives three normal job
 });
 
 test('a repair with no receipt stays eligible after its reservation expires',async t=>{
-  const f=fixture(t,{familyCount:2,cycleCalls:1});let work=f.client.work(),repair=work.jobs[0];
+  const f=fixture(t,{familyCount:2,cycleCalls:1,requireSingleBatch:true});let work=f.client.work(),repair=work.jobs[0];
   await f.client.receive(response(work,repair,{ok:false,kind:'search',sourceUrl:repair.url,errors:['schema_changed']},'partial'));
   f.client.retry({jobIds:[repair.id],evidence:'Retry this repaired parser path.'});work=f.client.work();assert.equal(work.jobs[0].id,repair.id);
-  const ordinary=f.client.work();assert.notEqual(ordinary.jobs[0].id,repair.id);await f.client.receive(response(ordinary,ordinary.jobs[0],search(ordinary.jobs[0])));
-  f.advance(5*60000+1);const restored=createSesumCollector(f.options);assert.equal(restored.work().jobs[0].id,repair.id);
+  assert.deepEqual(f.client.work().jobs,[],'a second worker cannot start while the repair batch is reserved');
+  f.advance(5*60000+1);const restored=createSesumCollector(f.options),ordinary=restored.work();assert.notEqual(ordinary.jobs[0].id,repair.id);await restored.receive(response(ordinary,ordinary.jobs[0],search(ordinary.jobs[0])));
+  assert.equal(restored.work().jobs[0].id,repair.id);
 });
 
 test('retrying selected blocked work cannot clear an authentication pause and needs explicit evidence',async t=>{
