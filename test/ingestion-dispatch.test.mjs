@@ -107,7 +107,7 @@ test('a launch freezes at most twenty of eight thousand tasks and shrinking batc
   try{
     f.dispatcher.tick();const frozen=f.dispatcher.status().shoppingBatch;
     assert.equal(frozen.items.length,20);assert.equal(frozen.summary.total,8000);assert.equal(frozen.summary.remaining,7980);assert.deepEqual(frozen.summary.byType,{'shopping-sesum-placement-review':8000});assert.match(frozen.summary.resumeHint,/next/);
-    assert.match(f.launches[0].prompt,/Frosset handelsbolk/);assert.match(f.launches[0].prompt,/outcome:"continued"/);assert.ok(f.launches[0].prompt.includes('"sourceKey":"sesum-product:19"'));assert.ok(!f.launches[0].prompt.includes('"sourceKey":"sesum-product:20"'));assert.ok(f.launches[0].prompt.length<40000);
+    assert.match(f.launches[0].prompt,/Frosset handelsbolk/);assert.match(f.launches[0].prompt,/outcome:"continued"/);assert.ok(f.launches[0].prompt.includes('"sourceKeys":["sesum-product:19"]'));assert.ok(!f.launches[0].prompt.includes('"sourceKeys":["sesum-product:20"]'));assert.ok(f.launches[0].prompt.length<16000);
     // A completed placement may open identity research, but never expands the
     // already running assignment or counts as an approval of that next stage.
     f.queue.rows=[{...f.queue.rows[0],do:'shopping-sesum-discovery'},...f.queue.rows.slice(20)];
@@ -207,11 +207,9 @@ test('new Sesum discovery launches the existing shopping agent with research and
   const store={snapshot:()=>({runLease:lease,rawItems:{},events:{}}),reviewQueue:()=>({items:[]}),completionReport:()=>({profileReviews:[],missingDrive:[],unsyncedCalendar:[]}),activityFacebook:()=>[],activityFeedStatus:()=>({changedPages:[]}),shopping:{queue:()=>rows},phone:{list:()=>[]},calendarActions:()=>[],beginRun:()=>({acquired:true,lease:lease={token:'test-owned-lease'}}),endRun:token=>{assert.equal(token,lease.token);lease=null;},renewRun:()=>{}};
   try{
     const d=createIngestionDispatcher({store,root:'.',dataDir:dir,clock:()=>Date.parse('2026-11-09T12:00:00Z'),readConfig:()=>({enabled:true,minGapMinutes:0}),alive:()=>true,launch:input=>{launch=input;return {pid:123};}});
-    d.tick();assert.equal(d.status().workerScope,'handel');assert.match(launch.prompt,/shopping-sesum-discovery/);assert.match(launch.prompt,/shopping-sesum-register/);assert.match(launch.prompt,/shopping-sesum-catalog/);assert.match(launch.prompt,/familyFingerprints/);assert.match(launch.prompt,/Manglende EAN eller gjennomgått donor er aldri automatisk avslag/);assert.match(launch.prompt,/shopping-sesum-offer-review/);assert.match(launch.prompt,/conditionsVerified:true/);assert.match(launch.prompt,/bare arbeid som faktisk krever nettleseren/);assert.match(launch.prompt,/En faktisk eksplisitt sikkerhetsstopp/);
-    assert.match(launch.prompt,/shopping-sesum-family-review/);assert.match(launch.prompt,/registrationFingerprint/);assert.match(launch.prompt,/vanlige web-\/søkeverktøy/);assert.match(launch.prompt,/aldri bare søkeutdrag/);
-    assert.match(launch.prompt,/shopping-sesum-placement-review/);assert.match(launch.prompt,/reviewedAllFamilies:true/);assert.match(launch.prompt,/noActiveFamilyVerified:true/);
-    assert.match(launch.prompt,/familySetFingerprint fra den faktisk leste gjeldende sjekklisten i shopping-review/);assert.match(launch.prompt,/hele den nye sjekklisten før ny kvittering/);
-    assert.match(launch.prompt,/HELE den konkrete ingredienslisten\/INCI/);assert.match(launch.prompt,/status:reopen/);assert.match(launch.prompt,/varig reviewHold/);assert.match(launch.prompt,/generisk setning.*aldri ekvivalensbevis/);
+    d.tick();assert.equal(d.status().workerScope,'handel');
+    for(const pattern of [/shopping-sesum-discovery/,/shopping-sesum-register/,/shopping-sesum-catalog/,/familyFingerprints/,/Manglende EAN eller gjennomgått donor er aldri automatisk avslag/,/shopping-agent-context/,/shopping-agent-guide TYPE/,/En faktisk eksplisitt sikkerhetsstopp/])assert.match(launch.prompt,pattern);
+    assert.doesNotMatch(launch.prompt,/conditionsVerified:true/);assert.doesNotMatch(launch.prompt,/HELE den konkrete ingredienslisten/);
     rows=[];launch.onExit(0);assert.equal(lease,null);assert.equal(d.status().running,false);
   }finally{assert.ok(dir.startsWith(join(tmpdir(),'familien-dispatch-sesum-')));rmSync(dir,{recursive:true,force:true});}
 });
@@ -225,6 +223,16 @@ test('native-only product batches omit unrelated Sesum research protocols withou
     assert.match(prompt,/shopping-jobs --id/);assert.equal(f.dispatcher.status().shoppingBatch.summary.agentJobs.shown,1);
     f.queue.rows=[];f.launches[0].onExit(0);
   }finally{f.close();}
+});
+
+test('fast shopping continuation requires configured delay and confirmed current receipts, with ordinary failure and family priority',()=>{
+ for(const [proof,exitCode,expected] of [[true,0,2],[false,0,1],[true,1,1]]){
+  const f=shoppingDispatchFixture(Array.from({length:25},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+i,sourceFingerprint:'fp'+i})),{shoppingProgressGapSeconds:30});
+  f.store.shopping.agentProgressSince=()=>proof;
+  try{f.dispatcher.tick();f.queue.rows=f.queue.rows.slice(20);f.launches[0].onExit(exitCode);f.clock.at+=29000;f.dispatcher.tick();assert.equal(f.launches.length,1);f.clock.at+=2000;f.dispatcher.tick();assert.equal(f.launches.length,expected);if(expected===2)f.launches[1].onExit(0);}finally{f.close();}
+ }
+ const f=shoppingDispatchFixture([{do:'shopping-product-review',productKey:'kassal:ODA_NO:1',watchId:'family'}],{shoppingProgressGapSeconds:30});f.store.shopping.agentProgressSince=()=>true;
+ try{f.dispatcher.tick();f.queue.rows=[{do:'shopping-product-review',productKey:'kassal:ODA_NO:2'}];f.launches[0].onExit(0);f.clock.at+=31000;f.store.phone.list=()=>[{status:'queued'}];f.dispatcher.tick();assert.equal(f.launches.length,1);}finally{f.close();}
 });
 
 test('campaign and linked offer terms wake the shopping agent at the same count, while price-date-only replay does not',()=>{

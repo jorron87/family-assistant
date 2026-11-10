@@ -20,6 +20,7 @@ export function launchLuna({root,prompt,onExit}) {
   if(cfg.enabled!==true||!cfg.model)throw Error('Configure and enable config/agent.json after a manual test.');
   const executable=findCodex();
   if(!executable)throw Error('ChatGPT-appens Codex-runtime mangler.');
+  const startedAt=Date.now(),metrics={model:cfg.model,reasoningEffort:cfg.reasoningEffort??'high',promptBytes:Buffer.byteLength(prompt),toolCalls:0,turns:0,inputTokens:0,cachedInputTokens:0,outputTokens:0,reasoningTokens:0};
   const child=spawn(executable,['exec','--skip-git-repo-check','-C',root,'-m',cfg.model,'-c','model_reasoning_effort='+JSON.stringify(cfg.reasoningEffort??'high'),'-c','approval_policy='+JSON.stringify(cfg.approvalPolicy??'on-request'),'-s',cfg.sandbox??'workspace-write','--json','-'],{cwd:root,windowsHide:true,stdio:['pipe','pipe','pipe']});
   // Source content and process output are kept in the existing encrypted archive / Codex history.
   // Never forward arbitrary model output, private source text or credentials to a public response.
@@ -28,6 +29,8 @@ export function launchLuna({root,prompt,onExit}) {
     buffer+=chunk.toString();const lines=buffer.split('\n');buffer=lines.pop();
     for(const line of lines) {
       let entry;try{entry=JSON.parse(line);}catch{continue;}
+      if(entry.type==='item.completed'&&['command_execution','mcp_tool_call','web_search'].includes(entry.item?.type))metrics.toolCalls++;
+      if(entry.type==='turn.completed'){metrics.turns++;for(const [field,key] of [['inputTokens','input_tokens'],['cachedInputTokens','cached_input_tokens'],['outputTokens','output_tokens'],['reasoningTokens','reasoning_output_tokens']]){const value=entry.usage?.[key];if(Number.isSafeInteger(value)&&value>=0)metrics[field]+=value;}}
       if(entry.type==='error'||entry.type==='turn.failed') {
         const message=JSON.stringify(entry).toLowerCase();
         errorNote=/401|unauthor|login|authentication/.test(message)?'ChatGPT eller en tilkoblet konto krever ny innlogging.':/429|limit|quota/.test(message)?'ChatGPT-bruksgrensen er nådd.':/not supported|model_not_found/.test(message)?'Denne ChatGPT-runtime støtter ikke den valgte Luna-modellen.':'Luna-kjøringen rapporterte en feil. Se kjøringshistorikken i ChatGPT.';
@@ -36,7 +39,7 @@ export function launchLuna({root,prompt,onExit}) {
     if(buffer.length>1000000)buffer='';
   });child.stderr.resume();
   let ended=false;
-  const finish=code=>{if(!ended){ended=true;onExit(code,errorNote);}};
+  const finish=code=>{if(!ended){ended=true;onExit(code,errorNote,{...metrics,elapsedMs:Date.now()-startedAt});}};
   child.on('error',()=>finish(-1));child.on('close',finish);
   child.stdin.on('error',()=>{});child.stdin.end(prompt);
   return child;

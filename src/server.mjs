@@ -124,6 +124,14 @@ async function handle(req, res) {
       return send(res,405,{error:'Ukjent Sesum-operasjon.'});
     }
     if(path==='/shopping-setup'&&method==='GET')return send(res,200,readFileSync(join(root,'public','shopping-setup.html')),'text/html; charset=utf-8');
+    if(path==='/api/shopping/agent-context'&&method==='POST'){
+      if(req.headers['x-family-request']!=='1')return send(res,403,{error:'Ugyldig avsender.'});
+      return send(res,200,store.shopping.agentContext(await json(req)));
+    }
+    if(path==='/api/shopping/agent-placement'&&method==='POST'){
+      if(req.headers['x-family-request']!=='1')return send(res,403,{error:'Ugyldig avsender.'});
+      return send(res,200,store.shopping.agentPlacement(await json(req)));
+    }
     if(path==='/api/shopping/market-refresh-plan'&&method==='GET')return send(res,200,{watchIds:shoppingMaintenance.marketPlan()});
     if(path==='/api/shopping/market-refresh'&&method==='POST'){
       if(req.headers['x-family-request']!=='1')return send(res,403,{error:'Ugyldig avsender.'});
@@ -507,7 +515,7 @@ servers.push(createServer((req,res) => {
     if(req.method==='POST'&&/^\/api\/shopping\/(?:stock-action|stock-scan|stock-intake(?:\/[a-f0-9-]{36}\/(?:submit|files\/[0-7]))?)$/.test(kioskStock))return handle(req,res);
     return send(res,req.method==='GET'?403:405,{error:'Gjennomgang og bildeoriginaler er bare tilgjengelige på agentporten.'});
   }
-  if(/^\/(?:api\/(?:resources|collector|google)(?:[/?]|$)|google-setup|shopping-setup|api\/shopping\/oda\/(?:connect|callback|tools|refresh(?:-plan)?)|api\/shopping\/(?:sesum\/|market-refresh|orders|settings|offer|review|nutrition|catalog|link|feed|library-))/.test(req.url))return send(res,req.method==='GET'?403:405,{error:'Kildeoriginaler og integrasjonsoppsett er bare tilgjengelige lokalt på agentporten.'});
+  if(/^\/(?:api\/(?:resources|collector|google)(?:[/?]|$)|google-setup|shopping-setup|api\/shopping\/oda\/(?:connect|callback|tools|refresh(?:-plan)?)|api\/shopping\/(?:sesum\/|agent-(?:context|placement)|market-refresh|orders|settings|offer|review|nutrition|catalog|link|feed|library-))/.test(req.url))return send(res,req.method==='GET'?403:405,{error:'Kildeoriginaler og integrasjonsoppsett er bare tilgjengelige lokalt på agentporten.'});
   if (req.method !== "GET" && !(req.method === "POST" && /^(?:\/api\/shopping\/(?:watch|pantry|item|deal|list|oda\/(?:sync|search|add|cart|probe|review|line|swap))|\/api\/home-assistant\/command|\/api\/doorbell\/frame|\/api\/profile\/edit|\/api\/events\/[a-f0-9]{24}\/(?:tasks\/[a-zA-Z0-9:_-]{1,100}|visibility)|\/api\/activities\/[a-f0-9]{24}\/reaction)$/.test(new URL(req.url,`http://${host}`).pathname))) return send(res,405,{error:"Handlingen er bare tilgjengelig lokalt på agentporten."});
   return handle(req,res);
 }));

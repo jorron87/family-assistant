@@ -44,7 +44,7 @@ test('shopping wakes the shared dispatcher in its own scope and unfinished work 
   assert.doesNotThrow(()=>store.recordRun({scope:'kildeendringer',outcome:'ok',summary:'Independent source changes are complete'}));
   assert.equal(store.changeCompletion().complete,true,'source-change scope does not certify or drain unfinished shopping');
   const d=createIngestionDispatcher({store,root:dir,dataDir:dir,clock:()=>at,readConfig:()=>({enabled:true,minGapMinutes:0}),launch:input=>{calls.push(input);return {pid:process.pid};}});
-  d.tick();assert.equal(calls.length,1);assert.equal(d.status().workerScope,'handel');assert.match(calls[0].prompt,/shopping-product-review/);assert.match(calls[0].prompt,/completion.shopping/);
+  d.tick();assert.equal(calls.length,1);assert.equal(d.status().workerScope,'handel');assert.match(calls[0].prompt,/shopping-review/);assert.doesNotMatch(calls[0].prompt,/HELE den konkrete ingredienslisten/);assert.match(calls[0].prompt,/completion.shopping/);
   store.shopping.review({storeId:'shop',status:'ok',evidence:'Gjennomgått alle sider i syntetisk avis',sourceUrl:'https://example.com/flyer',nextCheck:'2099-01-01'});
   store.recordRun({scope:'handel',outcome:'ok',summary:'Handel ferdig'});calls[0].onExit(0);assert.equal(store.snapshot().runLease,null);d.tick();assert.equal(calls.length,1);
   assert.equal(store.completionReport().shopping.complete,true);assert.equal(store.completionReport().complete,false,'shopping scope does not certify school coverage');

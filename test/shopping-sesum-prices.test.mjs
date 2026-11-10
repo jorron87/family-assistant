@@ -7,6 +7,8 @@ import {shoppingStore} from '../src/shopping.mjs';
 import {libraryPriceProvider} from '../src/shopping-library.mjs';
 import {productMetadataFingerprint,groupMetadataFingerprint} from '../src/product-library.mjs';
 import {sesumDonorFingerprint} from '../src/sesum-prices.mjs';
+import {agentManifest} from '../src/shopping-agent-context.mjs';
+import {shoppingAgentBatch} from '../src/shopping-agent-jobs.mjs';
 
 const NOW='2026-11-09T12:00:00Z';
 function setup(t,{donorStore='KIWI'}={}) {
@@ -31,6 +33,25 @@ test('explorer family and offers share one reader snapshot, with no reuse across
  f.shop.explorer.family(f.g.id);const first=calls;assert.equal(first,1);
  f.shop.explorer.family(f.g.id);assert.equal(calls,first+1);
  calls=0;f.shop.explorer.offers();assert.equal(calls,1);
+});
+
+test('agent context uses actual catalogue facts and only current saved receipts enable faster continuation',t=>{
+ const f=setup(t);f.ingest();const rows=f.shop.queue().filter(i=>i.do==='shopping-sesum-placement-review'),batch=shoppingAgentBatch(rows),manifest=agentManifest(batch),started=Date.parse(NOW);
+ const context=f.shop.agentContext(manifest);assert.equal(context.families.length,1);assert.equal(context.sources.length,1);assert.equal(context.sources[0].observation.source.name,f.p.name);assert.equal(f.shop.agentProgressSince(batch,started),false);
+ const data=f.shop.sesumPlacement(rows[0].sourceKey),source=data.items[0],family=data.families[0];
+ f.shop.sesumPriceReview({kind:'placement',sourceKey:source.sourceKey,sourceFingerprint:source.sourceFingerprint,registrationFingerprint:source.registrationFingerprint,familySetFingerprint:data.familySetFingerprint,status:'reviewed',reviewedAllFamilies:true,scopeEvidence:'Read the complete actual family requirements and original whole-bean package evidence.',evidence:'The exact whole roasted coffee bean product meets this household family.',targets:[{familyId:family.familyId,familyFingerprint:family.familyFingerprint,equivalenceEvidence:'Reviewed whole roasted beans, plain use and documented fixed 500g pack.'}]});
+ assert.equal(f.shop.agentProgressSince(batch,started),true);assert.equal(f.shop.agentProgressSince(batch,started+1),false);
+ f.p.name='Changed ground coffee 500g';f.ingest();assert.equal(f.shop.agentProgressSince(batch,started),false,'changed source metadata invalidates an old successful receipt');
+});
+
+test('agent decision batch prevalidates every source and rejects a stale context before writes',t=>{
+ const f=setup(t);f.ingest();f.ingest(25,NOW,'COOP_EXTRA');
+ const assignment=agentManifest(shoppingAgentBatch(f.shop.queue().filter(i=>i.do==='shopping-sesum-placement-review'))),packet=f.shop.agentContext(assignment);assert.equal(packet.sources.length,2);
+ const decisions=packet.sources.map((s,sourceIndex)=>({sourceIndex,status:'reviewed',reviewedAllFamilies:true,evidence:'Original whole-bean product label reviewed against family criteria.',scopeEvidence:'Read every active family and the exact whole-bean label and package.',targets:[{familyIndex:0,equivalenceEvidence:'Same plain roasted whole beans, use and fixed documented pack.'}]}));
+ const input={assignment,contextFingerprint:packet.contextFingerprint,decisions};
+ assert.throws(()=>f.shop.agentPlacement({...input,decisions:[decisions[0],{...decisions[1],targets:[{familyIndex:999}]}]}),/family index/);assert.equal(Object.keys(f.state.shopping.sesumPlacementReviews).length,0);
+ assert.equal(f.shop.agentPlacement(input).saved,2);assert.equal(Object.keys(f.state.shopping.sesumPlacementReviews).length,2);
+ assert.throws(()=>f.shop.agentPlacement(input),/context changed/);assert.equal(Object.keys(f.state.shopping.sesumPlacementReviews).length,2);
 });
 
 test('all followed families enter the manifest and price observations require an explicit bridge',t=>{

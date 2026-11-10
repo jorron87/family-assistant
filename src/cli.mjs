@@ -6,6 +6,8 @@ import { activityCoverage, validateActivityRun } from './activity-coverage.mjs';
 import { readJsonArg, slimCompletion, slimReviewQueue, slimResult, slimProfile, slimPhone, buildNext, shoppingOverview } from './cli-lib.mjs';
 import { filterShoppingWork } from './shopping-work-batch.mjs';
 import { shoppingAgentBatch } from './shopping-agent-jobs.mjs';
+import {shoppingProtocol} from './shopping-agent-protocol.mjs';
+import {agentManifest,agentContextPages} from './shopping-agent-context.mjs';
 
 const base = process.env.FAMILIEN_API ?? "http://127.0.0.1:4318";
 const rawArgs = process.argv.slice(2);
@@ -78,6 +80,21 @@ async function execute(command, args, flags) {
     case 'shopping-sesum-catalog': result=await request('/api/shopping/sesum/catalog'+(args[0]?'?familyId='+encodeURIComponent(args[0]):''));break;
     case 'shopping-sesum-review': result=await request('/api/shopping/sesum/review','POST',json(args[0]));break;
     case 'shopping-sesum-register': result=await request('/api/shopping/sesum/register','POST',json(args[0]));break;
+    case 'shopping-agent-guide': result={instructions:shoppingProtocol(args)};break;
+    case 'shopping-agent-context': {
+      const assignment=args[0]?json(args[0]):agentManifest((await request('/api/ingestion/dispatcher')).shoppingBatch??{jobs:[]});
+      const packet=await request('/api/shopping/agent-context','POST',assignment),contextFile=outputPath('tmp/agent/contexts/'+packet.contextFingerprint+'.json');
+      writeFileSync(contextFile,JSON.stringify({assignment,packet}),'utf8');
+      result={contextFile,contextFingerprint:packet.contextFingerprint,assignmentChanges:packet.assignmentChanges,activeStagesEmpty:packet.activeStagesEmpty,completionAuthority:packet.completionAuthority,pages:Object.fromEntries(Object.entries(agentContextPages(packet)).map(([section,pages])=>[section,pages.length])),next:packet.assignmentChanges.length?'Checkpoint this changed assignment; obtain a new assignment before writes.':'Read every required page with shopping-agent-page FILE SECTION PAGE (zero-based). Decide using sourceIndex/familyIndex; shopping-agent-decide FILE DECISIONS_FILE binds current fingerprints in code.'};break;
+    }
+    case 'shopping-agent-page': {
+      const {packet}=json(args[0]),pages=agentContextPages(packet)[args[1]],page=Number(args[2]??0);
+      if(!pages||!Number.isInteger(page)||page<0||page>=pages.length)throw Error('Select an existing zero-based context page.');
+      result={section:args[1],page,totalPages:pages.length,...pages[page]};break;
+    }
+    case 'shopping-agent-decide': {
+      const {assignment,packet}=json(args[0]);result=await request('/api/shopping/agent-placement','POST',{assignment,contextFingerprint:packet.contextFingerprint,decisions:json(args[1])});break;
+    }
     case 'shopping-jobs': {
       const queue=await request('/api/shopping/queue');
       const automaticMarket=await request('/api/shopping/market-refresh-plan'),marketIds=new Set(automaticMarket.watchIds);
