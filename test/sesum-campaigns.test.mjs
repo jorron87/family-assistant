@@ -98,3 +98,63 @@ test('a noncampaign receipt is not turned into a campaign by manual review alone
   const f=fixture();f.campaign.receipt.promotion=null;f.campaign.receipt.isPromo=false;
   assert.throws(()=>validateCampaignOffer(f),/no current campaign/);
 });
+
+function lastSecondFixture({day='2026-11-15',end='2026-11-15T22:59:59Z',from='2026-11-09'}={}){
+  const f=fixture(),read=day+'T11:00:00Z';
+  f.now=new Date(day+'T12:00:00Z');f.offer.observedAt=read;f.sourceReceipts[0].observedAt=read;f.campaign.receipt.observedAt=read;
+  f.offer.validFrom=from;f.offer.validTo=day;f.campaign.receipt.promotion.valid_from=from+'T00:00:00Z';f.campaign.receipt.promotion.valid_until=end;
+  f.termsEvidence.period='Read the actual primary announced inclusive calendar days '+from+' through '+day+', including the final local day.';
+  f.inclusiveEndOfDayVerified=true;return f;
+}
+
+test('a separately verified final local second permits the announced winter final day without changing the default exclusive rule',()=>{
+  const f=lastSecondFixture();delete f.inclusiveEndOfDayVerified;
+  assert.throws(()=>validateCampaignOffer(f),/period/,'23:59:59 is still exclusive when the explicit review is omitted');
+  f.inclusiveEndOfDayVerified=true;const proof=validateCampaignOffer(f);assert.equal(proof.inclusiveEndOfDayVerified,true);assert.equal(f.campaign.receipt.promotion.valid_until,'2026-11-15T22:59:59Z','validation must preserve the actual raw source timestamp');
+  f.offer.validTo='2026-11-16';assert.throws(()=>validateCampaignOffer(f),/period/,'the explicit review never adds a second advertised calendar day');
+});
+
+test('the verified last second follows Oslo summer time and both DST transition days',()=>{
+  const cases=[
+    {day:'2026-07-15',from:'2026-07-13',end:'2026-07-15T21:59:59Z',local:'2026-07-15T23:59:59+02:00'},
+    {day:'2026-03-29',from:'2026-03-23',end:'2026-03-29T21:59:59Z',local:'2026-03-29T23:59:59+02:00'},
+    {day:'2026-10-25',from:'2026-10-19',end:'2026-10-25T22:59:59Z',local:'2026-10-25T23:59:59+01:00'}
+  ];
+  for(const c of cases){
+    const f=lastSecondFixture(c);f.campaign.receipt.promotion.endsAt=c.local;assert.doesNotThrow(()=>validateCampaignOffer(f),c.day+' is one whole advertised local day even when its length changes');
+    delete f.inclusiveEndOfDayVerified;assert.throws(()=>validateCampaignOffer(f),/period/,c.day+' retains the default conservative exclusive interpretation');
+  }
+});
+
+test('equivalent last-second aliases and raw all-zero fractions agree, while different or non-final aliases remain unresolved',()=>{
+  for(const suffix of ['Z','.0Z','.000Z','.000000Z']){
+    const f=lastSecondFixture({end:'2026-11-15T22:59:59'+suffix});f.campaign.receipt.promotion.endsAt='2026-11-15T23:59:59.000000+01:00';f.campaign.receipt.promotion.endDate='2026-11-15';assert.doesNotThrow(()=>validateCampaignOffer(f),suffix);
+  }
+  for(const conflicting of ['2026-11-14','2026-11-16','2026-11-14T22:59:59Z','2026-11-16T00:00:00+01:00','2026-11-15T12:00:00Z']){
+    const f=lastSecondFixture();f.campaign.receipt.promotion.endsAt=conflicting;assert.throws(()=>validateCampaignOffer(f),conflicting+' cannot be hidden behind another valid end alias');
+  }
+});
+
+test('only literal true with at least one actual timestamped campaign end can supply the inclusive review',()=>{
+  for(const value of [false,'true','false',null,0,1,{},[]]){const f=lastSecondFixture();f.inclusiveEndOfDayVerified=value;assert.throws(()=>validateCampaignOffer(f),'invalid flag '+JSON.stringify(value));}
+  for(const value of [undefined,null,'','2026-11-15']){
+    const f=lastSecondFixture();if(value===undefined)delete f.campaign.receipt.promotion.valid_until;else f.campaign.receipt.promotion.valid_until=value;
+    assert.throws(()=>validateCampaignOffer(f),'an absent, empty or date-only end does not prove an actual last second');
+  }
+  const ordinary=lastSecondFixture();delete ordinary.inclusiveEndOfDayVerified;ordinary.campaign.receipt.promotion.valid_until='2026-11-15';assert.doesNotThrow(()=>validateCampaignOffer(ordinary),'omitting the new optional review preserves the ordinary date-only contract');
+});
+
+test('raw submillisecond fractions and times before the exact final local second never round into a whole final day',()=>{
+  for(const end of ['2026-11-15T22:59:59.001Z','2026-11-15T22:59:59.0001Z','2026-11-15T22:59:59.000001Z','2026-11-15T23:59:59.0000001+01:00','2026-11-15T22:59:58Z','2026-11-15T12:00:00Z','2026-11-15T00:00:00Z','2026-11-16T00:00:00+01:00']){
+    const f=lastSecondFixture({end});assert.throws(()=>validateCampaignOffer(f),end);
+  }
+  const midnight=fixture();assert.doesNotThrow(()=>validateCampaignOffer(midnight),'the existing exclusive midnight receipt still supports only its actually bounded previous final day');
+  midnight.inclusiveEndOfDayVerified=true;assert.throws(()=>validateCampaignOffer(midnight),'midnight cannot be relabelled as a final-second receipt');
+});
+
+test('verifying the final second never replaces the six primary terms or an actual fresh non-Sesum read',()=>{
+  for(const field of ['price','period','membership','customerLimit','bundle','conditions']){const f=lastSecondFixture();delete f.termsEvidence[field];assert.throws(()=>validateCampaignOffer(f),field+' still needs actual primary evidence');}
+  const unverified=lastSecondFixture();unverified.conditionsVerified=false;assert.throws(()=>validateCampaignOffer(unverified));
+  const stale=lastSecondFixture();stale.sourceReceipts[0].observedAt='2026-11-12T11:00:00Z';assert.throws(()=>validateCampaignOffer(stale),/48 hours/);
+  const aggregator=lastSecondFixture();aggregator.sourceReceipts[0].url='https://www.sesum.no/produkt/100-synthetic';assert.throws(()=>validateCampaignOffer(aggregator),/primary/);
+});

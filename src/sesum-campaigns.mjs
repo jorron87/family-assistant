@@ -94,16 +94,27 @@ function equalKnown(values,label){
   if(known.some(value=>value!==known[0]))throw Error(`Contradictory campaign ${label}.`);
   return known[0]??null;
 }
-function periodOf(promotion){
-  const starts=[],ends=[],exclusiveEnds=[];
+function periodOf(promotion,{inclusiveEndOfDayVerified=false}={}){
+  const starts=[],ends=[],exclusiveEnds=[];let timestampEnds=0;
   for(const key of START_KEYS)if(present(promotion[key])){
     const value=promotion[key];starts.push(typeof value==='string'&&/^\d{4}-\d\d-\d\d$/.test(value)?date(value,key):osloDay(timestamp(value,key)));
   }
   for(const key of END_KEYS)if(present(promotion[key])){
     const value=promotion[key];
     if(typeof value==='string'&&/^\d{4}-\d\d-\d\d$/.test(value))ends.push(date(value,key));
-    else{const at=timestamp(value,key);exclusiveEnds.push(at);ends.push(addDays(osloDay(at),-1));}
+    else{
+      const at=timestamp(value,key);timestampEnds++;
+      if(inclusiveEndOfDayVerified){
+        const local=osloParts(at),fraction=value.match(/\.(\d+)(?:Z|[+-]\d\d:\d\d)$/)?.[1];
+        // This is a manual primary-source attestation of the advertised final
+        // day, never a generic rounding of arbitrary timestamp boundaries.
+        // Check raw sub-millisecond digits too: Date.parse truncates them.
+        if(local.hour!==23||local.minute!==59||local.second!==59||at%1000!==0||fraction&&/[1-9]/.test(fraction))throw Error('Inclusive campaign ends require the exact whole last second 23:59:59.000 in Europe/Oslo.');
+        exclusiveEnds.push(at+1000);ends.push(osloDay(at));
+      }else{exclusiveEnds.push(at);ends.push(addDays(osloDay(at),-1));}
+    }
   }
+  if(inclusiveEndOfDayVerified&&!timestampEnds)throw Error('Inclusive end-of-day verification requires a supplied timestamped campaign end.');
   const start=equalKnown(starts,'start dates'),end=equalKnown(ends,'end dates');
   if(start&&end&&end<start)throw Error('Contradictory campaign period.');
   return {start,end,exclusiveEnds};
@@ -112,7 +123,7 @@ function periodOf(promotion){
 /** Validate an agent's explicitly evidenced campaign review. Evidence is a
  * trusted manual decision, not an automatic proof from a name, EAN, paid receipt
  * or empty source field. Household membership/variant checks belong to caller. */
-export function validateCampaignOffer({campaign,offer,chainCode,conditionsVerified,termsEvidence,sourceReceipts,now=new Date()}={}){
+export function validateCampaignOffer({campaign,offer,chainCode,conditionsVerified,termsEvidence,sourceReceipts,inclusiveEndOfDayVerified,now=new Date()}={}){
   const c=context(campaign),p=c.promotion??{},at=new Date(now).getTime();
   if(!Number.isFinite(at))throw Error('Invalid campaign review time.');
   if(c.receipt.isPromo!==true&&c.promotion===null)throw Error('The source has no current campaign to review.');
@@ -122,6 +133,7 @@ export function validateCampaignOffer({campaign,offer,chainCode,conditionsVerifi
   if(typeof offer.memberOnly!=='boolean'||!Number.isSafeInteger(offer.bundlePacks)||offer.bundlePacks<1||offer.maxPacks!==null&&(!Number.isSafeInteger(offer.maxPacks)||offer.maxPacks<1))throw Error('Explicit offer membership, customer limit and bundle terms are required.');
   if(offer.maxPacks!==null&&offer.maxPacks<offer.bundlePacks)throw Error('The customer cap cannot be lower than the required campaign bundle.');
   if(typeof offer.conditions!=='string'||offer.conditions.length>1000)throw Error('Invalid ordinary offer conditions.');
+  if(inclusiveEndOfDayVerified!==undefined&&inclusiveEndOfDayVerified!==true)throw Error('Inclusive end-of-day verification must be the explicit value true or omitted.');
   if(conditionsVerified!==true)throw Error('Campaign conditions require explicit verification.');
   if(!plain(termsEvidence)||Object.keys(termsEvidence).some(key=>!EVIDENCE_KEYS.includes(key)))throw Error('Six explicit campaign evidence fields are required.');
   const evidence=Object.fromEntries(EVIDENCE_KEYS.map(key=>[key,text(termsEvidence[key],`${key} evidence`)]));
@@ -138,10 +150,11 @@ export function validateCampaignOffer({campaign,offer,chainCode,conditionsVerifi
   const latestRead=Math.max(...primary.map(receipt=>Date.parse(receipt.observedAt))),observed=timestamp(offer.observedAt,'actual offer observation');
   if(observed>latestRead||at-observed>HOURS_48)throw Error('Offer observation must be fresh and cannot be newer than the actual primary read.');
   https(offer.sourceUrl);
-  const from=date(offer.validFrom,'offer start date'),to=date(offer.validTo,'offer end date'),period=periodOf(p);
+  const from=date(offer.validFrom,'offer start date'),to=date(offer.validTo,'offer end date'),period=periodOf(p,{inclusiveEndOfDayVerified:inclusiveEndOfDayVerified===true});
   if(to<from||osloMidnight(addDays(to,1))<=at)throw Error('Invalid or expired offer period.');
   // Announced start days use the ordinary day model and explicit primary proof.
-  // Timestamp ends are exclusive: the whole advertised final local day must fit.
+  // Timestamp ends remain exclusive unless a separately verified exact final
+  // second supplied the narrow inclusive end-of-day boundary above.
   if(period.start&&from<period.start||period.end&&to>period.end||period.exclusiveEnds.some(end=>osloMidnight(addDays(to,1))>end))throw Error('Offer period broadens the supplied campaign period.');
   const membership=equalKnown(['memberOnly','member_only'].map(key=>{
     if(!present(p[key]))return null;if(typeof p[key]!=='boolean')throw Error('Unresolved campaign membership.');return p[key];
@@ -158,5 +171,5 @@ export function validateCampaignOffer({campaign,offer,chainCode,conditionsVerifi
   if(bundlePrice!==null&&!sameMoney(offer.price*offer.bundlePacks,bundlePrice))throw Error('Effective package price and bundle quantity contradict the campaign total.');
   if(p.conditions!=null&&typeof p.conditions!=='string')throw Error('Unresolved campaign conditions.');
   if((typeof p.conditions==='string'&&p.conditions.trim()||membership===true||limit!==null||offer.bundlePacks>1||payFor!==null)&&!String(offer.conditions??'').trim())throw Error('Campaign restrictions must be preserved in offer conditions.');
-  return {campaignFingerprint:campaignFingerprint(campaign),offerTermsFingerprint:offerTermsFingerprint(offer,chainCode),conditionsVerified:true,termsEvidence:evidence,sourceReceipts:receipts.map(({primary,...receipt})=>receipt),latestPrimaryReadAt:new Date(latestRead).toISOString(),reviewedAt:new Date(at).toISOString()};
+  return {campaignFingerprint:campaignFingerprint(campaign),offerTermsFingerprint:offerTermsFingerprint(offer,chainCode),conditionsVerified:true,termsEvidence:evidence,sourceReceipts:receipts.map(({primary,...receipt})=>receipt),latestPrimaryReadAt:new Date(latestRead).toISOString(),reviewedAt:new Date(at).toISOString(),...(inclusiveEndOfDayVerified===true?{inclusiveEndOfDayVerified:true}:{})};
 }

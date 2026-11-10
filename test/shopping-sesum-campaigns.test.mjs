@@ -32,7 +32,7 @@ function setup(t){
   const work=()=>shop.queue().filter(item=>item.do==='shopping-sesum-offer-review');
   const signal=()=>changeSignal({snapshot:()=>({rawItems:{},events:{}}),reviewQueue:()=>({items:[]}),completionReport:()=>({profileReviews:[],missingDrive:[],unsyncedCalendar:[]}),activityFacebook:()=>[],activityFeedStatus:()=>({changedPages:[]}),shopping:{queue:work}});
   const item=()=>shop.familyView().items.find(item=>item.id===w.id);
-  return {state,clock,shop,w,p,g,alternative,data,link,ingest,approve,row,primary,offer,review,work,signal,item};
+  return {state,clock,shop,w,p,g,alternative,data,provider,link,ingest,approve,row,primary,offer,review,work,signal,item};
 }
 
 test('an expiry resolution cannot close a known active campaign or invent an unknown final day',t=>{
@@ -225,4 +225,47 @@ test('campaign lifecycle changes never rewrite earlier actual purchases or count
   const purchases=structuredClone(f.state.shopping.purchases),stock={amount:f.state.shopping.watches[f.w.id].stockAmount,at:f.state.shopping.watches[f.w.id].stockCheckedAt};
   f.clock.at='2026-11-11T12:00:00Z';f.ingest();f.approve();f.review();f.clock.at='2026-11-11T12:01:00Z';f.ingest({promotion:{...PROMOTION,price:11}});
   assert.deepEqual(f.state.shopping.purchases,purchases);assert.equal(f.state.shopping.watches[f.w.id].stockAmount,stock.amount);assert.equal(f.state.shopping.watches[f.w.id].stockCheckedAt,stock.at);
+});
+
+test('an explicitly verified last-second campaign registers an ordinary final-day offer and preserves its review across restart',t=>{
+  const f=setup(t);f.ingest({promotion:{...PROMOTION,valid_until:'2026-11-15T22:59:59Z'}});f.approve();
+  const before=structuredClone(f.state.shopping);assert.throws(()=>f.review(),/period/);assert.deepEqual(f.state.shopping,before,'omitting the new explicit proof keeps the conservative final-day rejection atomic');
+  const result=f.review({inclusiveEndOfDayVerified:true});assert.equal(result.inclusiveEndOfDayVerified,true);assert.equal(f.row().status,'registered');assert.equal(f.work().length,0);
+  const stored=f.state.shopping.offers[result.offerId],review=f.state.shopping.sesumOfferReviews[SOURCE+'\0'+f.w.id];
+  assert.equal(stored.validFrom,'2026-11-09');assert.equal(stored.validTo,'2026-11-15');assert.equal(stored.price,10);assert.equal(stored.packAmount,.5);assert.equal(review.inclusiveEndOfDayVerified,true);assert.equal(f.item().prices.current,20);
+  assert.ok(f.shop.sesumCandidates().find(row=>row.sourceKey===SOURCE).price.reasons.includes('unverified-promotion-conditions'),'the campaign review never reclassifies its paid source receipt as an ordinary current price');
+  const saved=JSON.parse(JSON.stringify(f.state)),restarted=shoppingStore(saved,{save(){},now:()=>new Date(f.clock.at),libraryPrices:f.provider});
+  assert.equal(restarted.sesumOfferCandidates(f.w.id).items.find(row=>row.sourceKey===SOURCE).status,'registered');assert.equal(saved.shopping.sesumOfferReviews[SOURCE+'\0'+f.w.id].inclusiveEndOfDayVerified,true);assert.equal(saved.shopping.offers[result.offerId].validTo,'2026-11-15');
+  assert.equal(restarted.familyView().items.find(row=>row.id===f.w.id).prices.current,20);assert.equal(saved.shopping.watches[f.w.id].stockAmount,before.watches[f.w.id].stockAmount);assert.deepEqual(saved.shopping.purchases,before.purchases);
+});
+
+test('invalid inclusive reviews cannot create an ordinary offer or partial acknowledgement',t=>{
+  const cases=[
+    {flag:false},{flag:'true'},{flag:null},{flag:1},
+    {flag:true,end:'2026-11-16T00:00:00Z'},
+    {flag:true,end:'2026-11-15T12:00:00Z'},
+    {flag:true,end:'2026-11-15T22:59:58Z'},
+    {flag:true,end:'2026-11-15T22:59:59.0000001Z'},
+    {flag:true,end:'2026-11-15'},
+    {flag:true,noEnd:true},
+    {flag:true,conflictingAlias:'2026-11-16'}
+  ];
+  for(const c of cases){
+    const f=setup(t),promotion={...PROMOTION,valid_until:c.end??'2026-11-15T22:59:59Z'};if(c.noEnd)delete promotion.valid_until;if(c.conflictingAlias)promotion.endsAt=c.conflictingAlias;
+    f.ingest({promotion});f.approve();const before=structuredClone(f.state.shopping);
+    assert.throws(()=>f.review({inclusiveEndOfDayVerified:c.flag}),JSON.stringify(c));
+    assert.equal(Object.keys(f.state.shopping.offers).length,0);assert.equal(Object.keys(f.state.shopping.sesumOfferReviews).length,0);assert.deepEqual(f.state.shopping,before,'failed inclusive proof leaves offers, acknowledgements, purchases and stock unchanged');assert.equal(f.row().status,'pending');
+  }
+});
+
+test('the explicit final-second review still requires actual primary terms before an offer is committed',t=>{
+  for(const change of [
+    f=>({conditionsVerified:false}),
+    f=>({termsEvidence:{...termsEvidence,period:''}}),
+    f=>({sourceReceipts:[f.primary({url:'https://www.sesum.no/produkt/71-synthetic-whole-beans-500g'})]}),
+    f=>({sourceReceipts:[f.primary({observedAt:'2026-11-08T11:00:00Z'})]})
+  ]){
+    const f=setup(t);f.ingest({promotion:{...PROMOTION,valid_until:'2026-11-15T22:59:59Z'}});f.approve();const before=structuredClone(f.state.shopping);
+    assert.throws(()=>f.review({inclusiveEndOfDayVerified:true,...change(f)}));assert.deepEqual(f.state.shopping,before);assert.equal(Object.keys(f.state.shopping.offers).length,0);assert.equal(f.row().status,'pending');
+  }
 });

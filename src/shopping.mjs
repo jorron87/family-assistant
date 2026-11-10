@@ -1603,6 +1603,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   }
   function sesumOfferReview(input){
     if(!input||!['registered','not-actionable','blocked'].includes(input.status))throw Error('Ugyldig Sesum-tilbudsvurdering.');
+    if(input.inclusiveEndOfDayVerified!==undefined&&(input.inclusiveEndOfDayVerified!==true||input.status!=='registered'))throw Error('Inkludert sluttdag krever uttrykkelig true ved registrering av primærbekreftet tilbud.');
     const context=sesumCampaignContexts().get(campaignKey(input.sourceKey,input.familyId));
     if(!context||input.sourceFingerprint!==context.sourceFingerprint||input.familyFingerprint!==context.familyFingerprint||input.campaignFingerprint!==context.campaignFingerprint)throw Error('Sesum-kampanjen, varen eller familiens godkjenning er endret; les gjeldende belegg.');
     if(typeof input.evidence!=='string'||input.evidence.length>6000||input.evidence.trim().length<10)throw Error('Konkret kampanjebelegg på 10–6000 tegn kreves.');
@@ -1616,8 +1617,9 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       const existing=s.offers[entry.id];
       if(existing?.sesumCampaign&&(existing.sesumCampaign.sourceKey!==context.sourceKey||existing.watchId!==context.familyId))throw Error('Tilbudet er allerede bundet til en annen Sesum-kilde eller varefamilie; bruk et eget externalId.');
       const store=s.settings.stores.find(s=>s.id===entry.storeId);
-      const proof=validateCampaignOffer({campaign:context,offer:entry,chainCode:store?.chainCode,conditionsVerified:input.conditionsVerified,termsEvidence:input.termsEvidence,sourceReceipts:input.sourceReceipts,now:now()});
+      const proof=validateCampaignOffer({campaign:context,offer:entry,chainCode:store?.chainCode,conditionsVerified:input.conditionsVerified,termsEvidence:input.termsEvidence,sourceReceipts:input.sourceReceipts,inclusiveEndOfDayVerified:input.inclusiveEndOfDayVerified,now:now()});
       record.offerId=entry.id;record.offerTermsFingerprint=offerTermsFingerprint(entry,store.chainCode);record.termsEvidence=proof.termsEvidence;record.sourceReceipts=proof.sourceReceipts;record.latestPrimaryReadAt=proof.latestPrimaryReadAt;
+      if(proof.inclusiveEndOfDayVerified===true)record.inclusiveEndOfDayVerified=true;
       entry={...entry,sesumCampaign:{sourceKey:context.sourceKey,sourceFingerprint:context.sourceFingerprint,familyFingerprint:context.familyFingerprint,campaignFingerprint:context.campaignFingerprint}};
     }else if(input.status==='blocked'){
       record.reason=required(input.reason,'Uavklart kampanjevilkår');
