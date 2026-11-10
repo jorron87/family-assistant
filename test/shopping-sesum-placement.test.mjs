@@ -10,14 +10,14 @@ import {productMetadataFingerprint,groupMetadataFingerprint} from '../src/produc
 
 const NOW='2026-11-10T12:00:00Z',SOURCE='sesum:KIWI:72';
 const definition=(id,name)=>({id,name,category:'Coffee',canonicalUnit:'kg',inclusionCriteria:'Plain whole roasted coffee beans with an explicitly verified organic declaration.',exclusions:['Ground coffee','Added flavourings'],qualityBasis:'Actual ingredients, whole-bean form and organic declaration',comparisonBasis:'Per kg'});
-function setup(t,{sourceName='New organic whole beans 500g'}={}){
+function setup(t,{sourceName='New organic whole beans 500g',onLibraryRead}={}){
   const dir=mkdtempSync(join(tmpdir(),'sesum-placement-'));t.after(()=>{if(!resolve(dir).startsWith(resolve(tmpdir(),'sesum-placement-')))throw Error('Unsafe test cleanup.');rmSync(dir,{recursive:true,force:true});});
   const A=definition('baseline-beans','Baseline organic whole beans'),B=definition('new-beans','New organic whole-bean variants');
   const p={productKey:'kassal:KIWI:71',source:'kassal',store:'KIWI',id:'71',name:'Baseline organic whole beans 500g',brand:'Baseline',ean:'1234567890123',ingredients:'Organic whole roasted coffee beans',description:'A reviewed plain organic roast',sourceUrl:'https://producer.example.test/baseline',canonicalPackAmount:.5,unit:'kg',packEvidence:'Read one actual fixed 500g bag.',rawPack:{weight:500,weightUnit:'g'},attributes:{organic:true},nutrition:null};p.metadataFingerprint=productMetadataFingerprint(p);
   const data={schemaVersion:1,createdAt:NOW,updatedAt:NOW,groups:[A],products:[p],memberships:[{groupId:A.id,productKey:p.productKey,status:'approved',reviewedFingerprint:p.metadataFingerprint,reviewedGroupFingerprint:groupMetadataFingerprint(A),equivalenceEvidence:'The actual plain organic whole beans match this group and brewing use.',qualityEvidence:'Read the full actual original ingredient declaration, form and organic label.',reviewedAt:NOW,sourceReceipts:[{url:p.sourceUrl,observedAt:NOW,evidence:'Read the original label and fixed 500g package.'}]}],prices:[{productKey:p.productKey,grossPackPrice:30,receiptAt:NOW,availabilityScope:'chain',sourceUrl:p.sourceUrl}]};
   const file=join(dir,'library.json'),write=()=>writeFileSync(file,JSON.stringify(data));write();
   let state={},shop;const clock={at:NOW};
-  const open=()=>{const provider=libraryPriceProvider(file,{now:()=>new Date(clock.at)});shop=shoppingStore(state,{save(){},now:()=>new Date(clock.at),libraryPrices:provider});};open();
+  const open=()=>{const provider=libraryPriceProvider(file,{now:()=>new Date(clock.at)});if(onLibraryRead){const read=provider.reader;provider.reader=()=>{onLibraryRead();return read();};}shop=shoppingStore(state,{save(){},now:()=>new Date(clock.at),libraryPrices:provider});};open();
   shop.settings({monitoringEnabled:true,stores:[{id:'kiwi',name:'KIWI',chainCode:'KIWI',url:'https://shop.example.test/kiwi',minSavings:0}]});
   const target=shop.watch({id:'target-beans',name:'Organic whole coffee beans',unit:'kg',storage:'pantry',purchaseAmount:10,stockAmount:2,targetPrice:50,note:'Plain whole roasted organic beans; accepted brands are Baseline and New.'});
   const wrong=shop.watch({id:'wrong-honey-hint',name:'Pure honey',unit:'kg',storage:'pantry',note:'Honey only; no coffee or added ingredients.'});
@@ -72,6 +72,32 @@ const identityWork=f=>f.shop.queue().filter(row=>row.sourceKey===SOURCE&&['shopp
 const noFamily=f=>f.review({status:'no-active-family',targets:[],noActiveFamilyVerified:true,
   reason:'The actual primary-labelled dishwashing brush is a cleaning tool, not honey, whole coffee beans or the exact litter formula.',
   scopeEvidence:'Read the complete current enabled family definitions, ingredient/form/organic/brand requirements and exact litter formula against the actual brush materials and use; no current need accepts this product.'});
+
+test('queue and completion each reuse one library snapshot without retaining it between invocations',t=>{
+  let reads=0;const f=setup(t,{onLibraryRead:()=>reads++});f.ingest();
+  reads=0;const queue=f.shop.queue();assert.equal(reads,1,'all derived work within one queue uses one base reader');
+  reads=0;const report=f.shop.completion();assert.equal(reads,1,'queue and blocked computations in completion share the same base reader');assert.deepEqual(report.work,queue);
+  reads=0;assert.deepEqual(f.shop.queue(),queue);assert.equal(reads,1,'a subsequent invocation must obtain a fresh reader');
+});
+
+test('shared completion reads preserve future blocked retries and notice due time and changed source facts on the next call',t=>{
+  const f=setup(t);f.ingest();f.review({status:'blocked',targets:[],reason:'The actual primary label is unreadable; its organic form remains unresolved.',retryAt:'2026-11-10T12:01:00Z'});
+  const before=f.shop.completion();assert.equal(f.work().length,0);assert.equal(before.blockedPlacements.length,1);assert.equal(before.complete,false);assert.equal(before.blockedPlacements[0].retryAt,'2026-11-10T12:01:00Z');
+  f.clock.at='2026-11-10T12:01:01Z';const due=f.shop.completion();assert.equal(due.blockedPlacements.length,1);assert.ok(due.work.some(row=>row.do==='shopping-sesum-placement-review'&&row.sourceKey===SOURCE));
+  f.ingest({changes:{name:'A materially changed actual ground-coffee variant 500g'}});const changed=f.shop.completion();assert.equal(changed.blockedPlacements.length,0);assert.ok(changed.work.some(row=>row.do==='shopping-sesum-placement-review'&&row.sourceKey===SOURCE&&row.status==='pending'));
+});
+
+test('a changed actual library group reopens placement between reads without reusing the preceding semantic snapshot',t=>{
+  const f=setup(t,{sourceName:'Dishwashing brush 500g'});f.ingest();noFamily(f);const before=f.shop.completion();assert.ok(!before.work.some(row=>row.do==='shopping-sesum-placement-review'&&row.sourceKey===SOURCE));
+  const fingerprint=f.placement().familySetFingerprint;f.data.groups[0].inclusionCriteria+=' Changed explicit household-relevant ingredient and form criteria.';f.write();
+  const after=f.shop.completion();assert.notEqual(f.placement().familySetFingerprint,fingerprint);assert.ok(after.work.some(row=>row.do==='shopping-sesum-placement-review'&&row.sourceKey===SOURCE));assert.equal(identityWork(f).length,1);assert.ok(after.work.some(row=>row.do==='shopping-family-build'&&row.reason==='group-changed'));
+});
+
+test('a failed queue read always discards its invocation context before a later read or metadata change',t=>{
+  let fail=false,reads=0;const f=setup(t,{sourceName:'Dishwashing brush 500g',onLibraryRead:()=>{reads++;if(fail)throw Error('Synthetic unavailable reader.');}});f.ingest();
+  fail=true;assert.throws(()=>f.shop.queue(),/Synthetic unavailable reader/);fail=false;reads=0;f.shop.queue();assert.equal(reads,1);
+  noFamily(f);assert.equal(identityWork(f).length,0);f.shop.watch({...f.target,note:'A newly specified actual form now requires explicit source research.'});reads=0;assert.ok(f.shop.queue().some(row=>row.do==='shopping-sesum-placement-review'&&row.sourceKey===SOURCE));assert.equal(reads,1,'the successful call after an error must not leave a persistent cache either');
+});
 
 test('a current whole-set no-family review removes redundant discovery from the actual queue without approving identity',t=>{
   const f=setup(t,{sourceName:'Dishwashing brush 500g'});f.ingest();assert.equal(identityWork(f).length,1);

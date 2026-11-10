@@ -192,15 +192,29 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   s.sesumPlacementTargets??={};
   s.sesumCatalogue??={};s.sesumCatalogueReviews??={};
   s.sesumOfferReviews??={};
+  // A synchronous queue/completion read shares one snapshot. Never keep this
+  // context between calls: receipts, fingerprints and retry deadlines can change.
+  let readContext=null;
+  function inReadContext(read){
+    if(readContext)return read();
+    readContext=new Map();try{return read();}finally{readContext=null;}
+  }
+  function readValue(key,read,args=[]){
+    if(!readContext)return read();
+    const prior=readContext.get(key);
+    if(prior&&prior.args.length===args.length&&args.every((arg,i)=>Object.is(arg,prior.args[i])))return prior.value;
+    const value=read();readContext.set(key,{args,value});return value;
+  }
+  const baseLibraryReader=()=>readValue('base-library-reader',()=>libraryPrices?.reader?.()??null);
   let sesumPrices;
-  const sesumCatalogue=createSesumCatalogue(s.sesumCatalogue,{save,now,horizonDays:()=>libraryPrices?.reader?.()?.horizonDays??183,knownOwnReceipts:source=>Object.values(s.sesumPrices.products??{}).filter(row=>row.source.id===source.id).map(row=>({source:row.source,price:row.receipt}))});
-  const discovery=createSesumDiscovery(s.sesumDiscovery,{save,now,reader:()=>libraryPrices?.reader?.()??null,source:key=>{const row=sesumPrices?.sourceRecord(key);return row&&sesumCatalogue.current(row.source)?row:null;}});
-  const reviewedReader=()=>discovery.overlay(libraryPrices?.reader?.()??null);
+  const sesumCatalogue=createSesumCatalogue(s.sesumCatalogue,{save,now,horizonDays:()=>baseLibraryReader()?.horizonDays??183,knownOwnReceipts:source=>Object.values(s.sesumPrices.products??{}).filter(row=>row.source.id===source.id).map(row=>({source:row.source,price:row.receipt}))});
+  const discovery=createSesumDiscovery(s.sesumDiscovery,{save,now,reader:baseLibraryReader,source:key=>{const row=sesumPrices?.sourceRecord(key);return row&&sesumCatalogue.current(row.source)?row:null;}});
+  const reviewedReader=()=>readValue('reviewed-library-reader',()=>discovery.overlay(baseLibraryReader()));
   sesumPrices=createSesumPrices(s.sesumPrices,{save,now,reader:reviewedReader,nativeEntries:()=>catalog.entries(),sourceCurrent:source=>sesumCatalogue.current(source)});
   const orders=()=>Object.values(s.orders);
   const freshPrice=(time,at=now().getTime())=>Number.isFinite(Date.parse(time))&&at-Date.parse(time)>=0&&at-Date.parse(time)<=48*3600000;
   const variablePack=name=>/(?:^|\s)ca\.?\s*\d|cirka|omtrent|vektvare|\b(?:pr|per)\.?\s*kg\b/i.test(name??'');
-  const libReader=()=>sesumPrices.overlay(reviewedReader());
+  const libReader=()=>readValue('library-reader',()=>sesumPrices.overlay(reviewedReader()));
   // Library groups lend products only to chains the family actually shops in;
   // short-dated and wholesale web shops stay out of everyday comparisons.
   const linkChains=()=>new Set(['ODA_NO',...s.settings.stores.filter(x=>x.chainCode&&!/nettbutikk/i.test(x.name)).map(x=>x.chainCode)]);
@@ -481,6 +495,9 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     return due.length?[{do:'shopping-market-refresh',groups:due.length,watchIds:due.map(w=>w.id).sort(),lastCheckedAt:due.map(w=>w.marketCalibration?.checkedAt).filter(Boolean).sort()[0]??null}]:[];
   }
   function queue() {
+    return inReadContext(queueInContext);
+  }
+  function queueInContext() {
     const routes=listRouteWork().map(e=>({do:'shopping-list-route',id:e.id,name:e.name,need:e.need,addedAt:e.addedAt,retryAt:e.routeRetryAt??null}));
     const stock=stockIntake.work().map(x=>({do:'shopping-stock-review',id:x.id,text:x.text,location:x.location,images:x.images.length,submittedAt:x.submittedAt,retryAt:x.retryAt}));
     if(!s.settings.monitoringEnabled)return [...stock,...routes];
@@ -492,6 +509,9 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     return [...stock,...catalog.pending().filter(p=>s.watches[p.watchId]?.enabled!==false&&!priceTooOld(p)&&!alreadyInFamily(p)).map(p=>({do:'shopping-product-review',watchId:p.watchId,watchName:s.watches[p.watchId]?.name,productId:p.id,store:p.store,name:p.name,fingerprint:p.fingerprint,sourceUrl:p.sourceUrl})),...feedWork(),...flyers,...marketRefreshDue(today),...sesumWork(),...sesumPlacementWork(),...sesumCatalogueWork(),...sesumFamilyWork(),...sesumOfferWork(),...libraryWork(),...listFamilyWork(),...unlinkedOrderLines(),...routes].map(named);
   }
   function completion() {
+    return inReadContext(completionInContext);
+  }
+  function completionInContext() {
     const work=queue(),familySetFingerprint=s.settings.monitoringEnabled?sesumPlacementFamilies().familySetFingerprint:null,blockedStores=s.settings.monitoringEnabled?s.settings.stores.filter(x=>s.reviews[x.id]?.status==='blocked').map(x=>({storeId:x.id,name:x.name,evidence:s.reviews[x.id].evidence,requiresRescan:flyerReviewState(x,familySetFingerprint).requiresRescan})):[];
     const blockedRoutes=[...s.shoppingList.filter(e=>!e.checkedAt&&(e.routing==='blocked'||e.cartError)).map(({id,name,reason,cartError})=>({id,name,reason:cartError??reason})),...stockIntake.blocked().map(x=>({id:x.id,name:'Lagertelling',reason:x.note}))];
     const blockedCampaigns=s.settings.monitoringEnabled?sesumOfferWork({all:true}).filter(item=>item.status==='blocked'):[];
@@ -1389,6 +1409,9 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     });
   }
   function sesumPlacementFamilies(){
+    return readValue('sesum-placement-families',buildSesumPlacementFamilies);
+  }
+  function buildSesumPlacementFamilies(){
     const reader=libReader();
     const families=Object.values(s.watches).filter(w=>w.enabled!==false).map(w=>{
       const variants=(w.variants??[]).map(link=>{const group=reader?.group(link.groupId);return {groupId:link.groupId,groupFingerprint:group?.fingerprint??null,reviewedGroupFingerprint:link.groupFingerprint,requires:[...(link.requires??[])].sort(),brands:[...(link.brands??[])].map(normalized).sort(),excludeProductKeys:[...(link.excludeProductKeys??[])].sort(),group:group?{name:group.name,unit:group.unit,inclusion:group.inclusion,exclusions:group.exclusions,comparisonBasis:group.comparisonBasis}:null};}).sort((a,b)=>a.groupId.localeCompare(b.groupId));
@@ -1412,6 +1435,9 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     return [...real,...sesumCatalogue.summaries().filter(source=>!source.parked&&!ids.has(sesumCatalogue.record(source.sourceKey).source.id))];
   }
   function sesumPlacement(sourceKey){
+    return readValue('sesum-placement',()=>buildSesumPlacement(sourceKey),[sourceKey]);
+  }
+  function buildSesumPlacement(sourceKey){
     const semantic=sesumPlacementFamilies(),reader=libReader(),research=sesumResearches(reader),chains=linkChains(),items=[];
     for(const source of sesumPlacementSubjects(reader,chains)){
       if(sourceKey&&source.sourceKey!==sourceKey)continue;
@@ -1520,10 +1546,16 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     return {...source,groups,registrationFingerprint};
   }
   function sesumResearches(reader=libReader()){
+    return readValue('sesum-researches',()=>buildSesumResearches(reader),[reader]);
+  }
+  function buildSesumResearches(reader){
     if(!reader)return new Map();
     return new Map(sesumPrices.approvedSources().map(source=>[source.sourceKey,sesumResearch(source,reader)]));
   }
   function sesumFamilyContexts(){
+    return readValue('sesum-family-contexts',buildSesumFamilyContexts);
+  }
+  function buildSesumFamilyContexts(){
     const reader=libReader(),sources=sesumResearches(reader),requirements=sesumRequirements(),native=catalog.entries(),semantic=sesumPlacementFamilies().families,result=[];
     if(!reader||!sources.size)return result;
     const nativeByKey=new Map(native.map(e=>[e.watchId+'\0'+catalogKey(e),e])),chains=linkChains(),membersByFamily=new Map(),exclusionsByFamily=new Map();
@@ -1550,6 +1582,9 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   }
   const campaignKey=(sourceKey,familyId)=>sourceKey+'\0'+familyId;
   function sesumCampaignContexts(){
+    return readValue('sesum-campaign-contexts',buildSesumCampaignContexts);
+  }
+  function buildSesumCampaignContexts(){
     const claimedSources=new Set(Object.values(s.offers).map(offer=>offer.sesumCampaign?.sourceKey).filter(Boolean));
     const reader=libReader(),requirements=sesumRequirements(),native=catalog.entries(),sources=[...sesumResearches(reader).values()].filter(source=>source.packAmount>0&&(source.receipt.isPromo===true||source.receipt.promotion!=null||claimedSources.has(source.sourceKey))),result=new Map();
     if(!reader)return result;
