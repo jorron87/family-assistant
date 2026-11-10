@@ -87,6 +87,13 @@ function decision(input) {
  }
  return result;
 }
+function reviewHold(input,fingerprint) {
+ if(input==null)return null;
+ if(!record(input)||input.fingerprint!==fingerprint)throw Error('Invalid catalog review hold.');
+ const openedAt=timestamp(input.openedAt,'review hold time');
+ if(!openedAt)throw Error('Review hold time is required.');
+ return {fingerprint,reason:text(input.reason,'review hold reason',4000,{required:true}),equivalenceEvidence:text(input.equivalenceEvidence,'equivalence evidence',4000,{required:true}),openedAt};
+}
 
 /**
  * Persistent, explicitly reviewed SKU/chain mappings. Source strings are bounded
@@ -118,13 +125,14 @@ export function createMarketCatalog(state,{now=()=>new Date(),save=()=>{}}={}) {
    if(identity(watchId,store,id)!==key)return null;
    const info=metadata(raw),fp=fingerprint(info);
    if(raw.fingerprint!==fp||!['pending','approved','excluded'].includes(raw.status))return null;
-   const review=raw.review==null?null:decision(raw.review),previousReview=raw.previousReview==null?null:decision(raw.previousReview);
+   const review=raw.review==null?null:decision(raw.review),previousReview=raw.previousReview==null?null:decision(raw.previousReview),hold=reviewHold(raw.reviewHold,fp);
    if(raw.status==='pending'?review!==null:!review||review.status!==raw.status||review.fingerprint!==fp)return null;
+   if(hold&&raw.status!=='pending')return null;
    const firstSeen=timestamp(raw.firstSeen,'first observation'),lastSeen=timestamp(raw.lastSeen,'last observation'),metadataObservedAt=timestamp(raw.metadataObservedAt,'metadata observation');
    if(!firstSeen||!lastSeen||!metadataObservedAt)return null;
    const pendingSince=raw.status==='pending'?timestamp(raw.pendingSince,'pending time'):null;
    if(raw.status==='pending'&&!pendingSince)return null;
-   return {version:VERSION,key,watchId,id,store,...info,fingerprint:fp,status:raw.status,firstSeen,lastSeen,metadataObservedAt,pendingSince,image:imageUrl(raw.image),query:text(raw.query,'query',500),currentPrice:number(raw.currentPrice,'current package price'),lastChecked:timestamp(raw.lastChecked,'actual price receipt'),review,previousReview};
+   return {version:VERSION,key,watchId,id,store,...info,fingerprint:fp,status:raw.status,firstSeen,lastSeen,metadataObservedAt,pendingSince,image:imageUrl(raw.image),query:text(raw.query,'query',500),currentPrice:number(raw.currentPrice,'current package price'),lastChecked:timestamp(raw.lastChecked,'actual price receipt'),review,previousReview,...(hold?{reviewHold:hold}:{})};
   }catch{return null;}
  }
  function snapshot(entry,at) {
@@ -165,7 +173,7 @@ export function createMarketCatalog(state,{now=()=>new Date(),save=()=>{}}={}) {
     }
    }
    const status=hasChanged?'pending':previous?.status??'pending';
-   staged.set(key,{version:VERSION,key,watchId,id,store,...info,fingerprint:fp,status,firstSeen:previous?.firstSeen??observedAt,lastSeen:observedAt,metadataObservedAt:observedAt,pendingSince:status==='pending'?(hasChanged?observedAt:previous?.pendingSince??observedAt):null,image:own(product,'image')&&product.image!==undefined?imageUrl(product.image):previous?.image??null,query:query===undefined?previous?.query??null:query,currentPrice,lastChecked,review:hasChanged?null:previous?.review??null,previousReview:hasChanged?previous.review??previous.previousReview:previous?.previousReview??null});
+   staged.set(key,{version:VERSION,key,watchId,id,store,...info,fingerprint:fp,status,firstSeen:previous?.firstSeen??observedAt,lastSeen:observedAt,metadataObservedAt:observedAt,pendingSince:status==='pending'?(hasChanged?observedAt:previous?.pendingSince??observedAt):null,image:own(product,'image')&&product.image!==undefined?imageUrl(product.image):previous?.image??null,query:query===undefined?previous?.query??null:query,currentPrice,lastChecked,review:hasChanged?null:previous?.review??null,previousReview:hasChanged?previous.review??previous.previousReview:previous?.previousReview??null,...(previous?.reviewHold?{reviewHold:{...previous.reviewHold,fingerprint:fp}}:{})});
   }
   if(staged.size){for(const [key,entry] of staged)state[key]=entry;save();}
   const rows=sortEntries([...staged.values()]).map(entry=>snapshot(entry,at));
@@ -176,8 +184,16 @@ export function createMarketCatalog(state,{now=()=>new Date(),save=()=>{}}={}) {
   const watchId=safeId(input.watchId,'watch ID'),id=safeId(input.id,'product ID',{numeric:true}),store=safeId(input.store,'chain ID'),key=identity(watchId,store,id),entry=read(key);
   if(!entry)throw Error('Unknown catalog product/chain.');
   if(input.fingerprint!==entry.fingerprint)throw Error('Catalog metadata changed; review the current fingerprint.');
-  const at=clock(),next=decision({...input,reviewedAt:at.toISOString()});
-  const updated={...entry,status:next.status,pendingSince:null,review:next,previousReview:entry.review??entry.previousReview};
+  const at=clock();let updated;
+  if(input.status==='reopen'){
+   const evidence=text(input.equivalenceEvidence??input.reason,'equivalence evidence',4000,{required:true}),reason=text(input.reason??evidence,'review hold reason',4000,{required:true});
+   const hold=reviewHold({fingerprint:entry.fingerprint,reason,equivalenceEvidence:evidence,openedAt:entry.reviewHold?.openedAt??at.toISOString()},entry.fingerprint);
+   updated={...entry,status:'pending',pendingSince:entry.pendingSince??at.toISOString(),review:null,previousReview:entry.review??entry.previousReview,reviewHold:hold};
+  }else{
+   const next=decision({...input,reviewedAt:at.toISOString()});
+   const {reviewHold:_,...unheld}=entry;
+   updated={...unheld,status:next.status,pendingSince:null,review:next,previousReview:entry.review??entry.previousReview};
+  }
   state[key]=updated;save();return snapshot(updated,at.getTime());
  }
  return {observe,review,pending,entries};

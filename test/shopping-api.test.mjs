@@ -36,6 +36,15 @@ test('shopping stays private, kiosk actions are limited, and order state survive
   assert.equal((await post(kiosk+'/api/shopping/pantry',{watchId:'missing',amount:1})).status,422);
   for(const path of ['/shopping-view.mjs','/shopping.css'])assert.equal((await fetch(kiosk+path)).status,200);
   assert.equal((await post(kiosk+'/api/shopping/watch',{name:'Følg pris',productKeys:[],unit:'stk',storage:'other',targetPrice:100})).status,200);
+  const catalogWatch=await(await post(base+'/api/shopping/watch',{name:'Synthetic plain grains',unit:'kg',storage:'pantry'})).json();
+  const actualReceipt=new Date().toISOString(),observed=await(await post(base+'/api/shopping/catalog',{watchId:catalogWatch.id,products:[{id:501,store:'ODA_NO',name:'Synthetic plain grains 500g',ingredients:'Plain grains',weight:500,weightUnit:'g',sourceUrl:'https://oda.com/no/products/501-synthetic-grains/',currentPrice:25,lastChecked:actualReceipt}]})).json();
+  const native=observed.entries[0],identity={watchId:catalogWatch.id,id:native.id,store:native.store,fingerprint:native.fingerprint};
+  assert.equal((await post(base+'/api/shopping/catalog-review',{...identity,status:'approved',packAmount:.5,unit:'kg',equivalenceEvidence:'Read the actual plain-grain recipe and fixed500g package.'})).status,200);
+  const reopen={...identity,status:'reopen',reason:'The exact rolled physical form needs a new review.'};
+  assert.equal((await post(base+'/api/shopping/catalog-review',reopen,{Origin:'https://untrusted.example'})).status,403);
+  assert.equal((await post(kiosk+'/api/shopping/catalog-review',reopen)).status,405);
+  const held=await(await post(base+'/api/shopping/catalog-review',reopen)).json();
+  assert.equal(held.status,'pending');assert.equal(held.reviewHold.fingerprint,native.fingerprint);assert.equal(held.previousReview.status,'approved');assert.equal(held.currentPrice,25);assert.equal(held.lastChecked,actualReceipt);
   const inventoryWatch=await (await post(kiosk+'/api/shopping/watch',{name:'Tomatbokser',productKeys:[],unit:'kg',storage:'pantry',enabled:false})).json();
   const intake=await (await post(kiosk+'/api/shopping/stock-intake',{clientId:crypto.randomUUID(),text:'15 bokser med tomat à 400 g',fileCount:1,mode:'replace',location:'Pantryhylle'})).json();
   const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jK1sAAAAASUVORK5CYII=','base64');
@@ -51,6 +60,7 @@ test('shopping stays private, kiosk actions are limited, and order state survive
   assert.equal((await post(base+'/api/shopping/stock-review',review)).status,200);
   const updated=await (await fetch(kiosk+'/api/shopping/family')).json();assert.equal(updated.items.find(x=>x.id===inventoryWatch.id).stock.amount,6);assert.equal(updated.stockReports[0].result.changes[0].previous,undefined);
   const invite=await (await post(base+'/api/phone/invite',{})).json(),paired=await post(mobile+'/send/api/pair',{code:invite.code,name:'Syntetisk telefon'}),cookie=paired.headers.get('set-cookie').split(';')[0];assert.equal(paired.status,200);
+  assert.equal((await post(mobile+'/send/api/shopping/catalog-review',reopen,{Cookie:cookie})).status,404);
   const mobileIntake=await (await post(mobile+'/send/api/shopping/stock-intake',{clientId:crypto.randomUUID(),text:'400 gram kyllingfilet',fileCount:1},{Cookie:cookie})).json();
   const phoneUpload=await fetch(mobile+`/send/api/shopping/stock-intake/${mobileIntake.id}/files/0`,{method:'POST',headers:{Cookie:cookie,'X-Family-Request':'1','X-File-Name':'freezer.png'},body:png});assert.equal(phoneUpload.status,200);
   assert.equal((await post(mobile+`/send/api/shopping/stock-intake/${mobileIntake.id}/submit`,{},{Cookie:cookie})).status,200);
@@ -59,5 +69,6 @@ test('shopping stays private, kiosk actions are limited, and order state survive
   const exited=new Promise(r=>child.once('exit',r));assert.equal((await post(base+'/api/maintenance/restart',{})).status,202);await exited;await start();
   assert.equal((await (await fetch(base+'/api/shopping')).json()).analysis.orderCount,1);
   assert.equal((await (await fetch(base+'/api/shopping')).json()).kassal.configured,true);
+  const restored=await(await fetch(base+'/api/shopping/catalog?watchId='+catalogWatch.id)).json();assert.equal(restored[0].reviewHold.reason,reopen.reason);assert.equal(restored[0].previousReview.status,'approved');assert.equal(restored[0].lastChecked,actualReceipt);
  }finally{if(child?.exitCode===null){const done=new Promise(r=>child.once('exit',r));child.kill();await done;}assert.ok(dir.startsWith(join(tmpdir(),'family-shopping-api-')));rmSync(dir,{recursive:true,force:true});}
 });

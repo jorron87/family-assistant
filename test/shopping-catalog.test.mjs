@@ -115,3 +115,45 @@ test('pending queue sorts oldest changed metadata first and conflicting duplicat
  assert.throws(()=>catalog.observe({watchId:'oats',products:[product({id:3}),product({id:3,name:'Conflicting package'})]}),/Conflicting metadata/);
  assert.deepEqual(state,before);
 });
+
+test('explicit reopening quarantines the current row and preserves its actual receipt and previous approval across reloads',()=>{
+ const f=fixture(),first=approve(f.catalog,observe(f.catalog));f.advance(2);
+ const reopen={watchId:first.watchId,id:first.id,store:first.store,fingerprint:first.fingerprint,status:'reopen',reason:'Exact grain form was not checked in the old name-only review.'};
+ let row=f.catalog.review(reopen);
+ assert.equal(row.status,'pending');assert.equal(row.review,null);assert.deepEqual(row.previousReview,first.review);
+ assert.equal(row.currentPrice,first.currentPrice);assert.equal(row.lastChecked,first.lastChecked);assert.equal(row.metadataObservedAt,first.metadataObservedAt);
+ assert.equal(row.reviewHold.fingerprint,row.fingerprint);assert.equal(row.reviewHold.reason,reopen.reason);assert.equal(row.packAmount,null);
+ let reloaded=createMarketCatalog(JSON.parse(JSON.stringify(f.state)),{now:()=>new Date('2026-11-08T15:00:00Z')});
+ assert.deepEqual(reloaded.entries()[0].reviewHold,row.reviewHold);assert.deepEqual(reloaded.pending()[0].previousReview,first.review);
+ const opened=row.reviewHold.openedAt;f.advance(1);row=f.catalog.review(reopen);assert.equal(row.reviewHold.openedAt,opened);
+ row=observe(f.catalog,product({currentPrice:16,lastChecked:'2026-11-08T15:00:00Z'}));
+ assert.equal(row.fingerprint,first.fingerprint);assert.equal(row.status,'pending');assert.equal(row.currentPrice,16);assert.equal(row.lastChecked,'2026-11-08T15:00:00.000Z');assert.equal(row.reviewHold.openedAt,opened);
+ row=observe(f.catalog,product({ingredients:'Whole oats, oat bran',currentPrice:17,lastChecked:'2026-11-08T15:00:00Z'}));
+ assert.notEqual(row.fingerprint,first.fingerprint);assert.equal(row.reviewHold.fingerprint,row.fingerprint);assert.equal(row.reviewHold.reason,reopen.reason);assert.deepEqual(row.previousReview,first.review);
+ reloaded=createMarketCatalog(JSON.parse(JSON.stringify(f.state)),{now:()=>new Date('2026-11-08T15:00:00Z')});
+ const approved=approve(reloaded,row,{equivalenceEvidence:'Read the current complete oats and bran label, actual rolled form and fixed 500g bag.'});
+ assert.equal(approved.status,'approved');assert.equal(approved.reviewHold,undefined);assert.deepEqual(approved.previousReview,first.review);
+ assert.equal(approved.currentPrice,17);assert.equal(approved.lastChecked,row.lastChecked);assert.equal(reloaded.pending().length,0);
+});
+
+test('reopening requires a current fingerprint and concrete bounded evidence before any state change',()=>{
+ const f=fixture(),first=approve(f.catalog,observe(f.catalog)),base={watchId:first.watchId,id:first.id,store:first.store,fingerprint:first.fingerprint,status:'reopen'};
+ for(const patch of [{},{reason:' '},{reason:'x'.repeat(4001)},{reason:'Review form',fingerprint:'0'.repeat(64)},{reason:'bad\u0000reason'}]){
+  const before=structuredClone(f.state),saves=f.saves();assert.throws(()=>f.catalog.review({...base,...patch}));assert.deepEqual(f.state,before);assert.equal(f.saves(),saves);
+ }
+ const opened=f.catalog.review({...base,equivalenceEvidence:'The actual current physical form and fixed pack were not read.'});
+ assert.equal(opened.reviewHold.reason,opened.reviewHold.equivalenceEvidence);
+ assert.equal(opened.status,'pending');assert.equal(opened.lastChecked,at);
+});
+
+test('an explicit reopened exclusion remains auditable through repeated metadata changes and a final decision',()=>{
+ const f=fixture(),first=observe(f.catalog),excluded=f.catalog.review({...first,status:'excluded',equivalenceEvidence:'Specific sugar-coated variant is excluded.'});
+ let row=f.catalog.review({...first,status:'reopen',equivalenceEvidence:'New actual label evidence requires reconsidering this specific exclusion.'});
+ for(const ingredients of ['Whole oats, sugar','Whole oats, sugar, raisins'])row=observe(f.catalog,product({ingredients}));
+ assert.equal(row.reviewHold.fingerprint,row.fingerprint);assert.deepEqual(row.previousReview,excluded.review);
+ const again=createMarketCatalog(JSON.parse(JSON.stringify(f.state)),{now:()=>new Date(at)});
+ assert.deepEqual(again.pending()[0].previousReview,excluded.review);
+ const decision=again.review({...row,status:'excluded',equivalenceEvidence:'Actual current sugar and raisin recipe still contradicts the plain-oat family.'});
+ assert.equal(decision.reviewHold,undefined);assert.equal(decision.status,'excluded');assert.equal(again.pending().length,0);
+ assert.equal(createMarketCatalog(JSON.parse(JSON.stringify(f.state)),{now:()=>new Date(at)}).entries()[0].reviewHold.fingerprint,row.fingerprint,'the detached reload never mutates its original state');
+});

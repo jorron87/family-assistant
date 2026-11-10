@@ -61,6 +61,24 @@ test('native exclusion and changed donor label retain priority over a source bri
   assert.equal(f.shop.familyView().items[0].prices.current,null);
 });
 
+test('reopening a native approval also holds its already reviewed Sesum alias for only that family',t=>{
+  const f=setup(t);f.ingest();f.approve();
+  const seen=f.shop.catalogObserve({watchId:f.w.id,products:[{id:f.p.id,store:f.p.store,name:f.p.name,ean:f.p.ean,brand:f.p.brand,ingredients:f.p.ingredients,description:f.p.description,sourceUrl:f.p.sourceUrl,weight:500,weightUnit:'g',currentPrice:20,lastChecked:NOW}]}).entries[0];
+  f.shop.catalogReview({watchId:f.w.id,id:seen.id,store:seen.store,fingerprint:seen.fingerprint,status:'approved',packAmount:.5,unit:'kg',equivalenceEvidence:'The current whole-bean variant and fixed package were explicitly reviewed.'});
+  const second=f.shop.watch({name:'Second whole-bean household family',unit:'kg',storage:'pantry',purchaseAmount:2});
+  f.shop.libraryLink({watchId:second.id,evidence:'Actual whole-bean use and variant allowed by this second family.',links:[{groupId:f.g.id,groupFingerprint:groupMetadataFingerprint(f.g),evidence:'Current recipe and form checked for this family.'}]});
+  assert.equal(f.shop.familyView().items.find(x=>x.id===f.w.id).prices.current,40);
+  const reopened=f.shop.catalogReview({watchId:f.w.id,id:seen.id,store:seen.store,fingerprint:seen.fingerprint,status:'reopen',reason:'The source review did not establish this family’s exact whole-bean subtype.'});
+  let view=f.shop.familyView();assert.equal(view.items.find(x=>x.id===f.w.id).prices.current,null);
+  assert.equal(view.items.find(x=>x.id===second.id).prices.current,40,'another family retains its independent explicit group approval');
+  assert.ok(f.shop.queue().some(x=>x.do==='shopping-product-review'&&x.watchId===f.w.id&&x.productId===seen.id));
+  assert.deepEqual(f.shop.explorer.family('followed:'+f.w.id).family.members,[],'followed-family alternatives cannot leak the held native/source alias');
+  f.clock.at='2026-11-09T12:01:00Z';f.ingest(10);
+  assert.equal(f.shop.familyView().items.find(x=>x.id===f.w.id).prices.current,null,'a new source price cannot settle native equivalence');
+  f.shop.catalogReview({watchId:f.w.id,id:seen.id,store:seen.store,fingerprint:reopened.fingerprint,status:'approved',packAmount:.5,unit:'kg',equivalenceEvidence:'The current exact whole-bean subtype and original fixed500g package now match this family.'});
+  assert.equal(f.shop.familyView().items.find(x=>x.id===f.w.id).prices.current,20);
+});
+
 test('equal numeric source IDs never overwrite a different native product in displayed alternatives',t=>{
   const f=setup(t),other={...structuredClone(f.p),productKey:'kassal:SPAR_NO:72',store:'SPAR_NO',id:'72',name:'Other whole beans 500g',brand:'Other',ean:'1234567890124',sourceUrl:'https://example.test/other-beans'};
   other.metadataFingerprint=productMetadataFingerprint(other);f.data.products.push(other);f.data.memberships.push({...f.data.memberships[0],productKey:other.productKey,reviewedFingerprint:other.metadataFingerprint});f.data.prices.push({productKey:other.productKey,grossPackPrice:35,receiptAt:'2026-11-09T11:00:00Z',availabilityScope:'chain',sourceUrl:other.sourceUrl});f.write();

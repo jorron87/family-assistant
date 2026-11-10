@@ -42,6 +42,38 @@ test('a library group lends nothing until the watch has an explicit link, and ex
  assert.ok(!f.shop.queue().some(x=>x.do==='shopping-family-build'));
 });
 
+test('a reopened native review holds its linked alias, creates durable work and never reapproves on price-only changes',t=>{
+ const f=fixture(t);f.native(f.rows[0]);f.native(f.rows[5],'excluded');f.link();
+ const p=f.rows[1].p,observation={id:p.id,store:p.store,name:p.name,ean:p.ean,brand:p.brand,ingredients:p.ingredients,description:p.description,sourceUrl:p.sourceUrl,currentPrice:10,lastChecked:RECEIPT};
+ let entry=f.shop.catalogObserve({watchId:f.w.id,products:[observation]}).entries[0];
+ assert.ok(!f.shop.queue().some(x=>x.do==='shopping-product-review'&&x.productId===p.id),'ordinary pending already reviewed family members retain existing deduplication');
+ assert.ok(f.shop.familyView().odaDraft.items[0].variants.some(x=>x.productId===2));
+ entry=f.shop.catalogReview({watchId:f.w.id,id:p.id,store:p.store,fingerprint:entry.fingerprint,status:'reopen',equivalenceEvidence:'The prior family approval did not establish the actual ketchup physical variant.'});
+ const work=()=>f.shop.queue().filter(x=>x.do==='shopping-product-review'&&x.productId===p.id);
+ assert.equal(work().length,1);assert.equal(work()[0].reason,'reopened');assert.equal(work()[0].reviewHold.fingerprint,entry.fingerprint);
+ let view=f.shop.familyView();assert.ok(!view.odaDraft.items[0].variants.some(x=>x.productId===2));assert.equal(view.items[0].prices.current,24,'independent reviewed chain prices remain available');
+ const other=f.shop.watch({name:'Another reviewed ketchup family',unit:'kg',storage:'pantry',purchaseAmount:3,targetPrice:200});
+ f.shop.libraryLink({watchId:other.id,evidence:'Separate family actually reviewed this group.',links:[{groupId:f.g.id,groupFingerprint:groupMetadataFingerprint(f.g),evidence:'Same concrete variant allowed here.'}]});
+ assert.ok(f.shop.familyView().odaDraft.items.find(x=>x.watchId===other.id).variants.some(x=>x.productId===2),'hold is scoped to the reviewed household family');
+ const reloaded=shoppingStore(JSON.parse(JSON.stringify(f.state)),{save(){},now:()=>new Date(f.clock.at),libraryPrices:f.provider});
+ assert.ok(reloaded.queue().some(x=>x.do==='shopping-product-review'&&x.productId===p.id));assert.ok(!reloaded.familyView().odaDraft.items.find(x=>x.watchId===f.w.id).variants.some(x=>x.productId===2));
+ f.clock.at='2026-11-09T12:11:00Z';entry=f.shop.catalogObserve({watchId:f.w.id,products:[{...observation,currentPrice:5,lastChecked:f.clock.at}]}).entries[0];
+ assert.equal(entry.status,'pending');assert.equal(work().length,1);assert.ok(!f.shop.familyView().odaDraft.items.find(x=>x.watchId===f.w.id).variants.some(x=>x.productId===2));
+ const updated=f.shop.catalogObserve({watchId:f.w.id,products:[{...observation,description:'Current exact physical variant requires research',currentPrice:5,lastChecked:f.clock.at}]}).entries[0];
+ assert.equal(updated.reviewHold.fingerprint,updated.fingerprint);assert.notEqual(updated.fingerprint,entry.fingerprint);assert.equal(work().length,1);
+ assert.throws(()=>f.shop.catalogReview({watchId:f.w.id,id:p.id,store:p.store,fingerprint:entry.fingerprint,status:'approved',packAmount:.5,unit:'kg',equivalenceEvidence:'Stale review'}),/current fingerprint/);
+ const approved=f.shop.catalogReview({watchId:f.w.id,id:p.id,store:p.store,fingerprint:updated.fingerprint,status:'approved',packAmount:.5,unit:'kg',equivalenceEvidence:'The current full tomato recipe, physical ketchup variant and fixed 500g pack are now explicitly verified.'});
+ assert.equal(approved.reviewHold,undefined);assert.equal(work().length,0);assert.ok(f.shop.familyView().odaDraft.items.find(x=>x.watchId===f.w.id).variants.some(x=>x.productId===2));assert.equal(approved.lastChecked,f.clock.at.replace('Z','.000Z'));
+});
+
+test('review holds respect the price horizon and return only with actual newer receipts',t=>{
+ const f=fixture(t);f.native(f.rows[0]);f.link();const entry=f.shop.catalogEntries(f.w.id)[0];
+ f.shop.catalogReview({watchId:f.w.id,id:entry.id,store:entry.store,fingerprint:entry.fingerprint,status:'reopen',reason:'Actual physical form requires a new review.'});
+ f.clock.at='2027-05-12T12:10:00Z';assert.ok(!f.shop.queue().some(x=>x.do==='shopping-product-review'),'old actual receipts remain parked');
+ const metadataOnly=f.shop.catalogObserve({watchId:f.w.id,products:[{id:entry.id,store:entry.store,name:entry.name}]}).entries[0];assert.equal(metadataOnly.lastChecked,entry.lastChecked);assert.ok(!f.shop.queue().some(x=>x.do==='shopping-product-review'));
+ const returned=f.shop.catalogObserve({watchId:f.w.id,products:[{id:entry.id,store:entry.store,name:entry.name,currentPrice:25,lastChecked:f.clock.at}]}).entries[0];assert.equal(returned.status,'pending');assert.ok(returned.reviewHold);assert.ok(f.shop.queue().some(x=>x.do==='shopping-product-review'));assert.equal(f.shop.familyView().items[0].prices.current,null,'the returned receipt never approves an unresolved variant');
+});
+
 test('quality is compared only between the same measurement, and only linked brands and attributes pass',t=>{
  const f=fixture(t);f.native(f.rows[0]);f.link();
  let variants=f.shop.familyView().odaDraft.items[0].variants;

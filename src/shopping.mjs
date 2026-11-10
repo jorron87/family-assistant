@@ -233,10 +233,11 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     }
     return found;
   }
+  const nativeReviewHeld=e=>e.status==='pending'&&e.reviewHold?.fingerprint===e.fingerprint;
   const nativeHoldsMember=(p,productKey,watchId,entries)=>{
     const identity=p.nativeIdentity??p,key=p.nativeIdentity?.key??p.donorProductKey??productKey;
     const samePack=(a,b)=>Number.isFinite(a)&&a>0&&Number.isFinite(b)&&b>0&&Math.abs(a-b)<=1e-6*Math.max(a,b);
-    return entries.some(e=>e.watchId===watchId&&key===catalogKey(e)&&(e.status==='excluded'||identity.textHash!==productTextHash(e)||e.status==='approved'&&(!samePack(e.packAmount,identity.pack)||e.unit!==identity.unit)||identity.rawPack&&(identity.rawPack.weight!==e.weight||String(identity.rawPack.weightUnit??'').trim()!==String(e.weightUnit??'').trim())));
+    return entries.some(e=>e.watchId===watchId&&key===catalogKey(e)&&(e.status==='excluded'||nativeReviewHeld(e)||identity.textHash!==productTextHash(e)||e.status==='approved'&&(!samePack(e.packAmount,identity.pack)||e.unit!==identity.unit)||identity.rawPack&&(identity.rawPack.weight!==e.weight||String(identity.rawPack.weightUnit??'').trim()!==String(e.weightUnit??'').trim())));
   };
   function currentPrices() {
     const at=now().getTime(),today=shoppingDay(now()),entries=catalog.entries(),native=new Map(),library=sesumPrices.provide(entries,libraryPrices?.(entries)??{status:'disabled',quotes:[]});
@@ -507,7 +508,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const alreadyInFamily=p=>{const w=s.watches[p.watchId];if(!reader||!w)return false;if(!familyMembers.has(w.id))familyMembers.set(w.id,linkedMembers(w,reader,{allChains:true}));return familyMembers.get(w.id).has(`kassal:${p.store}:${p.id}`);};
     const named=x=>x.watchId?{...x,familyId:x.watchId,familyName:x.watchName}:x;
     const flyers=s.settings.stores.filter(x=>!x.facebookGroup).map(store=>({store,...flyerReviewState(store,familySetFingerprint,today)})).filter(x=>x.due).map(({store,review,requiresRescan})=>({do:'shopping-review',storeId:store.id,name:store.name,url:store.url,lastReview:review?structuredClone(review):null,familySetFingerprint,requiresRescan,reason:requiresRescan&&review?'family-checklist-changed':review?'check-due':'unreviewed',fingerprint:hash(JSON.stringify([store.id,familySetFingerprint]))}));
-    return [...stock,...catalog.pending().filter(p=>s.watches[p.watchId]?.enabled!==false&&!priceTooOld(p)&&!alreadyInFamily(p)).map(p=>({do:'shopping-product-review',watchId:p.watchId,watchName:s.watches[p.watchId]?.name,productId:p.id,store:p.store,name:p.name,fingerprint:p.fingerprint,sourceUrl:p.sourceUrl})),...feedWork(),...flyers,...marketRefreshDue(today),...sesumWork(),...sesumPlacementWork(),...sesumCatalogueWork(),...sesumFamilyWork(),...sesumOfferWork(),...libraryWork(),...listFamilyWork(),...unlinkedOrderLines(),...routes].map(named);
+    return [...stock,...catalog.pending().filter(p=>s.watches[p.watchId]?.enabled!==false&&!priceTooOld(p)&&(nativeReviewHeld(p)||!alreadyInFamily(p))).map(p=>({do:'shopping-product-review',watchId:p.watchId,watchName:s.watches[p.watchId]?.name,productId:p.id,store:p.store,name:p.name,fingerprint:p.fingerprint,sourceUrl:p.sourceUrl,...(nativeReviewHeld(p)?{reason:'reopened',reviewHold:structuredClone(p.reviewHold)}:{})})),...feedWork(),...flyers,...marketRefreshDue(today),...sesumWork(),...sesumPlacementWork(),...sesumCatalogueWork(),...sesumFamilyWork(),...sesumOfferWork(),...libraryWork(),...listFamilyWork(),...unlinkedOrderLines(),...routes].map(named);
   }
   function completion() {
     return inReadContext(completionInContext);

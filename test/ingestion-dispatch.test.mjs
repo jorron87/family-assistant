@@ -33,6 +33,7 @@ test('new Sesum discovery launches the existing shopping agent with research and
     assert.match(launch.prompt,/shopping-sesum-family-review/);assert.match(launch.prompt,/registrationFingerprint/);assert.match(launch.prompt,/vanlige web-\/søkeverktøy/);assert.match(launch.prompt,/aldri bare søkeutdrag/);
     assert.match(launch.prompt,/shopping-sesum-placement-review/);assert.match(launch.prompt,/reviewedAllFamilies:true/);assert.match(launch.prompt,/noActiveFamilyVerified:true/);
     assert.match(launch.prompt,/familySetFingerprint fra den faktisk leste gjeldende sjekklisten i shopping-review/);assert.match(launch.prompt,/hele den nye sjekklisten før ny kvittering/);
+    assert.match(launch.prompt,/HELE den konkrete ingredienslisten\/INCI/);assert.match(launch.prompt,/status:reopen/);assert.match(launch.prompt,/varig reviewHold/);assert.match(launch.prompt,/generisk setning.*aldri ekvivalensbevis/);
     rows=[];launch.onExit(0);assert.equal(lease,null);assert.equal(d.status().running,false);
   }finally{assert.ok(dir.startsWith(join(tmpdir(),'familien-dispatch-sesum-')));rmSync(dir,{recursive:true,force:true});}
 });
