@@ -51,7 +51,7 @@ test('promotion evidence keeps dates, multibuy and limits while omitting unrelat
 
 test('null EAN remains unknown; malformed packages or receipts fail closed', () => {
   assert.equal(core.parseProduct(html({ product: { ...product, ean: null }, prices: [price] }), productUrl).product.ean, null);
-  for (const invalid of [{ ...product, ean: ['bad'] }, { ...product, weight: '850' }]) {
+  for (const invalid of [{ ...product, ean: ['bad code'] }, { ...product, weight: '850' }]) {
     assert.equal(core.parseProduct(html({ product: invalid, prices: [price] }), productUrl).ok, false);
   }
   for (const invalid of [{ ...price, observedAt: null }, { ...price, observedAt: '2026-11-09T12:30:00' }, { ...price, source: '' }, { ...price, price: -1 }]) {
@@ -72,10 +72,17 @@ test('short source catalogue codes stay separate from EANs without losing own pr
   assert.equal(parsed.prices[0].observedAt, price.observedAt);
   const onlyShort = core.parseProduct(html({ product: { ...source, ean: ['4073'] }, prices: [price] }), productUrl);
   assert.equal(onlyShort.ok, true);assert.equal(onlyShort.product.ean, null);assert.deepEqual(onlyShort.product.nonEanCodes, ['4073']);
-  for (const ean of [['40x3'], [''], ['123456789012345'], ['4073', null], [4073]]) {
+  for (const ean of [['bad code'], [''], ['https://example.test/code'], ['4073', null], [4073]]) {
     const failed = core.parseProduct(html({ product: { ...source, ean }, prices: [price] }), productUrl);
     assert.equal(failed.ok, false);assert.deepEqual(failed.prices, [], 'malformed fields do not certify any own price');
   }
+});
+
+test('opaque source identifiers in an EAN field remain distinct from actual barcodes',()=>{
+  const parsed=core.parseProduct(html({product:{...product,ean:['7030000000101','KIWI-synthetic-64stk','40x3']},prices:[price]}),productUrl);
+  assert.equal(parsed.ok,true);assert.deepEqual(parsed.product.ean,['7030000000101']);
+  assert.deepEqual(parsed.product.nonEanCodes,['KIWI-synthetic-64stk','40x3']);
+  assert.equal(parsed.prices[0].price,price.price);assert.equal(parsed.prices[0].observedAt,price.observedAt);
 });
 
 test('unexpected or conflicting own product schema cannot select a cheap unrelated row', () => {

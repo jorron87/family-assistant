@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {createProductLibrary,groupMetadataFingerprint,productMetadataFingerprint} from './product-library.mjs';
 import {createIndexReader} from './shopping-library.mjs';
+import {sesumNativeIdentity} from './sesum-prices.mjs';
 
 const plain=v=>v!==null&&typeof v==='object'&&!Array.isArray(v)&&[Object.prototype,null].includes(Object.getPrototypeOf(v));
 const stable=v=>typeof v==='string'&&/^[A-Za-z0-9:_-]{1,250}$/.test(v)&&!['__proto__','constructor','prototype'].includes(v);
@@ -68,6 +69,13 @@ export function createSesumDiscovery(state,{save=()=>{},now=()=>new Date(),reade
   if(drained&&(!original||original.unit!=='kg'||input.unit!=='kg'||input.packAmount>original.amount))throw Error('Drained mass must be documented and no larger than the source gross package mass.');
   if(!drained&&original&&(original.unit!==input.unit||!near(original.amount,input.packAmount)))throw Error('Canonical and source package amounts disagree.');
   if(!original&&input.fixedPackVerified!==true)throw Error('A missing source package needs explicit fixed-package verification.');
+  let nativeIdentity=null,nativeIdentityEvidence=null;
+  if(input.nativeProductKey!=null||input.nativeProductFingerprint!=null||input.nativeIdentityEvidence!=null){
+   if(!stable(input.nativeProductKey)||!fp(input.nativeProductFingerprint))throw Error('Explicit native identity key and current fingerprint are required.');
+   nativeIdentityEvidence=text(input.nativeIdentityEvidence,'native identity evidence',6000,{required:true});
+   const native=base?.product(input.nativeProductKey);nativeIdentity=sesumNativeIdentity(input.nativeProductKey,native);
+   if(native.store!==s.store||nativeIdentity.metadataFingerprint!==input.nativeProductFingerprint||nativeIdentity.unit!==input.unit||!near(nativeIdentity.pack,input.packAmount))throw Error('Native identity chain, metadata or canonical package changed; review its current fingerprint.');
+  }
   if(!Array.isArray(input.sourceReceipts)||!input.sourceReceipts.length||input.sourceReceipts.length>40)throw Error('Original review receipts are required.');
   const receipts=input.sourceReceipts.map(r=>{if(!plain(r))throw Error('Invalid review receipt.');return {url:https(r.url),observedAt:stamp(r.observedAt,at.getTime()),evidence:text(r.evidence,'review receipt',6000,{required:true})};});
   const proposed={};if(input.groups!=null&&(!Array.isArray(input.groups)||input.groups.length>30))throw Error('Invalid new families.');
@@ -85,18 +93,21 @@ export function createSesumDiscovery(state,{save=()=>{},now=()=>new Date(),reade
   });
   const library={schemaVersion:1,createdAt:at.toISOString(),updatedAt:at.toISOString(),groups:[...used.values()],products:[product],memberships,prices:[]},validated=createProductLibrary(library,{now:at}),audit=validated.audit();
   if(!audit.ok||memberships.some(m=>used.get(m.groupId).canonicalUnit!==product.unit)||validated.productQuote(product.productKey)?.reviewCurrent!==true)throw Error('Reviewed discovery product does not satisfy the product-library contract.');
-  const record={sourceKey:input.sourceKey,sourceFingerprint:input.sourceFingerprint,identityEvidence,product,groups:[...used.values()],memberships,packBasis:drained?'drained':'net',packBasisEvidence:basisEvidence,registeredAt:at.toISOString()};
+  const record={sourceKey:input.sourceKey,sourceFingerprint:input.sourceFingerprint,identityEvidence,product,groups:[...used.values()],memberships,packBasis:drained?'drained':'net',packBasisEvidence:basisEvidence,...(nativeIdentity?{nativeIdentity,nativeIdentityEvidence}:{}),registeredAt:at.toISOString()};
   state.records[input.sourceKey]=record;for(const [id,g] of Object.entries(proposed))if(!base?.group(id))state.groups[id]=g;state.revision++;save();
   return {sourceKey:input.sourceKey,sourceFingerprint:input.sourceFingerprint,productKey:product.productKey,productFingerprint:product.metadataFingerprint,groups:memberships.map(m=>({groupId:m.groupId,groupFingerprint:m.reviewedGroupFingerprint})),registeredAt:record.registeredAt};
  }
  function usable(record,base){
   const observed=current(record.sourceKey);if(!observed||observed.sourceFingerprint!==record.sourceFingerprint)return null;
+  if(record.nativeIdentity){
+   try{const native=base?.product(record.nativeIdentity.key);if(native?.store!==observed.source.store||!near(record.nativeIdentity.pack,record.product.canonicalPackAmount)||record.nativeIdentity.unit!==record.product.unit||JSON.stringify(sesumNativeIdentity(record.nativeIdentity.key,native))!==JSON.stringify(record.nativeIdentity))return null;}catch{return null;}
+  }
   const memberships=record.memberships.filter(m=>{const g=groupAt(m.groupId,base);return g&&groupMetadataFingerprint(g)===m.reviewedGroupFingerprint;});
   return memberships.length?{...record,memberships,groups:record.groups.filter(g=>memberships.some(m=>m.groupId===g.id))}:null;
  }
  let compiledBase=null,compiledRevision=null,compiledStamp=null,compiled=null;const baseIds=new WeakMap();let nextId=0;
  function overlay(base=raw()){
-  if(!base)return null;const index=base.index(),active=Object.values(state.records).map(r=>usable(r,base)).filter(Boolean),validation=digest(active.map(r=>[r.sourceKey,r.sourceFingerprint,r.product.metadataFingerprint,r.memberships.map(m=>[m.groupId,m.reviewedGroupFingerprint])]));
+  if(!base)return null;const index=base.index(),active=Object.values(state.records).map(r=>usable(r,base)).filter(Boolean),validation=digest(active.map(r=>[r.sourceKey,r.sourceFingerprint,r.product.metadataFingerprint,r.memberships.map(m=>[m.groupId,m.reviewedGroupFingerprint]),r.nativeIdentity?[r.nativeIdentity,base.product(r.nativeIdentity.key).quote,base.product(r.nativeIdentity.key).available]:null]));
   let id=baseIds.get(index);if(!id){id=++nextId;baseIds.set(index,id);}const cacheKey=[base.cacheKey??'','sesum-discovery',id,state.revision,validation].join('|');
   if(!active.length)return {...base,cacheKey};
   if(compiledBase!==index||compiledRevision!==state.revision||compiledStamp!==validation){
@@ -106,7 +117,7 @@ export function createSesumDiscovery(state,{save=()=>{},now=()=>new Date(),reade
     // the replaced metadata. Only the explicitly reviewed memberships remain.
     for(const groupId of Object.keys(out.members))out.members[groupId]=out.members[groupId].filter(m=>m.k!==record.sourceKey);
     for(const [groupId,g] of Object.entries(generated.groups)){if(!out.groups[groupId])out.groups[groupId]=g;out.members[groupId]=[...(out.members[groupId]??[]).filter(m=>m.k!==record.sourceKey),...generated.members[groupId]];}
-    out.products[record.sourceKey]={...generated.products[record.sourceKey],nativeDiscovery:true,sourceFingerprint:record.sourceFingerprint,identityEvidence:record.identityEvidence};Object.assign(out.qualityNotes,generated.qualityNotes);
+    out.products[record.sourceKey]={...generated.products[record.sourceKey],nativeDiscovery:true,sourceFingerprint:record.sourceFingerprint,identityEvidence:record.identityEvidence,...(record.nativeIdentity?{nativeIdentity:clone(record.nativeIdentity),nativeIdentityEvidence:record.nativeIdentityEvidence}:{})};Object.assign(out.qualityNotes,generated.qualityNotes);
    }
    compiledBase=index;compiledRevision=state.revision;compiledStamp=validation;compiled=createIndexReader(out,{horizonDays:base.horizonDays});
   }

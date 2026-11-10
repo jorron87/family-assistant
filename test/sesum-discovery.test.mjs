@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {createSesumDiscovery} from '../src/sesum-discovery.mjs';
 import {createIndexReader} from '../src/shopping-library.mjs';
 import {groupMetadataFingerprint,productMetadataFingerprint} from '../src/product-library.mjs';
+import {sesumDonorFingerprint} from '../src/sesum-prices.mjs';
 
 const NOW='2026-11-09T12:00:00Z',SOURCE_FP='1'.repeat(64),key='sesum:KIWI:123';
 const group={id:'whole-beans',name:'Whole beans',category:'Coffee',canonicalUnit:'kg',inclusionCriteria:'Roasted whole coffee beans',exclusions:['Ground coffee'],qualityBasis:'Actual contents and use',comparisonBasis:'Per kilogram'};
@@ -72,4 +73,29 @@ test('replacing an existing Sesum key does not inherit old approvals from other 
  f.index.members[group.id].push({k:key,s:'approved',r:true,u:50,q:null,n:null});const original=structuredClone(f.index);
  f.discovery.register(f.input({groups:[newGroup],memberships:[{groupId:newGroup.id,groupFingerprint:groupMetadataFingerprint(newGroup),equivalenceEvidence:'This actual plain-bean product was reviewed.',qualityEvidence:'Original content and form read.'}]}));
  const over=f.discovery.overlay();assert.deepEqual(over.groupsOf(key).map(m=>m.groupId),[newGroup.id]);assert.equal(over.members(group.id,{all:true}).some(m=>m.productKey===key),false);assert.deepEqual(f.index,original,'base metadata and historical memberships remain untouched');
+});
+
+test('an optional explicit same-chain native identity binds metadata and package without lending its recipe',()=>{
+ const f=fixture(),nativeKey='kassal:KIWI:8',native={...structuredClone(f.original),store:'KIWI',id:'8',metadataFingerprint:'3'.repeat(64),ingredients:'Native recipe must not be copied',nutrition:{basis:'g',per100:{fat:50}}};
+ f.index.products[nativeKey]=native;
+ const binding={nativeProductKey:nativeKey,nativeProductFingerprint:sesumDonorFingerprint(native),nativeIdentityEvidence:'Actual source and native label show the same physical fixed 500 g variant; brand, form and package were checked together.'};
+ f.discovery.register(f.input({...binding,product:{ingredients:null,description:'Source label facts remain independently researched.'}}));
+ const product=f.discovery.overlay().product(key),record=f.discovery.record(key);
+ assert.equal(product.ingredients,null);assert.equal(product.nutrition,null);
+ assert.equal(product.nativeIdentity.key,nativeKey);assert.equal(product.nativeIdentity.metadataFingerprint,binding.nativeProductFingerprint);assert.equal(product.nativeIdentity.pack,.5);assert.equal(product.nativeIdentity.unit,'kg');
+ assert.equal(record.nativeIdentityEvidence,binding.nativeIdentityEvidence);
+ assert.equal(binding.nativeProductFingerprint,native.metadataFingerprint,'real compiled native metadata fingerprint is authoritative');
+ assert.throws(()=>f.discovery.register(f.input({...binding,nativeProductFingerprint:product.metadataFingerprint})),/Native identity/,'the independently registered Sesum product fingerprint cannot replace the native fingerprint');
+ native.quote={...native.quote,grossPackPrice:99,receiptAt:'2026-11-09T11:30:00Z'};assert.ok(f.discovery.record(key),'price changes do not invalidate reviewed identity');
+ native.ingredients='Changed native physical variant';native.metadataFingerprint='4'.repeat(64);assert.equal(f.discovery.record(key),null);assert.equal(f.discovery.overlay().product(key),null,'changed native metadata withdraws source registration');
+ assert.throws(()=>f.discovery.register(f.input(binding)),/Native identity/);
+});
+
+test('native identity never joins a different chain or infers identity from EAN/name alone',()=>{
+ const f=fixture(),nativeKey='kassal:ODA_NO:7',binding={nativeProductKey:nativeKey,nativeProductFingerprint:sesumDonorFingerprint(f.original),nativeIdentityEvidence:'Explicit identity evidence'};
+ assert.throws(()=>f.discovery.register(f.input(binding)),/Native identity/);
+ for(const patch of [{nativeProductKey:nativeKey},{...binding,nativeIdentityEvidence:''},{...binding,nativeProductFingerprint:'f'.repeat(64)}])assert.throws(()=>f.discovery.register(f.input(patch)));
+ const key2='kassal:KIWI:8',native={...structuredClone(f.original),store:'KIWI',id:'8',pack:.4};f.index.products[key2]=native;
+ assert.throws(()=>f.discovery.register(f.input({nativeProductKey:key2,nativeProductFingerprint:sesumDonorFingerprint(native),nativeIdentityEvidence:'Explicit proof cannot override canonical package conflict.'})),/canonical package/);
+ f.discovery.register(f.input());assert.equal(f.discovery.overlay().product(key).nativeIdentity,undefined,'registration without a binding stays source-only');
 });

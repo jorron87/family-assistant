@@ -83,7 +83,7 @@ function productResult(result,job,chains,now){
   if(product.weight!==null&&(!Number.isFinite(product.weight)||product.weight<=0||product.weight>1e9))throw Error('Ugyldig Sesum-vekt.');
   if(p.soldByWeight!=null&&typeof p.soldByWeight!=='boolean')throw Error('Ugyldig Sesum-vektgrunnlag.');
   if(product.ean!==null){const eans=Array.isArray(product.ean)?product.ean:[product.ean];if(eans.length>30||!eans.every(ean=>typeof ean==='string'&&/^\d{8,14}$/.test(ean)))throw Error('Ugyldig Sesum-strekkode.');}
-  if(!Array.isArray(product.nonEanCodes)||product.nonEanCodes.length>30||product.nonEanCodes.some(code=>typeof code!=='string'||!/^\d{1,7}$/.test(code)))throw Error('Ugyldig lokal Sesum-kode.');
+  if(!Array.isArray(product.nonEanCodes)||product.nonEanCodes.length>30||product.nonEanCodes.some(code=>typeof code!=='string'||!/^[A-Za-z0-9][A-Za-z0-9:_-]{0,199}$/.test(code)||/^\d{8,14}$/.test(code)))throw Error('Ugyldig lokal Sesum-kode.');
   product.nonEanCodes=unique(product.nonEanCodes);
   const safePromotion=value=>{
     if(!value||typeof value!=='object'||Array.isArray(value))return null;

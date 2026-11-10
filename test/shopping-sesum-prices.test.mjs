@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {shoppingStore} from '../src/shopping.mjs';
 import {libraryPriceProvider} from '../src/shopping-library.mjs';
 import {productMetadataFingerprint,groupMetadataFingerprint} from '../src/product-library.mjs';
+import {sesumDonorFingerprint} from '../src/sesum-prices.mjs';
 
 const NOW='2026-11-09T12:00:00Z';
 function setup(t,{donorStore='KIWI'}={}) {
@@ -21,7 +22,7 @@ function setup(t,{donorStore='KIWI'}={}) {
   shop.libraryLink({familyId:w.id,evidence:'Reviewed whole-bean family',variants:[{groupId:g.id,groupFingerprint:groupMetadataFingerprint(g),evidence:'Same use, all brands allowed'}]});
   const ingest=(price=20,observedAt=clock.at,store='KIWI')=>shop.sesumReceivePrices({familyIds:[w.id],fetchedAt:clock.at,products:[{id:'71',name:p.name,brand:p.brand,vendor:'Test',ean:[p.ean],weight:500,weightUnit:'g',soldByWeight:false,sourceUrl:'https://www.sesum.no/produkt/71-test-whole-beans-500g',prices:[{storeCode:store,price,observedAt,source:'receipt_realtime',rawUnitPrice:999,isPromo:false,promotion:null}]}]});
   const approve=()=>{const row=shop.sesumCandidates(w.id)[0],donor=row.donors.find(d=>d.productKey===p.productKey);return shop.sesumPriceReview({sourceKey:row.sourceKey,sourceFingerprint:row.sourceFingerprint,productKey:p.productKey,productFingerprint:donor.productFingerprint,status:'approved',packAmount:.5,unit:'kg',equivalenceEvidence:'Same GTIN, brand, actual name and reviewed fixed 500g package; source price belongs to that exact product',packEvidence:'Both concrete records and original reviewed label document one fixed 500g pack'});};
-  return {shop,state,w,p,g,data,clock,write,ingest,approve};
+  return {shop,state,w,p,g,data,clock,write,ingest,approve,provider};
 }
 
 test('all followed families enter the manifest and price observations require an explicit bridge',t=>{
@@ -90,6 +91,28 @@ test('a native package-only metadata change blocks the old reviewed donor and it
   assert.deepEqual(f.shop.explorer.family('followed:'+f.w.id).family.members,[],'a held package is also held in the followed-family detail');
 });
 
+test('canonical gram conversion roundoff preserves the same reviewed package but not a changed raw package',t=>{
+  const f=setup(t);
+  Object.assign(f.p,{name:'Test whole beans 350g',canonicalPackAmount:350*.001,rawPack:{weight:350,weightUnit:'g'}});
+  f.p.metadataFingerprint=productMetadataFingerprint(f.p);
+  f.data.memberships[0].reviewedFingerprint=f.p.metadataFingerprint;f.write();
+  assert.notEqual(f.p.canonicalPackAmount,.35,'the fixture exercises real gram conversion roundoff');
+  f.shop.sesumReceivePrices({familyIds:[f.w.id],fetchedAt:NOW,products:[{id:'71',name:f.p.name,brand:f.p.brand,ean:[f.p.ean],weight:350,weightUnit:'g',soldByWeight:false,sourceUrl:'https://www.sesum.no/produkt/71-test-whole-beans-350g',prices:[{storeCode:'KIWI',price:20,observedAt:NOW,source:'receipt_realtime',isPromo:false}]}]});
+  const candidate=f.shop.sesumCandidates(f.w.id)[0],donor=candidate.donors.find(d=>d.productKey===f.p.productKey);
+  f.shop.sesumPriceReview({sourceKey:candidate.sourceKey,sourceFingerprint:candidate.sourceFingerprint,productKey:donor.productKey,productFingerprint:donor.productFingerprint,status:'approved',packAmount:.35,unit:'kg',equivalenceEvidence:'Actual original product identity and the same fixed 350g package reviewed.',packEvidence:'The original package and both concrete records show one fixed 350g bag.'});
+  const native={id:f.p.id,store:f.p.store,name:f.p.name,ean:f.p.ean,brand:f.p.brand,ingredients:f.p.ingredients,description:f.p.description,sourceUrl:f.p.sourceUrl,weight:350,weightUnit:'g',currentPrice:30,lastChecked:'2026-11-09T10:00:00Z'};
+  const entry=f.shop.catalogObserve({watchId:f.w.id,products:[native]}).entries[0];
+  f.shop.catalogReview({watchId:f.w.id,id:entry.id,store:entry.store,fingerprint:entry.fingerprint,status:'approved',packAmount:.35,unit:'kg',equivalenceEvidence:'The concrete native label documents the same fixed 350g bag.'});
+  f.shop.list({action:'add',watchId:f.w.id,storeName:'KIWI',packAmount:.35,packs:1,unitPrice:100});
+  const alternatives=()=>f.shop.familyView().list.open[0].others;
+  const members=()=>f.shop.explorer.family('followed:'+f.w.id).family.members;
+  assert.ok(alternatives().some(p=>Math.abs(p.packAmount-.35)<1e-12&&p.unitPrice===57.14),'the equivalent native/source choice retains the source receipt price');
+  assert.ok(members().some(p=>p.key===candidate.sourceKey&&Math.abs(p.unitPrice-20/.35)<1e-10),'the followed-family detail preserves the same source package');
+  f.shop.catalogObserve({watchId:f.w.id,products:[{...native,weight:1000,lastChecked:NOW}]});
+  assert.deepEqual(alternatives(),[],'a real raw package change still holds the old native and source variants');
+  assert.deepEqual(members(),[],'the followed-family detail also holds the genuinely changed package');
+});
+
 test('followed family details preserve the reviewed brand and attribute restrictions',t=>{
   const f=setup(t);f.ingest();f.approve();
   const family=f.shop.sesumFamilies()[0];assert.ok(family.queries.includes('Test whole beans'),'known concrete products remain discovery queries even without a broad alias');
@@ -112,6 +135,41 @@ test('newer approved native receipts cap older Sesum prices in every family view
   assert.equal(f.shop.familyView().items[0].prices.current,null,'newer unknown native price suppresses both older sources');
   assert.deepEqual(f.shop.familyView().list.open[0].others,[]);
   assert.ok(f.shop.explorer.family('followed:'+f.w.id).family.members.every(p=>p.unitPrice===null));
+});
+
+test('self-registered source identity follows newer same-chain native prices, unknowns and family exclusions',t=>{
+  const f=setup(t),sourceKey='sesum:KIWI:72';
+  const source={id:'72',name:f.p.name,brand:f.p.brand,ean:[f.p.ean],weight:500,weightUnit:'g',soldByWeight:false,sourceUrl:'https://www.sesum.no/produkt/72-test-whole-beans-500g'};
+  const receive=(price,observedAt)=>f.shop.sesumReceivePrices({familyIds:[f.w.id],fetchedAt:f.clock.at,products:[{...source,prices:[{storeCode:'KIWI',price,observedAt,source:'receipt_realtime',isPromo:false}]}]});
+  receive(20,'2026-11-09T11:30:00Z');
+  const candidate=f.shop.sesumCandidates(f.w.id).find(p=>p.sourceKey===sourceKey);
+  f.shop.sesumRegister({sourceKey,sourceFingerprint:candidate.sourceFingerprint,identityEvidence:'Read the concrete source bag, GTIN, whole-bean form and fixed package. Its recipe is not supplied and remains unknown.',nativeProductKey:f.p.productKey,nativeProductFingerprint:sesumDonorFingerprint(f.provider.reader().product(f.p.productKey)),nativeIdentityEvidence:'The same-chain native KIWI record and source bag show the same physical GTIN, whole-bean form and one fixed 500g package.',product:{ingredients:null,description:'Recipe not supplied by this source',brand:f.p.brand},packAmount:.5,unit:'kg',packEvidence:'Actual source bag and native record document one fixed 500g package.',memberships:[{groupId:f.g.id,groupFingerprint:groupMetadataFingerprint(f.g),equivalenceEvidence:'The actual whole roasted beans have the same brewing use; recipe details remain unknown rather than copied.',qualityEvidence:'Whole-bean form read on the original bag. No recipe or nutrition is transferred from the identity relation.'}],sourceReceipts:[{url:'https://example.test/source-bag',observedAt:NOW,evidence:'Read the actual source bag identity, physical form and fixed package.'}]});
+  assert.equal(f.shop.familyView().items[0].prices.current,40);
+  const row=()=>f.shop.explorer.family('followed:'+f.w.id).family.members.find(m=>m.key===sourceKey);
+  assert.equal(row().unitPrice,40);
+  const observe=(price,extra={})=>f.shop.catalogObserve({watchId:f.w.id,products:[{id:f.p.id,store:f.p.store,name:f.p.name,ean:f.p.ean,brand:f.p.brand,ingredients:f.p.ingredients,description:f.p.description,sourceUrl:f.p.sourceUrl,weight:500,weightUnit:'g',currentPrice:price,lastChecked:f.clock.at,...extra}]}).entries[0];
+  const entry=observe(35);
+  f.shop.catalogReview({watchId:f.w.id,id:entry.id,store:entry.store,fingerprint:entry.fingerprint,status:'approved',packAmount:.5,unit:'kg',equivalenceEvidence:'Current native contents and fixed package reviewed.'});
+  assert.equal(f.shop.familyView().items[0].prices.current,70);
+  assert.equal(row().unitPrice,70,'the self-registered source identity adopts the later native quote without requiring its own unknown recipe to equal the native recipe');
+  f.shop.list({action:'add',watchId:f.w.id,storeName:'KIWI',packAmount:.5,packs:1,unitPrice:100});
+  assert.ok(f.shop.familyView().list.open[0].others.every(p=>p.unitPrice===70));
+  f.clock.at='2026-11-09T12:01:00Z';observe(null);
+  assert.equal(f.shop.familyView().items[0].prices.current,null);assert.equal(row().unitPrice,null);
+  assert.deepEqual(f.shop.familyView().list.open[0].others,[],'new native unknown price cannot expose an older self source receipt');
+  f.shop.catalogReview({watchId:f.w.id,id:entry.id,store:entry.store,fingerprint:entry.fingerprint,status:'excluded',equivalenceEvidence:'The family explicitly excludes this physical variant.'});
+  f.clock.at='2026-11-09T12:02:00Z';receive(15,f.clock.at);
+  assert.equal(f.shop.familyView().items[0].prices.current,null,'a later own source price cannot bypass the native family exclusion');
+  assert.deepEqual(f.shop.familyView().list.open[0].others,[]);
+  assert.deepEqual(f.shop.explorer.family('followed:'+f.w.id).family.members,[]);
+});
+
+test('self-registration cannot use generic Coop identity to import its price or holds into Extra',t=>{
+  const f=setup(t,{donorStore:'COOP_NO'});f.ingest(20,NOW,'COOP_EXTRA');
+  const candidate=f.shop.sesumCandidates(f.w.id).find(p=>p.sourceKey==='sesum:COOP_EXTRA:71');
+  assert.throws(()=>f.shop.sesumRegister({sourceKey:candidate.sourceKey,sourceFingerprint:candidate.sourceFingerprint,identityEvidence:'Concrete bag identity and package reviewed.',nativeProductKey:f.p.productKey,nativeProductFingerprint:sesumDonorFingerprint(f.provider.reader().product(f.p.productKey)),nativeIdentityEvidence:'Same physical bag claimed across generic Coop and Extra; this is not same-chain identity.',product:{ingredients:null,description:'Unknown source recipe'},packAmount:.5,unit:'kg',packEvidence:'One fixed 500g bag.',memberships:[{groupId:f.g.id,groupFingerprint:groupMetadataFingerprint(f.g),equivalenceEvidence:'Reviewed whole roasted beans and use.',qualityEvidence:'Actual whole-bean form read.'}],sourceReceipts:[{url:'https://example.test/source-bag',observedAt:NOW,evidence:'Original source package read.'}]}),/native product identity|chain/);
+  assert.equal(f.shop.familyView().items[0].prices.current,null);
+  assert.ok(f.shop.queue().some(q=>q.sourceKey===candidate.sourceKey),'rejected cross-chain identity remains unresolved research');
 });
 
 for(const actualPrice of [true,false])test(`an entirely new Sesum SKU with ${actualPrice?'actual':'unproven'} price enters discovery and joins a followed family only after explicit research`,t=>{

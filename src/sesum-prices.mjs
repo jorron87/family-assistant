@@ -64,6 +64,18 @@ export function sesumDonorFingerprint(product){
  if(typeof product?.metadataFingerprint==='string'&&/^[a-f0-9]{64}$/.test(product.metadataFingerprint))return product.metadataFingerprint;
  return hash(Object.fromEntries(['store','id','name','ean','brand','ingredients','description','textHash','pack','packKnown','unit','packEvidence','rawPack','sourceUrl','attributes','nutrition'].map(key=>[key,product?.[key]??null])));
 }
+export function sesumNativeIdentity(key,product){
+ if(!stable(key)||!product||key!==`kassal:${product.store}:${product.id}`||!CHAINS.has(product.store)||!product.packKnown||!positive(product.pack)||!['kg','l','stk','m'].includes(product.unit))throw Error('A current fixed native product identity is required.');
+ return {key,metadataFingerprint:sesumDonorFingerprint(product),textHash:product.textHash??productTextHash(product),rawPack:product.rawPack?{weight:product.rawPack.weight??null,weightUnit:product.rawPack.weightUnit??null}:null,pack:product.pack,unit:product.unit};
+}
+function boundNativeIdentity(donor,base,store){
+ if(donor.nativeIdentity==null)return null;
+ const identity=donor.nativeIdentity,native=plain(identity)&&stable(identity.key)?base?.product(identity.key):null;
+ try{
+  if(!native||native.store!==store||native.unit!==donor.unit||!near(native.pack,donor.pack)||hash(sesumNativeIdentity(identity.key,native))!==hash(identity))return false;
+ }catch{return false;}
+ return {...identity,product:native};
+}
 function normalizedRows(products,fetchedAt,at){
  if(!Array.isArray(products)||products.length>500)throw Error('Observe at most 500 Sesum products.');
  const rows=[];
@@ -73,7 +85,7 @@ function normalizedRows(products,fetchedAt,at){
   if(weight!==null&&(!positive(weight)||weight>1e9))throw Error('Invalid Sesum product weight.');
   if(input.soldByWeight!=null&&typeof input.soldByWeight!=='boolean')throw Error('Invalid Sesum weight mode.');
   const nonEanCodes=input.nonEanCodes??[];
-  if(!Array.isArray(nonEanCodes)||nonEanCodes.length>30||nonEanCodes.some(code=>typeof code!=='string'||!/^\d{1,7}$/.test(code)))throw Error('Invalid Sesum non-EAN code.');
+  if(!Array.isArray(nonEanCodes)||nonEanCodes.length>30||nonEanCodes.some(code=>typeof code!=='string'||!(/^[A-Za-z0-9][A-Za-z0-9:_-]{0,199}$/).test(code)||/^\d{8,14}$/.test(code)))throw Error('Invalid Sesum non-EAN code.');
   const product={id,name:text(input.name,'Sesum product name',1000,{required:true}),brand:text(input.brand,'brand',300),vendor:text(input.vendor,'vendor',300),ean:eans(input.ean),...(nonEanCodes.length?{nonEanCodes:[...new Set(nonEanCodes)].sort()}:{}),weight,weightUnit:text(input.weightUnit,'weight unit',30),soldByWeight:input.soldByWeight??null,sourceUrl:productUrl(input.sourceUrl,id)};
   const ownPrices=input.prices??(Array.isArray(input.priceCandidates)?[]:null);
   if(!Array.isArray(ownPrices)||ownPrices.length>100)throw Error('Invalid Sesum chain prices.');
@@ -182,7 +194,7 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
  function validBridge(row,bridge,base){
   if(!row||!bridge||bridge.status!=='approved'||bridge.sourceFingerprint!==row.fingerprint)return false;
   const donor=base?.product(bridge.productKey);
-  return !!donor&&donorAllowed(row,bridge.productKey,donor)&&sesumDonorFingerprint(donor)===bridge.productFingerprint&&currentGroups(base,bridge.productKey).length>0&&donor.packKnown&&near(donor.pack,bridge.packAmount)&&donor.unit===bridge.unit;
+  return !!donor&&donorAllowed(row,bridge.productKey,donor)&&sesumDonorFingerprint(donor)===bridge.productFingerprint&&currentGroups(base,bridge.productKey).length>0&&donor.packKnown&&near(donor.pack,bridge.packAmount)&&donor.unit===bridge.unit&&boundNativeIdentity(donor,base,row.source.store)!==false;
  }
  function ingest(input){
   if(!plain(input)||!Array.isArray(input.familyIds)||input.familyIds.length>10000||input.familyIds.some(id=>!stable(id)))throw Error('Invalid Sesum family IDs.');
@@ -221,6 +233,7 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
   if(input.status==='approved'){
    const donor=stable(input.productKey)?base?.product(input.productKey):null;
    if(!donor||!donorAllowed(row,input.productKey,donor)||sesumDonorFingerprint(donor)!==input.productFingerprint)throw Error('Donor metadata changed; review its current fingerprint.');
+   if(boundNativeIdentity(donor,base,row.source.store)===false)throw Error('Native identity metadata changed; review its current fingerprint.');
    if(!currentGroups(base,input.productKey).length)throw Error('A donor needs a current reviewed product family.');
    if(!positive(input.packAmount)||!['kg','l','stk','m'].includes(input.unit)||!donor.packKnown||!near(donor.pack,input.packAmount)||donor.unit!==input.unit)throw Error('The bridge requires the donor\'s current documented canonical package.');
    if(row.source.soldByWeight)throw Error('Variable-weight Sesum products need a separate verified unit-price contract.');
@@ -249,14 +262,15 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
   for(const entry of entries){const key=`kassal:${entry.store}:${entry.id}`,rows=nativeByProduct.get(key)??[];rows.push(entry);nativeByProduct.set(key,rows);}
   const peers=new Map();
   for(const bridge of active){
-   const row=sourceRow(bridge.sourceKey),donor=base.product(bridge.productKey),key=bridge.productKey+'|'+row.source.store;
+   const row=sourceRow(bridge.sourceKey),donor=base.product(bridge.productKey),identity=boundNativeIdentity(donor,base,row.source.store),anchorKey=identity?.key??bridge.productKey,anchor=identity?.product??donor,key=anchorKey+'|'+row.source.store;
    let group=peers.get(key);
    if(!group){
-    const quotes=donor.store===row.source.store?(nativeByProduct.get(bridge.productKey)??[]).filter(entry=>compatibleNative(entry,donor)).map(nativeQuote).filter(Boolean):[];
-    let selected=donor.store===row.source.store?donor.quote:null;
+    const quotes=anchor.store===row.source.store?(nativeByProduct.get(anchorKey)??[]).filter(entry=>compatibleNative(entry,anchor)).map(nativeQuote).filter(Boolean):[];
+    let selected=anchor.store===row.source.store?anchor.quote:null;
     for(const quote of quotes)selected=chooseQuote(selected,quote);
-    group={donor,productKey:bridge.productKey,store:row.source.store,selected,nativeQuotes:quotes};peers.set(key,group);
+    group={donor:anchor,productKey:anchorKey,store:row.source.store,selected,nativeQuotes:quotes,explicitNativeIdentity:!!identity};peers.set(key,group);
    }
+   if(identity)group.explicitNativeIdentity=true;
    group.selected=chooseQuote(group.selected,quoteOf(row,bridge));
   }
   const validation=hash([...peers.values()].map(group=>[group.productKey,group.store,sesumDonorFingerprint(group.donor),group.donor.quote,group.nativeQuotes,group.donor.available,currentGroups(base,group.productKey).map(m=>[m.groupId,base.group(m.groupId).fingerprint,m.q,m.n])]));
@@ -264,26 +278,27 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
   const out={...index,products:{...index.products},members:Object.fromEntries(Object.entries(index.members).map(([key,rows])=>[key,[...rows]]))};
   for(const bridge of active){
    const row=sourceRow(bridge.sourceKey);
-   const group=peers.get(bridge.productKey+'|'+row.source.store),donor=group.donor,original=quoteOf(row,bridge),selected=group.selected;
-   let quote=original;
+   const donor=base.product(bridge.productKey),identity=boundNativeIdentity(donor,base,row.source.store),group=peers.get((identity?.key??bridge.productKey)+'|'+row.source.store),original=quoteOf(row,bridge),selected=group.selected;
+   let quote=identity?selected:original;
    const ownTime=Date.parse(original.receiptAt),selectedTime=Date.parse(selected?.receiptAt);
-   if(Number.isFinite(ownTime)&&Number.isFinite(selectedTime)){
+   if(!identity&&Number.isFinite(ownTime)&&Number.isFinite(selectedTime)){
     if(ownTime<selectedTime)quote={...original,reasons:[...new Set([...original.reasons,'superseded-price-receipt'])]};
     else if(ownTime===selectedTime&&(selected.reasons.includes('conflicting-latest-prices')||selected.grossPackPrice!==original.grossPackPrice))quote={...original,grossPackPrice:null,reasons:[...new Set([...original.reasons,...selected.reasons,'conflicting-latest-prices'])]};
    }
-   const product={...donor,store:row.source.store,id:row.source.id,source:'sesum',productKey:row.sourceKey,sourceUrl:row.source.sourceUrl,ean:row.source.ean[0]??donor.ean??null,available:donor.store!==row.source.store||donor.available!==false,donorProductKey:bridge.productKey,sourceFingerprint:row.fingerprint,metadataFingerprint:hash([row.fingerprint,bridge.productFingerprint]),quote};
+   const product={...donor,store:row.source.store,id:row.source.id,source:'sesum',productKey:row.sourceKey,sourceUrl:row.source.sourceUrl,ean:row.source.ean[0]??donor.ean??null,available:group.donor.store!==row.source.store||group.donor.available!==false,donorProductKey:bridge.productKey,sourceFingerprint:row.fingerprint,metadataFingerprint:hash([row.fingerprint,bridge.productFingerprint]),quote};
    out.products[row.sourceKey]=product;
    for(const m of currentGroups(base,bridge.productKey)){
     const member={...m,k:row.sourceKey,u:positive(quote.grossPackPrice)&&!quote.reasons.length?quote.grossPackPrice/bridge.packAmount:null};
     if(out.members[m.groupId].some(existing=>existing.k===row.sourceKey))out.members[m.groupId]=out.members[m.groupId].map(existing=>existing.k===row.sourceKey?member:existing);
     else out.members[m.groupId].push(member);
    }
-   if(donor.store===row.source.store){
-    const previous=out.products[bridge.productKey];
+   if(group.donor.store===row.source.store){
+    const previous=out.products[group.productKey];
     if(selected!==previous.quote){
-     out.products[bridge.productKey]={...previous,quote:selected};
-     for(const groupId of Object.keys(out.members))out.members[groupId]=out.members[groupId].map(m=>m.k===bridge.productKey?{...m,u:positive(selected.grossPackPrice)&&!selected.reasons.length?selected.grossPackPrice/bridge.packAmount:null}:m);
+     out.products[group.productKey]={...previous,quote:selected,...(group.explicitNativeIdentity?{sesumIdentityReviewed:true}:{})};
+     for(const groupId of Object.keys(out.members))out.members[groupId]=out.members[groupId].map(m=>m.k===group.productKey?{...m,u:positive(selected.grossPackPrice)&&!selected.reasons.length?selected.grossPackPrice/group.donor.pack:null}:m);
     }
+    else if(group.explicitNativeIdentity)out.products[group.productKey]={...previous,sesumIdentityReviewed:true};
    }
   }
   overlayIndex=index;overlayRevision=state.revision;overlayValidation=validation;overlayFactory=createIndexReader(out,{horizonDays:base.horizonDays});
@@ -295,7 +310,7 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
   for(const entry of entries){
    if(entry.status!=='approved')continue;
    const key=`kassal:${entry.store}:${entry.id}`,q=over.quote(key),p=q?.product;
-   if(!q?.reviewCurrent||!['sesum','native-catalog'].includes(q.price.priceSource)||p.unit!==entry.unit||!near(p.pack,entry.packAmount)||p.textHash!==productTextHash(entry))continue;
+   if(!(q?.reviewCurrent||p?.sesumIdentityReviewed===true)||!['sesum','native-catalog'].includes(q.price.priceSource)||p.unit!==entry.unit||!near(p.pack,entry.packAmount)||p.textHash!==productTextHash(entry))continue;
    if(p.rawPack&&(p.rawPack.weight!==entry.weight||normalize(p.rawPack.weightUnit)!==normalize(entry.weightUnit)))continue;
    result.set(`${entry.watchId}|${entry.store}|${entry.id}`,{watchId:entry.watchId,store:entry.store,id:entry.id,canonicalPackAmount:p.pack,...q.price});
   }

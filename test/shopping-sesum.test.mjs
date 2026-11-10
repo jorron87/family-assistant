@@ -113,9 +113,9 @@ test('multiple EANs and unknown weight mode survive; unproven quotes remain raw 
 
 test('valid EANs and separate short source codes reach encrypted catalog without a PLU identity inference',async t=>{
   const f=fixture(t);let work=f.client.work(),job=work.jobs[0];await f.client.receive(response(work,job,search(job,{products:[productUrl]})));work=f.client.work();job=work.jobs[0];
-  const result=product(job);result.product.name='Synthetic potatoes';result.product.ean=['1234567890123'];result.product.nonEanCodes=['4073','0001','4073'];
-  await f.client.receive(response(work,job,result));const received=f.received[0].products[0];assert.deepEqual(received.ean,['1234567890123']);assert.deepEqual(received.nonEanCodes,['4073','0001']);
-  const restored=createSesumCollector(f.options),saved=restored.catalog().items[0].product;assert.deepEqual(saved.ean,['1234567890123']);assert.deepEqual(saved.nonEanCodes,['4073','0001']);assert.equal(saved.prices[0].price,7.9);
+  const result=product(job);result.product.name='Synthetic potatoes';result.product.ean=['1234567890123'];result.product.nonEanCodes=['4073','0001','4073','KIWI-synthetic-64stk'];
+  await f.client.receive(response(work,job,result));const received=f.received[0].products[0];assert.deepEqual(received.ean,['1234567890123']);assert.deepEqual(received.nonEanCodes,['4073','0001','KIWI-synthetic-64stk']);
+  const restored=createSesumCollector(f.options),saved=restored.catalog().items[0].product;assert.deepEqual(saved.ean,['1234567890123']);assert.deepEqual(saved.nonEanCodes,['4073','0001','KIWI-synthetic-64stk']);assert.equal(saved.prices[0].price,7.9);
 });
 
 test('only a selected schema-failed product is retried after a fix; every completed search is retained',async t=>{
@@ -208,7 +208,7 @@ test('all 91 families keep local query overrides while unknown fields and malfor
   const job=work.jobs[0];await f.client.receive(response(work,job,search(job,{products:[productUrl]})));
   // Use a single-family fixture so the own-product job is the next eligible job.
   const own=fixture(t);let next=own.client.work(),searchJob=next.jobs[0];await own.client.receive(response(next,searchJob,search(searchJob,{products:[productUrl]})));next=own.client.work();const detail=next.jobs[0];
-  for(const patch of [{brand:{cookie:'private'}},{vendor:'v'.repeat(301)},{weight:-1},{weightUnit:'g'.repeat(31)},{soldByWeight:'false'},{ean:Array(31).fill('12345678')},{ean:['1234567890123','4073']},{nonEanCodes:['not-a-code']},{nonEanCodes:['12345678']},{nonEanCodes:Array(31).fill('4073')}]){
+  for(const patch of [{brand:{cookie:'private'}},{vendor:'v'.repeat(301)},{weight:-1},{weightUnit:'g'.repeat(31)},{soldByWeight:'false'},{ean:Array(31).fill('12345678')},{ean:['1234567890123','4073']},{nonEanCodes:['not a code']},{nonEanCodes:['12345678']},{nonEanCodes:Array(31).fill('4073')}]){
     const result=product(detail);Object.assign(result.product,patch);await assert.rejects(own.client.receive(response(next,detail,result)),/Sesum/);
   }
   assert.equal(own.received.length,0);const valid=product(detail);valid.product.cookie='must-not-cross';valid.prices[0].token='must-not-cross';

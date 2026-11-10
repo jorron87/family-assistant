@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createSesumPrices,sesumDonorFingerprint} from '../src/sesum-prices.mjs';
+import {createSesumDiscovery} from '../src/sesum-discovery.mjs';
 import {createIndexReader} from '../src/shopping-library.mjs';
-import {productTextHash} from '../src/product-library.mjs';
+import {productTextHash,groupMetadataFingerprint} from '../src/product-library.mjs';
 import {createLibraryExplorer} from '../src/library-explorer.mjs';
 
 const NOW='2026-11-09T12:10:00Z',OLD='2026-05-01T10:00:00Z',RECEIPT='2026-11-09T12:05:00Z';
@@ -33,7 +34,12 @@ test('short source codes are preserved separately and never become barcode donor
  assert.deepEqual(first.source.nonEanCodes,['4073']);assert.deepEqual(first.source.ean,[]);assert.deepEqual(first.donors,[]);
  f.ingest(f.source({name:'Unmapped produce',brand:null,ean:[],nonEanCodes:['4074']}));
  assert.notEqual(f.prices.candidates()[0].sourceFingerprint,first.sourceFingerprint,'changed local identifiers require a new review');
- assert.throws(()=>f.ingest(f.source({nonEanCodes:['not-a-code']})),/non-EAN/);
+ for(const code of ['https://example.test/id','bad code','bad\ncode',123,'x'.repeat(201),'7035620060182'])assert.throws(()=>f.ingest(f.source({nonEanCodes:[code]})),/non-EAN/);
+});
+test('opaque native source identifiers survive with real EANs but never become donor barcode matches',()=>{
+ const f=fixture(),opaque='KIWI-v-tservietter-plastfri-64stk-lillego';f.p.ean=opaque;
+ f.ingest(f.source({name:'Separate source item',brand:null,ean:['7035620060182'],nonEanCodes:[opaque]}));
+ const row=f.prices.candidates()[0];assert.deepEqual(row.source.ean,['7035620060182']);assert.deepEqual(row.source.nonEanCodes,[opaque]);assert.equal(row.donors.length,0);assert.equal(row.price.price,7.9);
 });
 test('a reviewed bridge recomputes the unit price from package price and revives parked source rows',()=>{
  const f=fixture({old:true});f.ingest();f.approve();const key=f.prices.candidates()[0].sourceKey,over=f.prices.overlay();
@@ -188,6 +194,45 @@ test('new reviewed native Sesum products can be their own donor without duplicat
  native.sourceFingerprint='b'.repeat(64);assert.throws(approve,/Donor metadata changed/);
  native.sourceFingerprint=record.sourceFingerprint;native.donorProductKey='kassal:KIWI:8';assert.throws(approve,/Donor metadata changed/);
  delete native.donorProductKey;native.nativeDiscovery=false;assert.throws(approve,/Donor metadata changed/);
+});
+
+test('self registration uses the explicitly bound same-chain latest price inside its new narrow family',()=>{
+ const f=fixture(),state={},native=[],selfKey='sesum:KIWI:123',narrow={id:'narrow-source-family',name:'Narrow source family',category:'Synthetic',canonicalUnit:'kg',inclusionCriteria:'The specifically researched plain variant',exclusions:['Other variants'],qualityBasis:'Actual independently read contents',comparisonBasis:'Per kg'};
+ let discovery;
+ const prices=createSesumPrices(state,{now:()=>new Date(f.clock.at),reader:()=>discovery?.overlay(f.reader())??f.reader(),nativeEntries:()=>native});
+ discovery=createSesumDiscovery({}, {now:()=>new Date(f.clock.at),reader:f.reader,source:key=>prices.sourceRecord(key)});
+ prices.ingest({familyIds:['family:narrow'],products:[f.source()],fetchedAt:NOW});
+ const source=prices.sourceRecord(selfKey);
+ discovery.register({sourceKey:selfKey,sourceFingerprint:source.sourceFingerprint,identityEvidence:'Actual source SKU, brand, physical form and fixed package researched.',nativeProductKey:f.productKey,nativeProductFingerprint:sesumDonorFingerprint(f.p),nativeIdentityEvidence:'The same physical brand/variant and fixed 390 g pack was explicitly verified in both primary sources.',product:{ingredients:null,description:'Source contents are independent; no native recipe was copied.'},packAmount:.39,unit:'kg',packEvidence:'Original fixed 390 g source package read.',groups:[narrow],memberships:[{groupId:narrow.id,groupFingerprint:groupMetadataFingerprint(narrow),equivalenceEvidence:'This specific source variant satisfies the narrow rules.',qualityEvidence:'Actual source form and label reviewed independently.'}],sourceReceipts:[{url:'https://shop.example/original-label',observedAt:RECEIPT,evidence:'Actual fixed package and physical identity were read.'}]});
+ const self=discovery.overlay().product(selfKey);
+ prices.review({sourceKey:selfKey,sourceFingerprint:source.sourceFingerprint,status:'approved',productKey:selfKey,productFingerprint:sesumDonorFingerprint(self),packAmount:.39,unit:'kg',equivalenceEvidence:'The independently registered source product is approved for its narrow family.',packEvidence:'Actual fixed 390 g package verified.'});
+ assert.equal(prices.overlay().quote(selfKey).price.grossPackPrice,7.9);
+ const before=prices.overlay().index();
+ f.index.products[f.productKey]={...f.p,quote:{...f.p.quote,grossPackPrice:20,receiptAt:'2026-11-09T12:06:00Z'}};
+ let over=prices.overlay();assert.notEqual(over.index(),before);assert.equal(over.quote(selfKey).price.grossPackPrice,20);assert.equal(over.quote(selfKey).price.receiptAt,'2026-11-09T12:06:00Z');
+ assert.equal(over.members(narrow.id).filter(m=>m.eligible).length,1,'latest physical native quote remains usable in the source-only narrow family');
+ assert.equal(over.product(selfKey).ingredients,null);assert.equal(over.product(selfKey).nutrition,null);
+ assert.equal(over.product(selfKey).nativeIdentity.key,f.productKey);assert.equal(over.product(selfKey).nativeIdentity.textHash,f.p.textHash);
+ assert.equal(prices.sourceRecord(selfKey).price.price,7.9);assert.equal(prices.sourceRecord(selfKey).price.observedAt,new Date(RECEIPT).toISOString(),'stored original Sesum receipt is never rewritten');
+ native.push(f.nativeEntry({lastChecked:'2026-11-09T12:07:00Z',currentPrice:null}));
+ over=prices.overlay();assert.equal(over.quote(selfKey).price.grossPackPrice,null);assert.ok(over.quote(selfKey).price.reasons.includes('unknown-gross-package-price'));assert.equal(over.members(narrow.id).some(m=>m.eligible),false);
+ native[0]=f.nativeEntry({lastChecked:'2026-11-09T12:07:00Z',currentPrice:22});
+ prices.ingest({familyIds:['family:narrow'],products:[f.source({prices:[{storeCode:'KIWI',price:7.9,source:'RECEIPT',observedAt:'2026-11-09T12:07:00Z'}]})],fetchedAt:NOW});
+ over=prices.overlay();assert.equal(over.quote(selfKey).price.grossPackPrice,null);assert.ok(over.quote(selfKey).price.reasons.includes('conflicting-latest-prices'));assert.equal(over.members(narrow.id).some(m=>m.eligible),false);
+ f.index.products[f.productKey]={...f.index.products[f.productKey],ingredients:'Changed physical native contents'};
+ assert.equal(discovery.record(selfKey),null);assert.equal(prices.overlay().product(selfKey),null,'native identity changes cannot lend their old reviewed relation');
+});
+
+test('explicit source identity may lend a fresh quote to an approved native row without copying family memberships',()=>{
+ const f=fixture(),selfKey='sesum:KIWI:123';f.ingest();
+ const source=f.prices.sourceRecord(selfKey),self={...structuredClone(f.p),source:'sesum',id:'123',sourceUrl:source.source.sourceUrl,nativeDiscovery:true,sourceFingerprint:source.sourceFingerprint,ingredients:null,nutrition:null,nativeIdentity:{key:f.productKey,metadataFingerprint:sesumDonorFingerprint(f.p),textHash:f.p.textHash,rawPack:structuredClone(f.p.rawPack),pack:.39,unit:'kg'}};
+ self.textHash=productTextHash(self);
+ f.index.products[selfKey]=self;f.index.members.tomatoes=[{k:selfKey,s:'approved',r:true,u:null,q:null,n:null}];
+ f.prices.review({status:'approved',sourceKey:selfKey,sourceFingerprint:source.sourceFingerprint,productKey:selfKey,productFingerprint:sesumDonorFingerprint(self),packAmount:.39,unit:'kg',equivalenceEvidence:'Explicitly registered source-only narrow family and native identity.',packEvidence:'Actual same fixed package read.'});
+ const entry=f.nativeEntry({lastChecked:'2026-11-09T12:04:00Z',currentPrice:15});
+ const result=f.prices.provide([entry],{status:'ready',quotes:[]});assert.equal(result.quotes.length,1);assert.equal(result.quotes[0].grossPackPrice,7.9);
+ assert.equal(f.prices.overlay().groupsOf(f.productKey).length,0,'price reconciliation adds no native family membership');
+ for(const patch of [{status:'excluded'},{name:'Different native variant'},{packAmount:1}])assert.equal(f.prices.provide([{...entry,...patch}],{status:'ready',quotes:[]}).quotes.length,0);
 });
 
 test('candidate-only products retain safe research evidence without inventing a usable price or chain',()=>{

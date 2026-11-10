@@ -116,9 +116,9 @@
     // This delivered field sometimes mixes barcodes with short catalogue
     // codes. Keep short digit strings as separate evidence; they are neither
     // EANs nor reviewed identities and must never enter barcode matching.
-    if (ean !== null && (!Array.isArray(ean) || ean.length > 30 || ean.some((item) => typeof item !== 'string' || !/^\d{1,14}$/.test(item)))) throw new Error('invalid_ean');
-    const barcodes = [...new Set((ean ?? []).filter(item => item.length >= 8))];
-    const nonEanCodes = [...new Set((ean ?? []).filter(item => item.length < 8))];
+    if (ean !== null && (!Array.isArray(ean) || ean.length > 30 || ean.some((item) => typeof item !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9:_-]{0,199}$/.test(item)))) throw new Error('invalid_ean');
+    const barcodes = [...new Set((ean ?? []).filter(item => /^\d{8,14}$/.test(item)))];
+    const nonEanCodes = [...new Set((ean ?? []).filter(item => !/^\d{8,14}$/.test(item)))];
     if (raw.weight != null && (!finite(raw.weight) || raw.weight <= 0)) throw new Error('invalid_weight');
     if (raw.soldByWeight != null && typeof raw.soldByWeight !== 'boolean') throw new Error('invalid_sold_by_weight');
     return {

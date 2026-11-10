@@ -157,6 +157,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   s.dealDecisions??={};
   s.purchases??=[];
   s.priceHistory??={};
+  s.priceHistoryBasis??={};
+  s.priceHistoryArchive??={};
   s.productLinks??={};
   s.feedReviewed??={};
   s.feedRead??={};
@@ -206,7 +208,11 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     }
     return found;
   }
-  const nativeHoldsMember=(p,productKey,watchId,entries)=>entries.some(e=>e.watchId===watchId&&(p.donorProductKey??productKey)===catalogKey(e)&&(e.status==='excluded'||p.textHash!==productTextHash(e)||e.status==='approved'&&(e.packAmount!==p.pack||e.unit!==p.unit)||p.rawPack&&(p.rawPack.weight!==e.weight||String(p.rawPack.weightUnit??'').trim()!==String(e.weightUnit??'').trim())));
+  const nativeHoldsMember=(p,productKey,watchId,entries)=>{
+    const identity=p.nativeIdentity??p,key=p.nativeIdentity?.key??p.donorProductKey??productKey;
+    const samePack=(a,b)=>Number.isFinite(a)&&a>0&&Number.isFinite(b)&&b>0&&Math.abs(a-b)<=1e-6*Math.max(a,b);
+    return entries.some(e=>e.watchId===watchId&&key===catalogKey(e)&&(e.status==='excluded'||identity.textHash!==productTextHash(e)||e.status==='approved'&&(!samePack(e.packAmount,identity.pack)||e.unit!==identity.unit)||identity.rawPack&&(identity.rawPack.weight!==e.weight||String(identity.rawPack.weightUnit??'').trim()!==String(e.weightUnit??'').trim())));
+  };
   function currentPrices() {
     const at=now().getTime(),today=shoppingDay(now()),entries=catalog.entries(),native=new Map(),library=sesumPrices.provide(entries,libraryPrices?.(entries)??{status:'disabled',quotes:[]});
     const key=p=>`${p.watchId}|${catalogKey(p)}`;
@@ -387,7 +393,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       const hasSaving=amount>0||alternative||!!market||globalReference!==null;
       if(hasSaving&&reference<=unitPrice)continue;
       const plan=planQuantities({tier,need,shelfMonths,stock,offer:o,caps:[w.maxPacks,o.maxPacks],unitSaving:Math.max(0,reference-unitPrice)});
-      const history=Object.values(s.priceHistory[w.id]??{});
+      const history=historyValues(w);
       const deal={...o,watchName:w.name,storeName:store.name,unitPrice:round(unitPrice),referencePrice:round(reference),referenceType,referenceSourceUrl:market?'https://kassal.app/api':alternative?ceiling.sourceUrl:null,discountPct:round(discountPct),tier,storage:w.storage,quantityBasis:need.basis,annualAmount:need.amount===null?null:round(need.amount),shelfMonths,fullMonths:plan.fullMonths,stock,checkStock:!stock.known||stock.needsCheck,lowestSeen:history.length>=30&&unitPrice<=Math.min(...history)};
       if(plan.covered){covered.push({...deal,saving:null,packs:0,options:[]});continue;}
       if(!plan.recommended||(hasSaving&&plan.recommended.saving<=0))continue;
@@ -466,6 +472,27 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     return entry;
   }
   function nutrition(input){const entry=validateNutrition(input);if(!orders().some(o=>o.products.some(p=>p.productKey===entry.productKey)))throw Error('Ukjent produkt.');return update(()=>s.nutrition[entry.productKey]=entry);}
+  function historyBasis(w,products,approved){
+    // Only semantic identity and reviewed normalization belong in this basis.
+    // New prices, receipt dates and review prose do not redefine past prices.
+    const basis={version:1,mode:w.catalogManaged?'catalog':'caller-reviewed',unit:w.unit,products:products.map(p=>({store:String(p.store),id:String(p.id),packAmount:p.packAmount,unit:p.unit,metadataFingerprint:w.catalogManaged?approved.get(`${p.store}\0${p.id}`).fingerprint:null})).sort((a,b)=>a.store<b.store?-1:a.store>b.store?1:a.id<b.id?-1:a.id>b.id?1:a.packAmount-b.packAmount||(a.unit<b.unit?-1:a.unit>b.unit?1:0))};
+    return {...basis,fingerprint:createHash('sha256').update(JSON.stringify(basis)).digest('hex')};
+  }
+  function knownHistoryBasis(basis){
+    if(!basis||basis.version!==1||!['catalog','caller-reviewed'].includes(basis.mode)||!['kg','l','stk'].includes(basis.unit)||!Array.isArray(basis.products))return false;
+    if(basis.products.some(p=>!p||typeof p.store!=='string'||typeof p.id!=='string'||!Number.isFinite(p.packAmount)||p.packAmount<=0||p.unit!==basis.unit||(basis.mode==='catalog'?!/^[a-f0-9]{64}$/.test(p.metadataFingerprint??''):p.metadataFingerprint!==null)))return false;
+    const {version,mode,unit,products}=basis;
+    return basis.fingerprint===createHash('sha256').update(JSON.stringify({version,mode,unit,products})).digest('hex');
+  }
+  function historyValues(w){
+    const basis=s.priceHistoryBasis[w.id];
+    if(!knownHistoryBasis(basis)||basis.unit!==w.unit||basis.mode!==(w.catalogManaged?'catalog':'caller-reviewed'))return [];
+    if(w.catalogManaged){
+      const entries=new Map(catalog.entries(w.id).map(p=>[`${p.store}\0${p.id}`,p]));
+      if(basis.products.some(p=>{const entry=entries.get(`${p.store}\0${p.id}`);return !entry||entry.status!=='approved'||entry.fingerprint!==p.metadataFingerprint||entry.packAmount!==p.packAmount||entry.unit!==p.unit;}))return [];
+    }
+    return Object.values(s.priceHistory[w.id]??{});
+  }
   function market(input){
     const w=s.watches[input.watchId];if(!w)throw Error('Ukjent overvåkning.');
     if(!Array.isArray(input.products)||input.products.length>500||input.products.some(p=>p.reviewed===true&&!text(p.equivalenceEvidence)))throw Error('Markedsprodukter krever konkret sammenligningsbelegg.');
@@ -477,6 +504,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       return {...p,reviewed:p.reviewed===true&&!!entry&&entry.packAmount===p.packAmount&&entry.unit===p.unit,equivalenceEvidence:entry?.equivalenceEvidence??p.equivalenceEvidence};
     });
     const result=calibrateMarket({unit:w.unit,products,now:now(),windowDays:days});
+    const basis=historyBasis(w,result.products,approved);
     const ceiling=w.referenceCeiling;
     if(result.status==='ready'&&ceiling&&now().getTime()-Date.parse(ceiling.checkedAt)<=48*3600000&&ceiling.price<result.goodPrice){
       result.goodPrice=ceiling.price;
@@ -486,11 +514,28 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     }
     return update(()=>{
       const {dailyBest,rejectedObservations,...summary}=result;
-      const series=s.priceHistory[w.id]??={};
+      const previousBasis=s.priceHistoryBasis[w.id]??null;
+      let series=s.priceHistory[w.id]??{};
+      const basisChanged=!knownHistoryBasis(previousBasis)||previousBasis.fingerprint!==basis.fingerprint;
+      const needsNewBasis=basisChanged&&result.status==='insufficient';
+      const knownAutomatic=!!w.marketCalibration&&w.priceGuide?.evidence?.startsWith('Kassal-markedshistorikk:')===true;
+      const quarantine=needsNewBasis&&!w.manualLimits&&knownAutomatic;
+      const automaticGuide=quarantine?{priceGuide:structuredClone(w.priceGuide??null),targetPrice:w.targetPrice??null,excellentPrice:w.excellentPrice??null}:null;
+      const reason=knownHistoryBasis(previousBasis)?'reviewed-product-basis-changed':'legacy-unbound-history';
+      const fallback=needsNewBasis?{status:'needs-review',reason,automaticGuideQuarantined:quarantine}:result.status==='insufficient'?w.marketCalibration?.fallback??null:null;
+      if(basisChanged){
+        if(Object.keys(series).length||automaticGuide&&Object.values(automaticGuide).some(value=>value!==null))(s.priceHistoryArchive[w.id]??=[]).push({archivedAt:now().toISOString(),reason,basis:structuredClone(previousBasis),series:structuredClone(series),replacedBy:basis.fingerprint,...(automaticGuide?{automaticGuide}:{})});
+        series={};
+      }
+      // A requested window does not prove a complete response: some sources
+      // return only their latest receipts. Preserve older actual observations
+      // only when their semantic basis is unchanged.
       for(const point of dailyBest)series[point.day]=point.price;
       const oldest=shoppingDay(new Date(now().getTime()-400*86400000));
       for(const day of Object.keys(series))if(day<oldest)delete series[day];
-      w.marketCalibration={...summary,rejectedObservationCount:rejectedObservations.length};
+      s.priceHistory[w.id]=series;s.priceHistoryBasis[w.id]=basis;
+      if(quarantine){w.priceGuide=null;w.targetPrice=null;w.excellentPrice=null;}
+      w.marketCalibration={...summary,rejectedObservationCount:rejectedObservations.length,...(fallback?{fallback}:{} )};
       if(result.status==='ready'){
         // A limit the family set by hand survives the daily recalibration.
         if(!w.manualLimits){w.targetPrice=result.goodPrice;w.excellentPrice=result.excellentPrice;}
@@ -521,14 +566,14 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   function itemView(w,a,at,catalogPacks=new Map(),offerLow=new Map(),priceContext=currentPrices()) {
     const need=needOf(w,a),rate=rateOf(need),stock=estimateStock(w,rate,at),market=w.marketCalibration,rows=needRows(w,a);
     const normal=w.priceGuide?.referencePrice??null;
-    const history=Object.values(s.priceHistory[w.id]??{});
+    const history=historyValues(w);
     const best=quotesFor(w,priceContext)[0]??null;
     const evaluationReference=comparisonReference(w,a,{kind:'input',unitPrice:Infinity},priceContext);
     // "Good" must be a real step below normal, or the guide just repeats itself.
     const good=w.targetPrice!=null?round(Math.min(w.targetPrice,normal?normal*.92:Infinity,evaluationReference?evaluationReference*.92:Infinity)):null;
     const excellent=w.excellentPrice!=null?round(Math.min(w.excellentPrice,good??Infinity,evaluationReference?evaluationReference*.92:Infinity)):null;
     const chains=market?.coverage?.chainCount;
-    const basis=market?.status==='ready'?market.coverage.observedDays+' dager med priser fra '+chains+(chains===1?' kjede':' kjeder'):market?.status==='needs-review'?'En vare er endret og sjekkes på nytt':w.priceGuide?'Foreløpig, ut fra det dere har betalt':w.targetPrice?'Egen prisgrense':'For lite prisdata ennå';
+    const basis=market?.status==='ready'?market.coverage.observedDays+' dager med priser fra '+chains+(chains===1?' kjede':' kjeder'):market?.status==='needs-review'?'En vare er endret og sjekkes på nytt':market?.fallback?.status==='needs-review'?'Endret varegrunnlag trenger nye prisdata':w.priceGuide?'Foreløpig, ut fra det dere har betalt':w.targetPrice?'Egen prisgrense':'For lite prisdata ennå';
     const sizes=commonPacks(rows,catalogPacks.get(w.id)??[],Object.keys(w.stockPacks??{}).map(Number));
     const links=linkStates(w,priceContext.reader).filter(link=>link.state==='ok');
     return {libraryCategory:links[0]?.group.category??null,libraryGroups:links.map(link=>link.group.name),packs:packBreakdown(sizes,stock.known?w.stockPacks??null:null,stock.amount),id:w.id,name:w.name,unit:w.unit,storage:w.storage,enabled:w.enabled!==false,manualLimits:w.manualLimits===true,annualAmount:need.amount===null?null:round(need.amount),annualBasis:need.basis,shelfLifeMonths:shelfLifeMonths(w),shelfCustom:w.shelfLifeMonths!=null,shelfDefault:defaultShelfLifeMonths(w),stock,spent:round(rows.reduce((n,p)=>n+p.spent,0)),prices:{normal,evaluationReference,good,excellent,targetPrice:w.targetPrice,current:best?round(best.unitPrice):null,currentChain:best?.storeName.replace(/\s*\(nettbutikk\)$/i,' (+ frakt)')??null,currentSourceUrl:best?.sourceUrl??null,currentCheckedAt:best?.lastChecked??null,lowestSeen:history.length>=30?Math.min(...history):null,historyDays:history.length,basis}};
