@@ -16,7 +16,7 @@ export function groupPlacementWork(rows,identity){
 // A review is reusable only on the exact same source, registration and whole
 // family basis. Newer holds and explicit reopen tombstones always win.
 export function placementDelta(source,registrationFingerprint,latest,families){
- const valid=latest&&['reviewed','no-active-family'].includes(latest.status)&&latest.reviewedAllFamilies===true&&latest.sourceFingerprint===source.sourceFingerprint&&latest.registrationFingerprint===registrationFingerprint&&latest.familyProofVersion===1&&Array.isArray(latest.reviewedFamilies);
+ const valid=latest&&latest.sourceKey===source.sourceKey&&['reviewed','no-active-family'].includes(latest.status)&&latest.reviewedAllFamilies===true&&latest.sourceFingerprint===source.sourceFingerprint&&latest.registrationFingerprint===registrationFingerprint&&latest.familyProofVersion===1&&Array.isArray(latest.reviewedFamilies);
  const prior=new Map(valid?latest.reviewedFamilies.map(f=>[f.familyId,f.familyFingerprint]):[]);
  const retained=families.filter(f=>prior.get(f.familyId)===f.familyFingerprint),ids=new Set(retained.map(f=>f.familyId));
  return {familiesToReview:families.filter(f=>!ids.has(f.familyId)).map(f=>f.familyId),retainedFamilyIds:[...ids],retainedTargets:valid?(latest.targets??[]).filter(t=>ids.has(t.familyId)):[]};

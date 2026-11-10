@@ -10,7 +10,7 @@ export function createShoppingMaintenance({store,oda,kassal,enabled,clock=Date.n
     if(!Array.isArray(watchIds)||watchIds.length>10||watchIds.some(id=>!allowed.has(id)))throw Error('Select at most ten currently reviewable market families.');
     const lease=store.beginRun();if(!lease.acquired)return {deferred:true,reason:'busy'};
     running=true;
-    try{const results=[];for(const watchId of new Set(watchIds))results.push(await refreshReviewedMarket({shopping:store.shopping,kassal,watchId}));lastResult={kind:'market',results};lastError=null;return lastResult;}
+    try{const results=[];for(const watchId of new Set(watchIds)){if(store.snapshot().runLease?.token!==lease.lease.token)throw Error('Market refresh lease changed.');store.renewRun?.(lease.lease.token);results.push(await refreshReviewedMarket({shopping:store.shopping,kassal,watchId}));}lastResult={kind:'market',results};lastError=null;return lastResult;}
     catch(error){lastError='Reviewed market refresh failed; unresolved work remains.';retryAt=clock()+30*60000;throw error;}
     finally{running=false;if(store.snapshot().runLease?.token===lease.lease.token)store.endRun(lease.lease.token);}
   }
