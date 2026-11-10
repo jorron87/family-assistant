@@ -14,6 +14,7 @@ import {productTextHash} from './product-library.mjs';
 import {annualNeed,chainName,commonPacks,dealScore,packsFor,dealTier,defaultShelfLifeMonths,estimateStock,packBreakdown,planQuantities,shelfLifeMonths,shelfWithDate} from './shopping-planning.mjs';
 
 const hash=value=>createHash('sha256').update(value).digest('hex').slice(0,24);
+const priceContextExclusions=Symbol('shopping-price-exclusions');
 const catalogKey=p=>p.productKey??`kassal:${p.store}:${p.id}`;
 const round=n=>Math.round((n+Number.EPSILON)*100)/100;
 const text=(v,max=500)=>String(v??'').trim().slice(0,max);
@@ -204,8 +205,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   // short-dated and wholesale web shops stay out of everyday comparisons.
   const linkChains=()=>new Set(['ODA_NO',...s.settings.stores.filter(x=>x.chainCode&&!/nettbutikk/i.test(x.name)).map(x=>x.chainCode)]);
   const linkStates=(w,reader)=>(w.variants??[]).map(link=>{const group=reader?.group(link.groupId)??null;return {...link,group,state:!reader?'unavailable':!group?'missing':group.fingerprint!==link.groupFingerprint?'changed':group.unit!==w.unit?'unit':'ok'};});
-  function linkedMembers(w,reader,{allChains=false,includeParked=false,ignoreScopedExclusions=false}={}) {
-    const found=new Map(),chains=linkChains(),excluded=ignoreScopedExclusions?new Set():sesumScopedExclusions(w,reader);
+  function linkedMembers(w,reader,{allChains=false,includeParked=false,ignoreScopedExclusions=false,excludedSet=null}={}) {
+    const found=new Map(),chains=linkChains(),excluded=ignoreScopedExclusions?new Set():excludedSet??sesumScopedExclusions(w,reader);
     for(const link of linkStates(w,reader)){
       if(link.state!=='ok')continue;
       for(const m of reader.members(link.groupId,{all:includeParked})){
@@ -239,10 +240,13 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     }
     // An explicit, reviewed group link adds its other products. Any native row
     // for the same product wins, so a family exclusion always holds.
-    const reader=libReader();
+    const reader=libReader(),exclusionsByFamily=new Map();
+    const hasScopedExclusions=Object.values(s.sesumFamilyReviews).some(rows=>Object.values(rows).some(row=>row.status==='excluded'||row.holdExcluded===true));
+    const approvedByKey=reader&&hasScopedExclusions?new Map(sesumPrices.approvedSources().map(source=>[source.sourceKey,source])):null;
+    const exclusionsFor=w=>{if(!exclusionsByFamily.has(w.id))exclusionsByFamily.set(w.id,sesumScopedExclusions(w,reader,approvedByKey));return exclusionsByFamily.get(w.id);};
     if(reader)for(const w of Object.values(s.watches)){
       if(w.enabled===false)continue;
-      for(const m of linkedMembers(w,reader).values()){
+      for(const m of linkedMembers(w,reader,{excludedSet:exclusionsFor(w)}).values()){
         const p=m.product,k=key({watchId:w.id,store:p.store,id:p.id,productKey:m.productKey});
         if(nativeHoldsMember(p,m.productKey,w.id,entries))continue;
         if(!m.eligible||native.has(k)&&native.get(k).status!=='pending')continue; // An approved family member needs no second review.
@@ -250,11 +254,9 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
         native.set(k,{watchId:w.id,store:p.store,id:p.id,productKey:m.productKey,name:p.name,ean:p.ean,brand:p.brand,sourceUrl:p.sourceUrl,status:'approved',approved:true,unit:w.unit,packAmount,price:packAmount?m.price.grossPackPrice??m.unitPrice*packAmount:null,unitPrice:m.unitPrice,lastChecked:m.price.receiptAt,priceSource:'library',priceSourceUrl:m.price.sourceUrl??p.sourceUrl,origin:'library',groupId:m.groupId,image:p.image??null});
       }
     }
-    const scopedByFamily=new Map();
     for(const p of native.values()){
       const w=s.watches[p.watchId];if(!w)continue;
-      if(!scopedByFamily.has(w.id))scopedByFamily.set(w.id,sesumScopedExclusions(w,reader));
-      if(scopedProductHeld(scopedByFamily.get(w.id),reader?.product(catalogKey(p))??p,catalogKey(p)))Object.assign(p,{approved:false,status:'excluded',price:null,unitPrice:null});
+      if(scopedProductHeld(exclusionsFor(w),reader?.product(catalogKey(p))??p,catalogKey(p)))Object.assign(p,{approved:false,status:'excluded',price:null,unitPrice:null});
     }
     const quotes=[],campaigns=Object.values(s.offers).some(o=>o.sesumCampaign)?sesumCampaignContexts():new Map();
     for(const p of native.values())if(p.approved&&(!variablePack(p.name)||p.priceSource==='library')&&p.unitPrice>0&&Number.isFinite(p.unitPrice)&&freshPrice(p.lastChecked,at)){
@@ -266,7 +268,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       if(!store||!w||o.unit!==w.unit||!o.comparable||o.validFrom>today||o.validTo<today||o.bestBefore&&o.bestBefore<today||!freshPrice(o.observedAt,at)||o.memberOnly&&!store.memberEligible||campaignOfferState(o,campaigns))continue;
       quotes.push({...o,offerId:o.id,storeName:store.name,chainCode:store.chainCode??null,unitPrice:o.price/o.packAmount,lastChecked:o.observedAt,kind:'offer'});
     }
-    return {entries:[...native.values()],reviewedNative:entries,quotes,libraryStatus:library.status,reader,campaigns,excluded:new Set([...native.values()].filter(e=>e.status==='excluded').map(key))};
+    return Object.defineProperty({entries:[...native.values()],reviewedNative:entries,quotes,libraryStatus:library.status,reader,campaigns,excluded:new Set([...native.values()].filter(e=>e.status==='excluded').map(key))},priceContextExclusions,{value:exclusionsFor});
   }
   const quotesFor=(w,prices=currentPrices())=>prices.quotes.filter(p=>p.watchId===w.id&&p.unit===w.unit).sort((a,b)=>a.unitPrice-b.unitPrice||String(a.storeName).localeCompare(String(b.storeName)));
   function comparisonReference(w,a,candidate,prices=currentPrices()) {
@@ -718,9 +720,9 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   // family is shown for comparison only and never becomes a price reference.
   function familyMembers(w,base,prices) {
     const reader=prices.reader;if(!reader||w?.family?.kind==='own')return [];
-    if(w?.variants?.length)return [...linkedMembers(w,reader,{allChains:true}).values()];
+    if(w?.variants?.length)return [...linkedMembers(w,reader,{allChains:true,excludedSet:prices[priceContextExclusions]?.(w)??null}).values()];
     if(!base)return [];
-    const seen=new Map(),excluded=w?sesumScopedExclusions(w,reader):new Set();
+    const seen=new Map(),excluded=w?(prices[priceContextExclusions]?.(w)??sesumScopedExclusions(w,reader)):new Set();
     for(const m of reader.groupsOf(catalogKey(base))){
       if(m.s!=='approved'||!m.r||w&&reader.group(m.groupId)?.unit!==w.unit)continue;
       for(const row of reader.members(m.groupId))if(row.status==='approved'&&row.reviewCurrent&&!seen.has(row.productKey)&&!scopedProductHeld(excluded,row.product,row.productKey))seen.set(row.productKey,row);
@@ -1478,11 +1480,11 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   function scopedProductHeld(excluded,p,key){
     return [key,...[p.nativeIdentity?.key,p.donorProductKey].filter(alias=>alias?.split(':')[1]===p.store)].some(alias=>excluded.has(alias));
   }
-  function sesumScopedExclusions(w,reader){
+  function sesumScopedExclusions(w,reader,approvedByKey=null){
     const reviews=Object.entries(s.sesumFamilyReviews).filter(([,rows])=>rows[w.id]?.status==='excluded'||rows[w.id]?.holdExcluded===true),excluded=new Set();
     if(!reviews.length||!reader)return excluded;
     for(const [sourceKey] of reviews){
-      const approved=sesumPrices.approvedSource(sourceKey),source=approved??sesumPrices.sourceRecord(sourceKey);if(!source)continue;
+      const approved=approvedByKey?approvedByKey.get(sourceKey):sesumPrices.approvedSource(sourceKey),source=approved??sesumPrices.sourceRecord(sourceKey);if(!source)continue;
       excluded.add(sourceKey);
       const actualAt=source.price?.observedAt??source.receipt?.observedAt;
       if(!approved&&actualAt&&!withinPriceHorizon(actualAt,now().getTime(),reader.horizonDays))continue;
@@ -1513,7 +1515,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   function sesumFamilyContexts(){
     const reader=libReader(),sources=sesumResearches(reader),requirements=sesumRequirements(),native=catalog.entries(),semantic=sesumPlacementFamilies().families,result=[];
     if(!reader||!sources.size)return result;
-    const nativeByKey=new Map(native.map(e=>[e.watchId+'\0'+catalogKey(e),e])),chains=linkChains(),membersByFamily=new Map();
+    const nativeByKey=new Map(native.map(e=>[e.watchId+'\0'+catalogKey(e),e])),chains=linkChains(),membersByFamily=new Map(),exclusionsByFamily=new Map();
     for(const source of sources.values()){
       if(!sesumCatalogue.researchable(source.source))continue;
       const p=reader.product(source.sourceKey),receiptAt=reader.quote(source.sourceKey)?.price.receiptAt??source.receipt.observedAt;
@@ -1522,8 +1524,9 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
         const w=s.watches[familyId];if(!w||w.enabled===false)continue;
         const decision=sesumFamilyDecision(source,familyId,requirements,source.registrationFingerprint);
         if(decision?.status==='excluded')continue;
-        if(!membersByFamily.has(familyId))membersByFamily.set(familyId,linkedMembers(w,reader,{includeParked:true}));
-        const anchor=p.nativeIdentity?.key??p.donorProductKey??source.productKey,entry=nativeByKey.get(familyId+'\0'+anchor),held=nativeHoldsMember(p,source.sourceKey,familyId,entry?[entry]:[])||scopedProductHeld(sesumScopedExclusions(w,reader),p,source.sourceKey);
+        if(!exclusionsByFamily.has(familyId))exclusionsByFamily.set(familyId,sesumScopedExclusions(w,reader,sources));
+        if(!membersByFamily.has(familyId))membersByFamily.set(familyId,linkedMembers(w,reader,{includeParked:true,excludedSet:exclusionsByFamily.get(familyId)}));
+        const anchor=p.nativeIdentity?.key??p.donorProductKey??source.productKey,entry=nativeByKey.get(familyId+'\0'+anchor),held=nativeHoldsMember(p,source.sourceKey,familyId,entry?[entry]:[])||scopedProductHeld(exclusionsByFamily.get(familyId),p,source.sourceKey);
         const own=entry?.status==='approved'&&entry.store===source.source.store&&entry.unit===w.unit&&Math.abs(entry.packAmount-source.packAmount)<=1e-6*Math.max(entry.packAmount,source.packAmount);
         if(!held&&(membersByFamily.get(familyId).has(source.sourceKey)||own))continue;
         result.push({do:'shopping-sesum-family-review',sourceKey:source.sourceKey,sourceFingerprint:source.sourceFingerprint,registrationFingerprint:source.registrationFingerprint,watchId:familyId,watchName:w.name,familyId,familyName:w.name,familyFingerprint:requirements.get(familyId),fingerprint:hash(JSON.stringify([source.registrationFingerprint,requirements.get(familyId)])),groups:source.groups,status:decision?.status==='blocked'?'blocked':'pending',reason:decision?.reason??(held?'review-prior-family-exclusion':'review-new-family-membership'),retryAt:decision?.retryAt??null});
