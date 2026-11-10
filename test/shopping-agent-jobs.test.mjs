@@ -25,6 +25,7 @@ test('automatic price work honors owner, family priority, busy backoff and its o
   const code=createShoppingMaintenance({store,oda,enabled:()=>enabled,clock:()=>at});
   lease={token:'foreign'};await code.tick();assert.equal(lease.token,'foreign');assert.equal(calls,0);lease=null;
   phone=[{status:'queued'}];await code.tick();phone=[];calendar=[{id:'pending'}];await code.tick();calendar=[];enabled=false;await code.tick();assert.equal(calls,0);enabled=true;
+  let stock=[{id:'family-stock'}];store.shopping.stockIntake={work:()=>stock};await code.tick();assert.equal(calls,0);stock=[];
   const pending=code.tick();await code.tick();assert.equal(calls,1);assert.equal(code.status().running,true);resolve({deferred:true,reason:'oda-busy'});await pending;assert.equal(lease,null);assert.equal(code.status().running,false);
   await code.tick();assert.equal(calls,1);at+=5*60000;const retry=code.tick();assert.equal(calls,2);resolve({families:1,results:[]});await retry;assert.equal(lease,null);
   // Even an unexpected failure cannot release a replacement/foreign lease.
