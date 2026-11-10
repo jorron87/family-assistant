@@ -1,12 +1,14 @@
 import {shoppingWorkBatch, SHOPPING_BATCH_LIMIT} from './shopping-work-batch.mjs';
 
 // A source key is an identity, a display name/EAN is not. Only relatedSources
-// already established by the domain may join independent chain identities.
+// or an exact metadata research key established by the domain may join chains.
 export function shoppingAgentJobs(queue = []) {
   const parent = new Map();
   const root = key => {if (!parent.has(key)) parent.set(key,key); const p=parent.get(key); if(p===key)return key; const r=root(p);parent.set(key,r);return r;};
   const keys = item => item.sourceKey ? [item.sourceKey,...(item.relatedSources??[]).map(r=>r.sourceKey)] : [];
   for (const item of queue) {const sources=keys(item);for(const key of sources)parent.set(root(key),root(sources[0]));}
+  const metadata=new Map();
+  for(const item of queue)if(item.sourceKey&&item.researchProductKey){const prior=metadata.get(item.researchProductKey);if(prior)parent.set(root(item.sourceKey),root(prior));else metadata.set(item.researchProductKey,item.sourceKey);}
   const jobs = new Map();
   for (const [index,item] of queue.entries()) {
     // Market calibration is independently bounded per family, not per row.

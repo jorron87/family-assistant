@@ -11,7 +11,7 @@ import {activitySourcePhaseRows} from './source-phase-checkpoint.mjs';
 const shoppingSignalRows=(store,items,{perFamily=false}={})=>items
   .flatMap(item=>perFamily&&item.do==='shopping-market-refresh'&&Array.isArray(item.watchIds)&&item.watchIds.length?[...new Set(item.watchIds)].map(id=>({...item,watchIds:[id]})):[item])
   .filter(item=>!['shopping-list-route','shopping-stock-review'].includes(item.do))
-  .map(item=>['shopping',item.do,item.storeId,item.watchId,item.productId,item.productKey,item.fingerprint,item.lastReview?.checkedAt,item.watchIds,item.do==='shopping-feed-review'?store.shopping.feedFingerprint(item.storeId):null,item.sourceKey,item.sourceFingerprint,Array.isArray(item.familyIds)?[...item.familyIds].sort():null,item.familyFingerprint,item.campaignFingerprint,item.offerTermsFingerprint,item.registrationFingerprint,item.familySetFingerprint]);
+  .map(item=>['shopping',item.do,item.storeId,item.watchId,item.productId,item.productKey,item.fingerprint,item.lastReview?.checkedAt,item.watchIds,item.do==='shopping-feed-review'?store.shopping.feedFingerprint(item.storeId):null,item.sourceKey,item.sourceFingerprint,Array.isArray(item.familyIds)?[...item.familyIds].sort():null,item.familyFingerprint,item.campaignFingerprint,item.offerTermsFingerprint,item.registrationFingerprint,item.familySetFingerprint,item.researchProductKey]);
 function shoppingCohortSignal(store,items){
   const rows=shoppingSignalRows(store,items,{perFamily:true}).map(row=>JSON.stringify(row)).sort();
   return {items:rows,signature:rows.length?createHash('sha256').update(JSON.stringify(rows)).digest('hex'):null};

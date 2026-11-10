@@ -18,6 +18,11 @@ test('native family decisions share a product job while market families stay ind
   const batch=shoppingAgentBatch(rows);assert.equal(batch.jobs.length,20);assert.equal(batch.jobs[0].items.length,2);assert.equal(batch.summary.total,93);assert.equal(batch.summary.agentJobs.total,92);assert.equal(batch.items.find(i=>i.do==='shopping-market-refresh').watchIds.length,19);
 });
 
+test('exact source metadata shares a job across different donor bases without combining their receipts',()=>{
+  const rows=[{do:'shopping-sesum-placement-review',sourceKey:'sesum:KIWI:1',researchProductKey:'full-metadata-a',registrationFingerprint:'donor-a'}, {do:'shopping-sesum-placement-review',sourceKey:'sesum:REMA_1000:1',researchProductKey:'full-metadata-a',registrationFingerprint:'different-donor-b'},{do:'shopping-sesum-family-review',sourceKey:'sesum:REMA_1000:1',watchId:'actual-family'},{do:'shopping-sesum-placement-review',sourceKey:'sesum:COOP_EXTRA:1',researchProductKey:'different-label-b',ean:'same',name:'same'}];
+  const before=JSON.stringify(rows),batch=shoppingAgentBatch(rows);assert.equal(batch.jobs.length,2);assert.equal(batch.jobs[0].items.length,3);assert.equal(batch.items.length,4);assert.deepEqual(batch.jobs[0].sourceKeys,['sesum:KIWI:1','sesum:REMA_1000:1']);assert.equal(JSON.stringify(rows),before);assert.notEqual(batch.jobs[0].items[0].registrationFingerprint,batch.jobs[0].items[1].registrationFingerprint);
+});
+
 test('automatic price work honors owner, family priority, busy backoff and its own lease without launching an agent',async()=>{
   let at=1000000,lease=null,phone=[],calendar=[],resolve,calls=0,enabled=true;
   const store={snapshot:()=>({runLease:lease}),phone:{list:()=>phone},calendarActions:()=>calendar,shopping:{odaRefreshPlan:input=>{assert.equal(input.automatic,true);return [{watchId:'reviewed-family'}];}},beginRun:()=>({acquired:true,lease:lease={token:'owned-code-work'}}),endRun:token=>{assert.equal(token,lease.token);lease=null;}};
