@@ -216,6 +216,17 @@ test('new Sesum discovery launches the existing shopping agent with research and
   }finally{assert.ok(dir.startsWith(join(tmpdir(),'familien-dispatch-sesum-')));rmSync(dir,{recursive:true,force:true});}
 });
 
+test('native-only product batches omit unrelated Sesum research protocols without reducing shopping scope',()=>{
+  const f=shoppingDispatchFixture([{do:'shopping-product-review',productKey:'kassal:ODA_NO:1',productId:'1',watchId:'family',fingerprint:'current'}]);
+  try{
+    f.dispatcher.tick();const prompt=f.launches[0].prompt;
+    assert.match(prompt,/shopping-catalog-review/);assert.match(prompt,/HELE den konkrete ingredienslisten/);
+    assert.doesNotMatch(prompt,/Sesums globale plassering/);assert.doesNotMatch(prompt,/Sesum-discovery:/);
+    assert.match(prompt,/shopping-jobs --id/);assert.equal(f.dispatcher.status().shoppingBatch.summary.agentJobs.shown,1);
+    f.queue.rows=[];f.launches[0].onExit(0);
+  }finally{f.close();}
+});
+
 test('campaign and linked offer terms wake the shopping agent at the same count, while price-date-only replay does not',()=>{
   const row={do:'shopping-sesum-offer-review',sourceKey:'sesum:KIWI:123',sourceFingerprint:'source',watchId:'family',familyFingerprint:'family-a',campaignFingerprint:'campaign-a',offerTermsFingerprint:'offer-a'};
   const store={snapshot:()=>({rawItems:{},events:{}}),reviewQueue:()=>({items:[]}),completionReport:()=>({profileReviews:[],missingDrive:[],unsyncedCalendar:[]}),activityFacebook:()=>[],activityFeedStatus:()=>({changedPages:[]}),shopping:{queue:()=>[row]}};
