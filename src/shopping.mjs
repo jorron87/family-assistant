@@ -158,7 +158,7 @@ export function collapseSameProduct(rows,aliases={}) {
   return out;
 }
 
-export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices,sesumCollectionStatus,sesumResearchTerms=()=>null,odaConnected=()=>false}={}) {
+export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices,sesumCollectionStatus,sesumResearchTerms=()=>null,sesumResearchMaxPriceAgeHours=()=>null,odaConnected=()=>false}={}) {
   state.shopping??={orders:{},watches:{},offers:{},reviews:{},cartReceipts:{},settings:{monitoringEnabled:false,historyFrom:null,stores:[],storageNote:'',stockUpDays:60}};
   const s=state.shopping;
   s.nutrition??={};
@@ -555,7 +555,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const alreadyInFamily=p=>{const w=s.watches[p.watchId];if(!reader||!w)return false;if(!familyMembers.has(w.id))familyMembers.set(w.id,linkedMembers(w,reader,{allChains:true}));return familyMembers.get(w.id).has(`kassal:${p.store}:${p.id}`);};
     const named=x=>x.watchId?{...x,familyId:x.watchId,familyName:x.watchName}:x;
     const flyers=s.settings.stores.filter(x=>!x.facebookGroup).map(store=>({store,...flyerReviewState(store,familySetFingerprint,today)})).filter(x=>x.due).map(({store,review,requiresRescan})=>({do:'shopping-review',storeId:store.id,name:store.name,url:store.url,lastReview:review?structuredClone(review):null,familySetFingerprint,requiresRescan,reason:requiresRescan&&review?'family-checklist-changed':review?'check-due':'unreviewed',fingerprint:hash(JSON.stringify([store.id,familySetFingerprint]))}));
-    return [...stock,...odaRefreshWork(),...catalog.pending().filter(p=>s.watches[p.watchId]?.enabled!==false&&!priceTooOld(p)&&(nativeReviewHeld(p)||!alreadyInFamily(p))).map(p=>({do:'shopping-product-review',watchId:p.watchId,watchName:s.watches[p.watchId]?.name,productId:p.id,store:p.store,name:p.name,fingerprint:p.fingerprint,sourceUrl:p.sourceUrl,...(nativeReviewHeld(p)?{reason:'reopened',reviewHold:structuredClone(p.reviewHold)}:{})})),...feedWork(),...flyers,...marketRefreshDue(today),...sesumPlacementWork(),...sesumCatalogueWork(),...sesumWork(),...sesumFamilyWork(),...sesumOfferWork(),...libraryWork(),...listFamilyWork(),...unlinkedOrderLines(),...routes].map(named);
+    return [...stock,...odaRefreshWork(),...catalog.pending().filter(p=>s.watches[p.watchId]?.enabled!==false&&!priceTooOld(p)&&(nativeReviewHeld(p)||!alreadyInFamily(p))).map(p=>({do:'shopping-product-review',watchId:p.watchId,watchName:s.watches[p.watchId]?.name,productId:p.id,store:p.store,name:p.name,fingerprint:p.fingerprint,sourceUrl:p.sourceUrl,...(nativeReviewHeld(p)?{reason:'reopened',reviewHold:structuredClone(p.reviewHold)}:{})})),...feedWork(),...flyers,...marketRefreshDue(today),...sesumOfferWork(),...sesumFamilyWork(),...sesumWork(),...sesumPlacementWork(),...sesumCatalogueWork(),...libraryWork(),...listFamilyWork(),...unlinkedOrderLines(),...routes].map(named);
   }
   function completion() {
     return inReadContext(completionInContext);
@@ -573,7 +573,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       let status;try{status=sesumCollectionStatus();}catch{status=null;}
       collection=sesumCollectionCompletion(status,status?.enabled?sesumFamilies():[]);
     }
-    const scopeItems=s.settings.monitoringEnabled?sesumPlacement().items:[],researchScopeSummary={sources:scopeItems.length,deferredSearchNoise:scopeItems.filter(i=>!i.discoveryScope.candidate).length,placementTasks:work.filter(i=>i.do==='shopping-sesum-placement-review').length,coverageNote:'Name terms route discovery only; deferred observations are preserved and unreviewed, never product exclusions or complete assortment coverage.'};
+    const scopeItems=s.settings.monitoringEnabled?sesumPlacement().items:[],researchScopeSummary={sources:scopeItems.length,deferredSearchNoise:scopeItems.filter(i=>!i.discoveryScope.candidate&&i.discoveryScope.reason!=='await-current-price').length,deferredPriceResearch:scopeItems.filter(i=>i.discoveryScope.reason==='await-current-price').length,placementTasks:work.filter(i=>i.do==='shopping-sesum-placement-review').length,coverageNote:'Name terms route discovery only; deferred observations are preserved and unreviewed, never product exclusions or complete assortment coverage.'};
     return {researchScope:researchScopeSummary,complete:!work.length&&!blockedStores.length&&!blockedRoutes.length&&!blockedCampaigns.length&&!blockedFamilies.length&&!blockedPlacements.length&&!blockedCatalogue.length&&!blockedOda.length&&collection?.complete!==false,work,blockedStores,blockedRoutes,blockedCampaigns,blockedFamilies,blockedPlacements,blockedCatalogue,blockedOda,...(collection?{collection}:{})};
   }
   function listRouteAttempt(ids) {return update(()=>{for(const e of listRouteWork())if(ids.includes(e.id)){e.routeAttempts=(e.routeAttempts??0)+1;e.routeRetryAt=null;}return true;});}
@@ -1530,8 +1530,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       const current=review?.sourceFingerprint===source.sourceFingerprint&&review.registrationFingerprint===registrationFingerprint&&review.familySetFingerprint===semantic.familySetFingerprint;
       items.push({...source,rawFamilyIds:[...source.familyIds],researchedFamilyIds:sesumResearchedFamilyIds(source,semantic.families),registrationFingerprint,familySetFingerprint:semantic.familySetFingerprint,fingerprint:hash(JSON.stringify([source.sourceKey,source.sourceFingerprint,registrationFingerprint,semantic.familySetFingerprint])),status:current?review.status:'pending',reason:current?review.reason??null:'review-all-active-family-placement',retryAt:current?review.retryAt??null:null,review:review?structuredClone(review):null,...(sourceKey?{source:sesumSubjectRecord(source.sourceKey).source,registration:source.kind==='catalogue'?null:discovery.record(source.sourceKey)}:{})});
     }
-    const terms=sesumResearchTerms();
-    for(const item of items){item.discoveryScope=researchScope(item,semantic.families,terms);if(item.registrationFingerprint||item.researchedFamilyIds.length||item.review?.targets?.length||item.status==='blocked')item.discoveryScope={...item.discoveryScope,candidate:true,retainedKnownResearch:true};}
+    const terms=sesumResearchTerms(),maxAge=sesumResearchMaxPriceAgeHours(),freshIds=new Set(items.filter(i=>i.receiptAt&&now().getTime()-Date.parse(i.receiptAt)>=0&&now().getTime()-Date.parse(i.receiptAt)<=maxAge*3600000).map(i=>sesumSubjectRecord(i.sourceKey).source.id));
+    for(const item of items){item.discoveryScope=researchScope(item,semantic.families,terms);if(item.registrationFingerprint||item.researchedFamilyIds.length||item.review?.targets?.length||item.status==='blocked')item.discoveryScope={...item.discoveryScope,candidate:true,retainedKnownResearch:true};if(Number.isFinite(maxAge)&&maxAge>0&&item.discoveryScope.candidate&&!item.discoveryScope.retainedKnownResearch&&!freshIds.has(sesumSubjectRecord(item.sourceKey).source.id))item.discoveryScope={...item.discoveryScope,candidate:false,reason:'await-current-price'};}
     return {...semantic,items,total:items.length,hasMore:false,scope:{mode:sourceKey?'exact-source':'all-active-sources',sourceKey:sourceKey??null}};
   }
   function sesumPlacementWork({all=false}={}){
