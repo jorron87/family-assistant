@@ -164,3 +164,50 @@ test('a reviewed fixed native 500g row cannot acquire a null-pack direct quote, 
   f.reload();assert.equal(f.item().prices.current,200);assert.equal(otherView().prices.current,109);
   }
 });
+
+test('a real legacy raw own row accepts only an identical same-time source-bound unit-label amendment',t=>{
+  const f=fixture(t);f.ingest({basis:false});const row=f.state.shopping.sesumPrices.products[SOURCE];
+  for(const key of ['variableWeight','unitPriceBasis','unitPriceBasisFingerprint','unitPriceBasisError'])delete row.receipt[key];row.receipt.reasons=[];
+  const legacy=structuredClone(row.receipt);f.register();f.link([f.A,f.B]);assert.equal(f.item().prices.current,200);
+  f.clock.at='2026-11-10T12:01:00Z';f.ingest({observedAt:NOW});assert.equal(f.item().prices.current,109);assert.equal(f.candidate().price.price,109);assert.deepEqual(row.receipt,legacy,'ingestion preserves its prior immutable object in history');
+  const current=f.state.shopping.sesumPrices.products[SOURCE];assert.ok(current.receiptHistory.some(event=>event.receipt.price===109&&!event.receipt.variableWeight));assert.equal(current.receipt.observedAt,'2026-11-10T12:00:00.000Z');
+});
+
+test('only a provably false legacy-marker conflict can be amended on read, with raw history retained',t=>{
+  const f=fixture(t);f.clock.at='2026-11-10T12:00:01Z';f.ingest({observedAt:'2026-11-10T13:00:00.123605+01:00'});f.register();f.link([f.A,f.B]);const row=f.state.shopping.sesumPrices.products[SOURCE],actual=row.receipt.observedAt;
+  const legacy={price:109,observedAt:actual,source:row.receipt.source,sourceStoreCode:'KIWI',isPromo:false,promotion:null,reasons:[]};
+  row.receiptHistory=[{fetchedAt:'2026-11-10T11:59:00Z',sourceFingerprint:row.fingerprint,receipt:legacy}];row.receipt={...row.receipt,price:null,reasons:['conflicting-latest-prices']};
+  const before=structuredClone(row);f.reload();assert.equal(f.candidate().price.price,109);assert.equal(f.candidate().price.unitPriceBasisAmendment.kind,'legacy-own-row-label-v1');assert.equal(f.item().prices.current,109);assert.deepEqual(f.state.shopping.sesumPrices.products[SOURCE],before,'a derived amendment never rewrites raw receipt or history');f.reload();assert.equal(f.item().prices.current,109);
+  f.clock.at='2026-11-10T12:01:00Z';f.ingest({observedAt:actual});assert.equal(f.candidate().price.price,109);assert.equal(f.item().prices.current,109);assert.ok(f.state.shopping.sesumPrices.products[SOURCE].receiptHistory.some(event=>event.receipt.price===null&&event.receipt.reasons.includes('conflicting-latest-prices')));
+});
+
+test('legacy proof amendment never resolves real price, unknown, unit, terms, provenance or metadata conflicts',t=>{
+  const mutations=[
+    event=>{event.receipt.price=119;},event=>{event.receipt.price=null;event.receipt.reasons=['conflicting-latest-prices'];},
+    event=>{event.receipt.source=null;},event=>{event.receipt.promotion={member_only:true};},event=>{event.receipt.isPromo=true;},
+    event=>{event.receipt.sourceStoreCode='COOP_EXTRA';},event=>{event.receipt.observedAt='2026-11-10T12:01:00Z';},event=>{event.sourceFingerprint='0'.repeat(64);},
+    event=>{event.receipt.unitPriceBasis={unit:'l',amount:109};},event=>{event.receipt.variableWeight=true;}
+  ];
+  for(const mutate of mutations){const f=fixture(t);f.ingest();f.register();f.link([f.A,f.B]);const row=f.state.shopping.sesumPrices.products[SOURCE],legacy={fetchedAt:NOW,sourceFingerprint:row.fingerprint,receipt:{price:109,observedAt:row.receipt.observedAt,source:row.receipt.source,sourceStoreCode:'KIWI',isPromo:false,promotion:null,reasons:[]}};mutate(legacy);row.receiptHistory=[legacy];row.receipt={...row.receipt,price:null,reasons:['conflicting-latest-prices']};f.reload();assert.equal(f.candidate().price.price,null);assert.equal(f.item().prices.current,200);}
+  for(const later of [{price:null,source:null,reasons:['missing-price-source']},{price:null,reasons:['conflicting-latest-prices']},{price:119,reasons:[]},{price:109,promotion:{member_only:true},reasons:[]}]){
+    const f=fixture(t);f.ingest();f.register();f.link([f.A,f.B]);const row=f.state.shopping.sesumPrices.products[SOURCE],legacy={price:109,observedAt:row.receipt.observedAt,source:row.receipt.source,sourceStoreCode:'KIWI',isPromo:false,promotion:null,reasons:[]};row.receiptHistory=[{fetchedAt:NOW,sourceFingerprint:row.fingerprint,receipt:legacy},{fetchedAt:NOW,sourceFingerprint:row.fingerprint,receipt:{...legacy,...later}}];row.receipt={...row.receipt,price:null,reasons:['conflicting-latest-prices']};f.reload();assert.equal(f.item().prices.current,200,'a later unresolved or genuinely changed quote cannot be laundered by a valid label');
+  }
+});
+
+test('legacy amendment checks every later metadata event and every known own store and historical proof field',t=>{
+  for(const variant of ['later-metadata','known-store','raw-chain','foreign-product-proof','different-date-proof','different-source-proof','foreign-control-proof','invalid-label-proof']){
+    const f=fixture(t);f.ingest();f.register();f.link([f.A,f.B]);const row=f.state.shopping.sesumPrices.products[SOURCE],legacy={price:109,observedAt:row.receipt.observedAt,source:row.receipt.source,sourceStoreCode:'KIWI',isPromo:false,promotion:null,reasons:[]};
+    row.receiptHistory=[{fetchedAt:NOW,sourceFingerprint:row.fingerprint,receipt:legacy}];
+    if(variant==='known-store')legacy.storeId='9';
+    else if(variant==='raw-chain'){legacy.sourceStoreCode='COOP_EXTRA';row.receipt.sourceStoreCode='COOP_EXTRA';}
+    else {const later={fetchedAt:NOW,sourceFingerprint:row.fingerprint,receipt:structuredClone(row.receipt)};row.receiptHistory.push(later);
+      if(variant==='later-metadata'){later.sourceFingerprint='0'.repeat(64);later.receipt.price=119;}
+      else if(variant==='foreign-product-proof')later.receipt.unitPriceBasis.productId='123';
+      else if(variant==='different-date-proof')later.receipt.unitPriceBasis.observedAt='2026-11-10T11:59:59Z';
+      else if(variant==='different-source-proof')later.receipt.unitPriceBasis.source='other_provenance';
+      else if(variant==='foreign-control-proof')later.receipt.unitPriceBasis.rowControl='kjederad-9';
+      else later.receipt.unitPriceBasis.label='119,00 kr/kg';
+    }
+    row.receipt={...row.receipt,price:null,reasons:['conflicting-latest-prices']};f.reload();assert.equal(f.candidate().price.price,null,variant);assert.equal(f.item().prices.current,200,variant);
+  }
+});

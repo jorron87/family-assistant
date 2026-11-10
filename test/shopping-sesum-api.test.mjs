@@ -32,6 +32,13 @@ test('Sesum is opt-in, accepts only local/extension workers, and stays off kiosk
     assert.equal((await post('/api/shopping/sesum/offer-review',{'Content-Type':'application/json'})).status,403);
     assert.equal((await post('/api/shopping/sesum/offer-review',{'Content-Type':'application/json','X-Family-Request':'1',Origin:'chrome-extension://'+'a'.repeat(32)})).status,403);
     assert.equal((await post('/api/shopping/sesum/review',{'Content-Type':'application/json','X-Family-Request':'1',Origin:'chrome-extension://'+'a'.repeat(32)})).status,403);
+    const catalogueReview={kind:'catalogue',sourceKey:'sesum-product:72',status:'blocked',reason:'An actual configured chain receipt is still missing'};
+    for(const listener of [port+1,port+2])assert.ok([401,403,405].includes((await fetch(`http://127.0.0.1:${listener}/api/shopping/sesum/review`,{method:'POST',headers:{'Content-Type':'application/json','X-Family-Request':'1'},body:JSON.stringify(catalogueReview)})).status));
+    assert.equal((await fetch(api+'/api/shopping/sesum/review',{method:'POST',headers:{'Content-Type':'application/json','X-Family-Request':'1',Origin:'chrome-extension://'+'a'.repeat(32)},body:JSON.stringify(catalogueReview)})).status,403);
+    for(const listener of [port+1,port+2])assert.ok([401,403,405].includes((await fetch(`http://127.0.0.1:${listener}/api/shopping/sesum/metadata-import`,{method:'POST',headers:{'Content-Type':'application/json','X-Family-Request':'1'},body:'{}'})).status));
+    assert.equal((await post('/api/shopping/sesum/metadata-import',{'Content-Type':'application/json'})).status,403);
+    assert.equal((await post('/api/shopping/sesum/metadata-import',{'Content-Type':'application/json','X-Family-Request':'1',Origin:'chrome-extension://'+'a'.repeat(32)})).status,403);
+    const imported=await(await post('/api/shopping/sesum/metadata-import',{'Content-Type':'application/json','X-Family-Request':'1'})).json();assert.equal(imported.metadataApplied,0);assert.equal(imported.metadataReplayPendingCount,0);assert.equal((await(await fetch(api+'/api/shopping/sesum/status')).json()).enabled,false);
     for(const listener of [port+1,port+2])assert.ok([401,403,405].includes((await fetch(`http://127.0.0.1:${listener}/api/shopping/sesum/review`,{method:'POST',headers:{'Content-Type':'application/json','X-Family-Request':'1'},body:JSON.stringify({status:'blocked',reason:'Unresolved source family membership'})})).status));
   }finally{
     const ended=new Promise(r=>child.once('exit',r));child.kill();await ended;

@@ -12,6 +12,16 @@ const iso=value=>typeof value==='string'&&/^\d{4}-\d\d-\d\dT/.test(value)&&/(?:Z
 const unique=items=>[...new Set(items)];
 const text=(value,max=250)=>typeof value==='string'&&value.trim()&&value.length<=max?value.trim():null;
 const DIRECT_UNIT_REPAIR='missing-direct-unit-basis-v1',DIRECT_UNIT_BUILD='sesum-collector-build-1.7.1-1';
+function ownReceiptSummary(receipts,job,at){
+  const productId=new URL(job.url).pathname.match(/^\/produkt\/(\d+)/)?.[1],safe=new Map();
+  for(const row of receipts){
+    const storeId=typeof row?.storeId==='number'&&Number.isSafeInteger(row.storeId)&&row.storeId>0?String(row.storeId):typeof row?.storeId==='string'&&/^[1-9]\d{0,29}$/.test(row.storeId)?row.storeId:null;
+    if(!storeId||typeof row.storeCode!=='string'||!/^[A-Z][A-Z\d_]{0,63}$/.test(row.storeCode)||!text(row.source,100)||/[\u0000-\u001f\u007f]/u.test(row.source)||!iso(row.observedAt)||Date.parse(row.observedAt)>at.getTime())continue;
+    const receipt={storeCode:chainCode(row.storeCode),storeId,source:text(row.source,100),observedAt:row.observedAt};safe.set(JSON.stringify(receipt),receipt);
+  }
+  if(safe.size>100)throw Error('For mange egne Sesum-prisdatoer.');
+  return {kind:'own-product-chain-receipts-v1',productId,sourceUrl:job.url,receipts:[...safe.values()].sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))};
+}
 
 export function sesumQueryPlan(requestedQueries){
   return requestedQueries.map(requestedQuery=>{
@@ -100,6 +110,7 @@ function productResult(result,job,chains,now){
     }
     return row;
   };
+  const receiptSummary=ownReceiptSummary([...result.prices,...(Array.isArray(result.priceCandidates)?result.priceCandidates:[])],job,now);
   const prices=[],priceCandidates=Array.isArray(result.priceCandidates)?result.priceCandidates.filter(p=>p&&chains.includes(chainCode(p.storeCode))).map(p=>safePrice(p,text(p.reason,150)??'unproven_price')):[];
   const relatedProducts=Array.isArray(result.candidates)?result.candidates.filter(p=>p&&typeof p==='object'&&['string','number'].includes(typeof p.id)&&/^[1-9]\d*$/.test(String(p.id))&&Number.isSafeInteger(Number(p.id))).map(p=>{
     let sourceUrl=null;
@@ -115,11 +126,11 @@ function productResult(result,job,chains,now){
     if(!price.observedAt||!text(price.source,100)){priceCandidates.push(safePrice(price,'missing_price_provenance'));continue;}
     prices.push(safePrice(price));
   }
-  return {...product,prices,priceCandidates,relatedProducts};
+  return {...product,prices,priceCandidates,relatedProducts,ownReceiptSummary:receiptSummary};
 }
 
 /** Public-page work queue. Progress is separate from reviewed, usable prices. */
-export function createSesumCollector({dataDir,config={},families,receivePrices,now=()=>new Date(),encryptionKey}={}){
+export function createSesumCollector({dataDir,config={},families,receivePrices,receiveMetadata,now=()=>new Date(),encryptionKey}={}){
   const enabled=config.enabled===true;
   const chains=unique((config.chainCodes??['KIWI','REMA_1000','COOP_EXTRA']).map(chainCode));
   if(chains.some(c=>!CHAIN_CODES.has(c)))throw Error('Ukjent Sesum-kjedekode.');
@@ -133,17 +144,17 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
     return {...f,queries:unique([...(Array.isArray(f.queries)&&f.queries.length?f.queries:[f.name]),...queries])};
   }));
   const path=join(dataDir,'sesum-collector.json.enc');
-  let key=encryptionKey,state={schemaVersion:1,run:null,history:[],pauseUntil:null,observations:{}},loaded=false;
+  let key=encryptionKey,state={schemaVersion:1,run:null,history:[],pauseUntil:null,observations:{},metadataImports:{}},loaded=false,catalogueCache=null;
   function load(){
     if(loaded)return;
     key??=loadKey(dataDir);loaded=true;
     if(existsSync(path)){state=JSON.parse(decrypt(readFileSync(path),key));if(state.schemaVersion!==1)throw Error('Ukjent Sesum-køversjon.');}
-    state.observations??={};
+    state.observations??={};state.metadataImports??={};
   }
-  function save(){mkdirSync(dataDir,{recursive:true});const temp=path+'.tmp';writeFileSync(temp,encrypt(Buffer.from(JSON.stringify(state)),key));renameSync(temp,path);}
+  function save(){catalogueCache=null;mkdirSync(dataDir,{recursive:true});const temp=path+'.tmp';writeFileSync(temp,encrypt(Buffer.from(JSON.stringify(state)),key));renameSync(temp,path);}
   const jobId=(kind,url,generation=0)=>digest(kind+url+':'+generation);
   const resolvedId=(run,id)=>{const seen=new Set();while(run.productAliases&&Object.hasOwn(run.productAliases,id)&&!seen.has(id)){seen.add(id);id=run.productAliases[id];}return id;};
-  let indexedRun=null,productIndex=new Map(),replayTask=null;
+  let indexedRun=null,productIndex=new Map(),replayTask=null,metadataTask=null;
   const directUnitBuildRequest=job=>job.directUnitBasisRepairRequests?.[DIRECT_UNIT_BUILD]??job.retryHistory?.find(row=>row.repair===DIRECT_UNIT_REPAIR&&row.parserBuild===DIRECT_UNIT_BUILD);
   function indexProducts(run){
     if(indexedRun!==run){indexedRun=run;productIndex=new Map(Object.values(run.jobs).filter(j=>j.kind==='product').map(j=>[j.url,j.id]));}
@@ -154,6 +165,8 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
     if(!p||!iso(fetchedAt))return null;
     try{
       const product=productResult({ok:true,kind:'product',sourceUrl:job.url,product:p,prices:p.prices??[],priceCandidates:p.priceCandidates??[],candidates:p.relatedProducts??[]},job,chains,now());
+      const previous=p.ownReceiptSummary;
+      if(previous?.kind==='own-product-chain-receipts-v1'&&previous.productId===product.id&&previous.sourceUrl===job.url&&Array.isArray(previous.receipts)&&previous.receipts.length<=100)product.ownReceiptSummary=ownReceiptSummary([...product.ownReceiptSummary.receipts,...previous.receipts],job,now());
       for(const price of [...product.prices,...product.priceCandidates]){
         const previous=[...(p.prices??[]),...(p.priceCandidates??[])].find(old=>chainCode(old.storeCode)===price.storeCode&&old.observedAt===price.observedAt&&old.price===price.price);
         if(previous&&chainCode(previous.sourceStoreCode)===price.storeCode)price.sourceStoreCode=previous.sourceStoreCode;
@@ -242,7 +255,7 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
     state.run=run;state.pauseUntil=null;save();return run;
   }
   function observation(run,job){
-    const p=job.productObservation,{prices=[],priceCandidates=[],relatedProducts=[],...metadata}=p;
+    const p=job.productObservation,{prices=[],priceCandidates=[],relatedProducts=[],ownReceiptSummary:receiptSummary,...metadata}=p;
     const checked=checkedObservation(job),repair=directUnitRepair(run,job,checked);
     return {runId:run.id,jobId:job.id,familyIds:[...job.familyIds],sourceUrl:job.url,fetchedAt:job.observationFetchedAt??job.fetchedAt,collectionStatus:job.status,callbackError:job.observationError??null,productObservationFingerprint:digest(metadata),savedObservationFingerprint:checked?digest(checked):null,...(repair?{directUnitBasisRepair:repair}:{}),product:structuredClone(p),parsedPriceCount:prices.length,unprovenPriceCount:priceCandidates.length,relatedProductCount:relatedProducts.length};
   }
@@ -250,6 +263,22 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
     if(!previous)return incoming;
     const latest=Date.parse(incoming.fetchedAt)>=Date.parse(previous.fetchedAt)?incoming:previous;
     return {...latest,familyIds:unique([...previous.familyIds,...incoming.familyIds])};
+  }
+  function catalogueRows(){
+    if(catalogueCache)return catalogueCache;
+    const rows=new Map(Object.entries(state.observations));
+    if(state.run)for(const job of Object.values(state.run.jobs))if(job.productObservation){const row=observation(state.run,job);rows.set(job.productObservation.id,mergeObservation(rows.get(job.productObservation.id),row));}
+    return catalogueCache=[...rows.values()];
+  }
+  const metadataBody=row=>digest([row.product,row.fetchedAt]);
+  const metadataToken=row=>digest([metadataBody(row),unique(row.familyIds).sort()]);
+  function metadataPending(){return typeof receiveMetadata==='function'?catalogueRows().filter(row=>state.metadataImports[row.product.id]?.failed===true||state.metadataImports[row.product.id]?.token!==metadataToken(row)):[];}
+  function metadataDelivered(row){
+    if(typeof receiveMetadata!=='function')return;
+    const id=String(row.product.id),previous=state.metadataImports[id],bodyToken=metadataBody(row);
+    if(previous&&Date.parse(previous.fetchedAt)>Date.parse(row.fetchedAt))return;
+    const familyIds=unique([...(previous?.bodyToken===bodyToken?previous.familyIds??[]:[]),...row.familyIds]);
+    state.metadataImports[id]={token:metadataToken({...row,familyIds}),bodyToken,familyIds,fetchedAt:row.fetchedAt,appliedAt:now().toISOString(),retryAt:null,error:null};
   }
   function ensure(){
     load();const currentSnapshot=snapshot();
@@ -362,6 +391,7 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
     callbackInFlight.add(job);
     try{
       const applied=await receivePrices({runId:run.id,jobId:job.id,familyIds,products:[structuredClone(receipt.product)],fetchedAt:receipt.fetchedAt});
+      metadataDelivered({product:receipt.product,familyIds,fetchedAt:receipt.fetchedAt});
       job.review=applied;job.appliedFamilyIds=unique([...(replayOnly?job.appliedFamilyIds??[]:[]),...familyIds]);
       job.replayFamilyIds=(job.replayFamilyIds??[]).filter(id=>!familyIds.includes(id));job.replayError=null;job.replayRetryAt=null;
       if(!replayOnly){
@@ -377,28 +407,48 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
       save();throw error;
     }finally{callbackInFlight.delete(job);}
   }
-  async function replayPending(){
-    if(!enabled)return {applied:0,failed:0,pending:0};
-    if(replayTask)return replayTask;
-    replayTask=(async()=>{
-      const run=ensure(),at=now().getTime();let applied=0,failed=0;
-      const jobs=Object.values(run.jobs).filter(j=>!callbackInFlight.has(j)&&(j.callbackPending||j.replayFamilyIds?.length)&&(!j.replayRetryAt||Date.parse(j.replayRetryAt)<=at)).slice(0,cycleCalls);
+  async function replayPendingNow({metadataOnly=false}={}){
+    if(!enabled)return {applied:0,failed:0,metadataApplied:0,metadataFailed:0,metadataReplayPendingCount:0,pending:0};
+      load();const run=metadataOnly?state.run:ensure(),at=now().getTime();let applied=0,failed=0;
+      const jobs=metadataOnly||!run?[]:Object.values(run.jobs).filter(j=>!callbackInFlight.has(j)&&(j.callbackPending||j.replayFamilyIds?.length)&&(!j.replayRetryAt||Date.parse(j.replayRetryAt)<=at)).slice(0,cycleCalls);
       for(const job of jobs){
         const own=job.callbackPending,checked=own??reusable(job);
         if(!checked)continue;
         const receipt=own?{...own,familyIds:unique([...own.familyIds,...job.familyIds])}:{...checked,familyIds:[...job.replayFamilyIds]};
         try{await applyObservation(run,job,receipt,{replayOnly:!own});applied++;}catch{failed++;}
       }
-      finish(run);if(jobs.length)save();
-      return {applied,failed,pending:Object.values(run.jobs).filter(j=>j.callbackPending||j.replayFamilyIds?.length).length};
-    })();
+      let metadataApplied=0,metadataFailed=0;catalogueCache=null;
+      const rows=metadataPending().filter(row=>{
+        const record=state.metadataImports[row.product.id],job=row.runId===run?.id?run.jobs[resolvedId(run,row.jobId)]:null;
+        return !job?.callbackPending&&!job?.replayFamilyIds?.length&&!callbackInFlight.has(job)&&(!record?.retryAt||record.token!==metadataToken(row)||Date.parse(record.retryAt)<=at);
+      }).slice(0,Math.max(0,cycleCalls-jobs.length));
+      for(const row of rows){
+        const job=row.runId===run?.id?run.jobs[resolvedId(run,row.jobId)]:null;
+        if(job)callbackInFlight.add(job);
+        try{
+          const checked=checkedObservation({url:row.sourceUrl,productObservation:row.product,observationFetchedAt:row.fetchedAt});
+          if(!checked)throw Error('Den lagrede egne Sesum-observasjonen kunne ikke valideres.');
+          await receiveMetadata({runId:row.runId,jobId:row.jobId,familyIds:[...row.familyIds],products:[checked.product],fetchedAt:checked.fetchedAt});
+          metadataDelivered(row);metadataApplied++;
+        }catch(error){state.metadataImports[row.product.id]={token:metadataToken(row),fetchedAt:row.fetchedAt,retryAt:new Date(now().getTime()+60000).toISOString(),error:text(error?.message,500)??'Lagrede varemetadata kunne ikke registreres.',failed:true};metadataFailed++;}finally{if(job)callbackInFlight.delete(job);}
+      }
+      if(jobs.length)finish(run);if(jobs.length||rows.length)save();
+      const metadataReplayPendingCount=metadataPending().length;
+      return {applied,failed,metadataApplied,metadataFailed,metadataReplayPendingCount,pending:(run?Object.values(run.jobs).filter(j=>j.callbackPending||j.replayFamilyIds?.length).length:0)+metadataReplayPendingCount};
+  }
+  function serial(operation){const next=receiveTask.catch(()=>{}).then(operation);receiveTask=next;return next;}
+  async function replayPending(){
+    if(replayTask)return replayTask;
+    replayTask=serial(()=>replayPendingNow());
     try{return await replayTask;}finally{replayTask=null;}
   }
-  let receiveTask=Promise.resolve();
-  function receive(input){
-    const next=receiveTask.catch(()=>{}).then(async()=>{if(replayTask)await replayTask;return receiveNow(input);});
-    receiveTask=next;return next;
+  async function replayMetadata(){
+    if(metadataTask)return metadataTask;
+    metadataTask=serial(()=>replayPendingNow({metadataOnly:true}));
+    try{return await metadataTask;}finally{metadataTask=null;}
   }
+  let receiveTask=Promise.resolve();
+  function receive(input){return serial(()=>receiveNow(input));}
   async function receiveNow(input){
     if(!enabled)throw Error('Sesum-innhenting er ikke aktivert.');
     load();const run=state.run;
@@ -462,12 +512,12 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
     }
     job.fetchedAt=input.fetchedAt;job.completedAt=now().toISOString();job.deliveredUntil=null;
     if(collectorVersion&&job.status==='complete')state.implementationReceipt={collectorVersion,collectorBuild,runId:run.id,jobId:job.id,kind:job.kind,acceptedAt:job.completedAt,fetchedAt:input.fetchedAt,sourceUrl:job.url};
-    finish(run);save();await replayPending();return {accepted:true,runId:run.id,jobId:job.id,status:job.status,applied};
+    finish(run);save();await replayPendingNow();return {accepted:true,runId:run.id,jobId:job.id,status:job.status,applied};
   }
   function status(){
     if(!enabled)return {enabled:false,status:'disabled',familyCount:0,chainCodes:chains};
     load();const run=state.run;
-    if(!run)return {enabled:true,status:'not_started',familyCount:0,chainCodes:chains};
+    if(!run){const metadataReplayPendingCount=metadataPending().length;return {enabled:true,status:'not_started',familyCount:0,chainCodes:chains,metadataReplayPendingCount,replayPendingCount:metadataReplayPendingCount};}
     const planCurrent=run.fingerprint===digest(snapshot())&&JSON.stringify(run.chainCodes)===JSON.stringify(chains),nextRefreshAt=run.finishedAt?new Date(Date.parse(run.finishedAt)+refreshHours*3600000).toISOString():null,refreshDue=nextRefreshAt!==null&&now()>=Date.parse(nextRefreshAt);
     const jobs=Object.values(run.jobs),freshChains=job=>unique((job.priceReceipts??[]).filter(p=>p.price!==null&&p.observedAt&&now()-Date.parse(p.observedAt)<=48*3600000).map(p=>p.storeCode)),manifest=run.families.map(f=>{
       const own=jobs.filter(j=>j.familyIds.includes(f.familyId)),search=own.filter(j=>j.kind==='search'),products=own.filter(j=>j.kind==='product');
@@ -476,18 +526,17 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,n
       const collectionOutcome=collectionStatus!=='complete'?collectionStatus:products.length?'matches_collected':'no_matches';
       return {familyId:f.familyId,name:f.name,unit:f.unit,fingerprint:f.fingerprint,collectionStatus,collectionOutcome,requestedQueries:f.requestedQueries??f.queries,queryPlan:f.queryPlan??null,queries:f.queries,completedZeroMatchQueries,searchPages:search.length,productCount:products.length,productsCollected:products.filter(j=>j.status==='complete'&&!j.replayFamilyIds?.includes(f.familyId)).length,unresolvedItems:[...own.filter(j=>j.status!=='complete').map(j=>({jobId:j.id,kind:j.kind,status:j.status,url:j.url,reason:j.observationError??j.error??j.errors??null})),...own.filter(j=>j.replayFamilyIds?.includes(f.familyId)).map(j=>({jobId:j.id,kind:'replay',status:'pending',url:j.url,reason:j.replayError??'family-observation-replay-pending'})),...unsearchableTerms.map(term=>({kind:'query',status:'partial',term,reason:'single-term-exceeds-source-limit-64'}))],chains:chains.map(code=>({chainCode:code,collectionStatus,collectionOutcome:collectionStatus!=='complete'?collectionStatus:!products.length?'no_matches':products.some(j=>j.priceChains?.includes(code))?'prices_collected':'no_chain_prices',observedProducts:products.filter(j=>j.priceChains?.includes(code)).length,freshProducts:products.filter(j=>!j.replayFamilyIds?.includes(f.familyId)&&freshChains(j).includes(code)).length,reviewStatus:products.length?'see_price_integration':'no_candidates',freshnessStatus:products.some(j=>!j.replayFamilyIds?.includes(f.familyId)&&freshChains(j).includes(code))?'has_fresh_candidates':'missing_fresh_price'}))};
     });
-    return {enabled:true,status:run.status,runId:run.id,startedAt:run.startedAt,finishedAt:run.finishedAt,planCurrent,nextRefreshAt,refreshDue,pauseUntil:state.pauseUntil,implementationReceipt:state.implementationReceipt??null,replayPendingCount:jobs.filter(j=>j.callbackPending||j.replayFamilyIds?.length).length,replayPendingFamilyCount:jobs.reduce((n,j)=>n+(j.callbackPending?.familyIds.length??j.replayFamilyIds?.length??0),0),familyCount:manifest.length,familyCounts:Object.fromEntries(['pending','partial','blocked','matches_collected','no_matches'].map(outcome=>[outcome,manifest.filter(f=>f.collectionOutcome===outcome).length])),chainCodes:chains,jobCounts:Object.fromEntries(['pending','complete','partial','blocked'].map(status=>[status,jobs.filter(j=>j.status===status).length])),jobCountsByKind:Object.fromEntries(['search','product'].map(kind=>[kind,Object.fromEntries(['pending','complete','partial','blocked'].map(status=>[status,jobs.filter(j=>j.kind===kind&&j.status===status).length]))])),manifest,coverageNote:'Fullførte søk beskriver innhentingen, ikke komplett kjedesortiment, godkjent ekvivalens eller lokal lagerstatus.'};
+    const metadataReplayPendingCount=metadataPending().length;
+    return {enabled:true,status:run.status,runId:run.id,startedAt:run.startedAt,finishedAt:run.finishedAt,planCurrent,nextRefreshAt,refreshDue,pauseUntil:state.pauseUntil,implementationReceipt:state.implementationReceipt??null,metadataReplayPendingCount,replayPendingCount:jobs.filter(j=>j.callbackPending||j.replayFamilyIds?.length).length+metadataReplayPendingCount,replayPendingFamilyCount:jobs.reduce((n,j)=>n+(j.callbackPending?.familyIds.length??j.replayFamilyIds?.length??0),0),familyCount:manifest.length,familyCounts:Object.fromEntries(['pending','partial','blocked','matches_collected','no_matches'].map(outcome=>[outcome,manifest.filter(f=>f.collectionOutcome===outcome).length])),chainCodes:chains,jobCounts:Object.fromEntries(['pending','complete','partial','blocked'].map(status=>[status,jobs.filter(j=>j.status===status).length])),jobCountsByKind:Object.fromEntries(['search','product'].map(kind=>[kind,Object.fromEntries(['pending','complete','partial','blocked'].map(status=>[status,jobs.filter(j=>j.kind===kind&&j.status===status).length]))])),manifest,coverageNote:'Fullførte søk beskriver innhentingen, ikke komplett kjedesortiment, godkjent ekvivalens eller lokal lagerstatus.'};
   }
   function catalog({familyId=null}={}){
     if(familyId!==null&&!text(familyId,200))throw Error('Ugyldig Sesum-varefamilie.');
     if(!enabled)return {enabled:false,runId:null,items:[]};
-    load();const rows=new Map(Object.entries(state.observations));
-    if(state.run)for(const job of Object.values(state.run.jobs))if(job.productObservation){const row=observation(state.run,job);rows.set(job.productObservation.id,mergeObservation(rows.get(job.productObservation.id),row));}
-    const items=[...rows.values()].filter(row=>familyId===null||row.familyIds.includes(familyId)).sort((a,b)=>a.sourceUrl.localeCompare(b.sourceUrl)).map(({directUnitBasisRepair,...row})=>{
+    load();const items=catalogueRows().filter(row=>familyId===null||row.familyIds.includes(familyId)).sort((a,b)=>a.sourceUrl.localeCompare(b.sourceUrl)).map(({directUnitBasisRepair,...row})=>{
       const job=row.runId===state.run?.id?state.run.jobs[resolvedId(state.run,row.jobId)]:null,repair=job?directUnitRepair(state.run,job):null;
       return {...row,...(repair&&row.savedObservationFingerprint===repair.observationFingerprint?{directUnitBasisRepair:repair}:{})};
     });
     return {enabled:true,runId:state.run?.id??null,items:structuredClone(items),coverageNote:'Registrerte kildeobservasjoner, inkludert uavklarte priser og separate tilsvarende-forslag. Ingen produktgodkjenning, ny prisdato eller lokal lagerstatus følger av innhentingen.'};
   }
-  return {work,receive,refresh,retry,status,catalog,replayPending};
+  return {work,receive,refresh,retry,status,catalog,replayPending,replayMetadata};
 }

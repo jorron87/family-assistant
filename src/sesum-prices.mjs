@@ -135,16 +135,40 @@ function newerReceipt(previous,incoming){
  if(!Number.isFinite(newTime))return incoming;
  if(Number.isFinite(oldTime)&&newTime<oldTime)return previous;
  if(Number.isFinite(oldTime)&&newTime===oldTime){
-  const signature=p=>JSON.stringify([p.price,p.isPromo,p.promotion,...(p.variableWeight?[p.source,p.sourceStoreCode]:[])]);
+  const variable=previous.variableWeight||incoming.variableWeight;
+  const signature=p=>JSON.stringify([p.price,p.isPromo,p.promotion,...(variable?[p.source??null,alias(p.sourceStoreCode)??null]:[])]);
   if(previous.reasons.includes('conflicting-latest-prices')||signature(previous)!==signature(incoming))return {...incoming,price:null,reasons:[...new Set([...previous.reasons,...incoming.reasons,'conflicting-latest-prices'])]};
   if(previous.unitPriceBasis&&incoming.unitPriceBasis&&(previous.unitPriceBasis.unit!==incoming.unitPriceBasis.unit||previous.unitPriceBasis.amount!==incoming.unitPriceBasis.amount))return {...incoming,price:null,reasons:[...new Set([...previous.reasons,...incoming.reasons,'conflicting-latest-prices'])]};
  }
  return incoming;
 }
+// Legacy receipts did not have variableWeight. A prior comparison between
+// signatures of different lengths could therefore hold a pure label amendment.
+// Recover only an exact, fully evidenced ordinary tuple; never erase raw history.
+function effectiveReceipt(row){
+ const raw=row.receipt,basis=raw.unitPriceBasis,at=Date.parse(raw.observedAt);
+ if(raw.price!==null||raw.variableWeight!==true||!basis||raw.isPromo===true||raw.promotion!=null||raw.reasons.length!==1||raw.reasons[0]!=='conflicting-latest-prices'||!Number.isFinite(at)||Date.parse(basis.observedAt)!==at||alias(raw.sourceStoreCode)!==row.source.store)return raw;
+ const checked=sanitizeUnitPriceBasis(basis,{productId:row.source.id,sourceUrl:row.source.sourceUrl,storeCode:row.source.store,storeId:raw.storeId,price:basis.amount,source:raw.source,observedAt:basis.observedAt});
+ if(!checked.basis)return raw;
+ const terms=p=>JSON.stringify([p.isPromo===true,p.promotion??null,p.source??null,alias(p.sourceStoreCode)??null]);
+ const events=row.receiptHistory??[],legacy=e=>{
+  const p=e.receipt;return e.sourceFingerprint===row.fingerprint&&Date.parse(p.observedAt)===at&&p.variableWeight!==true&&!p.unitPriceBasis&&p.price===basis.amount&&!p.reasons.length&&terms(p)===terms(raw)&&!p.candidate;
+ },first=events.findIndex(legacy);
+ if(first<0)return raw;
+ for(let i=0;i<events.length;i++){
+  const p=events[i].receipt,date=Date.parse(p.observedAt);if(i<first&&date<at)continue;
+  if(events[i].sourceFingerprint!==row.fingerprint||date!==at||terms(p)!==terms(raw)||p.candidate||p.storeId!=null&&String(p.storeId)!==String(raw.storeId))return raw;
+  const proof=p.unitPriceBasis;
+  if(proof&&(proof.amount!==basis.amount||proof.unit!==basis.unit||Date.parse(proof.observedAt)!==date||!sanitizeUnitPriceBasis(proof,{productId:row.source.id,sourceUrl:row.source.sourceUrl,storeCode:row.source.store,storeId:p.storeId,price:proof.amount,source:p.source,observedAt:proof.observedAt}).basis))return raw;
+  if(p.price===basis.amount&&!p.reasons.length){if(p.variableWeight===true&&!proof)return raw;continue;}
+  if(p.price!==null||!proof||p.reasons.length!==1||p.reasons[0]!=='conflicting-latest-prices')return raw;
+ }
+ return {...raw,price:basis.amount,reasons:[],unitPriceBasisAmendment:{kind:'legacy-own-row-label-v1',sourceFingerprint:row.fingerprint,observedAt:raw.observedAt,rawReasons:[...raw.reasons]}};
+}
 const currentGroups=(reader,key)=>(reader?.groupsOf(key)??[]).filter(row=>row.s==='approved'&&row.r&&reader.group(row.groupId));
 const donorAllowed=(row,key,donor)=>!key.startsWith('sesum:')||key===row.sourceKey&&donor?.source==='sesum'&&donor.nativeDiscovery===true&&donor.sourceFingerprint===row.fingerprint&&!donor.donorProductKey;
 function quoteOf(row,bridge){
- const receipt=row.receipt,reasons=receiptReasons(receipt);
+ const receipt=effectiveReceipt(row),reasons=receiptReasons(receipt);
  if(bridge.priceBasis==='direct-unit'){
   const basis=receipt.unitPriceBasis,verified=!!basis&&basis.unit===bridge.unit&&positive(receipt.price)&&bridge.priceIncludesVat===true;
   if(!basis)reasons.push(receipt.unitPriceBasisError??'missing-own-unit-price-basis');
@@ -173,7 +197,7 @@ function chooseQuote(previous,incoming){
 /** Explicit reviewed bridges from Sesum public prices to compact library SKUs.
  * Source text is data. Nothing here approves a family watch or changes a cart.
  */
-export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=()=>null,nativeEntries=()=>[]}={}){
+export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=()=>null,nativeEntries=()=>[],sourceCurrent=()=>true}={}){
  if(!plain(state))throw Error('Sesum price state must be a plain map.');
  state.version??=1;if(state.version!==1)throw Error('Unsupported Sesum price state.');
  state.products??={};state.bridges??={};state.revision??=0;
@@ -211,7 +235,7 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
  }
  const sourceRow=key=>stable(key)&&Object.hasOwn(state.products,key)?state.products[key]:null;
  function validBridge(row,bridge,base){
-  if(!row||!bridge||bridge.status!=='approved'||bridge.sourceFingerprint!==row.fingerprint)return false;
+  if(!row||!sourceCurrent(row.source)||!bridge||bridge.status!=='approved'||bridge.sourceFingerprint!==row.fingerprint)return false;
   const donor=base?.product(bridge.productKey);
   const identity=!!donor&&donorAllowed(row,bridge.productKey,donor)&&sesumDonorFingerprint(donor)===bridge.productFingerprint&&currentGroups(base,bridge.productKey).length>0&&donor.unit===bridge.unit&&boundNativeIdentity(donor,base,row.source.store)!==false;
   if(!identity)return false;
@@ -232,7 +256,7 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
     if(familyIds.length!==previous.familyIds.length)staged.set(item.sourceKey,{...previous,familyIds});
     continue;
    }
-   const receipt=changed?item.receipt:newerReceipt(previous?.receipt,item.receipt),receiptHistory=[...(previous?.receiptHistory??[])];
+   const receipt=changed?item.receipt:newerReceipt(previous?effectiveReceipt(previous):null,item.receipt),receiptHistory=[...(previous?.receiptHistory??[])];
    if(previous&&hash(previous.receipt)!==hash(receipt))receiptHistory.push({fetchedAt:previous.fetchedAt,sourceFingerprint:previous.fingerprint,receipt:clone(previous.receipt)});
    staged.set(item.sourceKey,{...item,familyIds:[...new Set([...(previous?.familyIds??[]),...input.familyIds])],firstSeen:previous?.firstSeen??fetchedAt,receipt,...(receiptHistory.length?{receiptHistory}:{} )});
   }
@@ -253,12 +277,12 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
    }
    donors.sort((a,b)=>(Number(b.match.ean)+Number(b.match.name)+Number(b.match.brand)+Number(b.match.pack))-(Number(a.match.ean)+Number(a.match.name)+Number(a.match.brand)+Number(a.match.pack))||a.productKey.localeCompare(b.productKey));
    const bridge=state.bridges[row.sourceKey]??null,current=validBridge(row,bridge,base);
-   return {sourceKey:row.sourceKey,sourceFingerprint:row.fingerprint,source:clone(source),price:{...clone(row.receipt),reasons:receiptReasons(row.receipt)},basisReviewNeeded:current&&bridge.priceBasis==='direct-unit'&&!!row.receipt.unitPriceBasis&&row.receipt.unitPriceBasis.unit!==bridge.unit,familyIds:[...row.familyIds],status:current?'approved':bridge?.status==='excluded'&&bridge.sourceFingerprint===row.fingerprint?'excluded':'pending',bridge:bridge?clone(bridge):null,donors};
+   return {sourceKey:row.sourceKey,sourceFingerprint:row.fingerprint,sourceMetadataCurrent:sourceCurrent(row.source),source:clone(source),price:{...clone(effectiveReceipt(row)),reasons:receiptReasons(effectiveReceipt(row))},basisReviewNeeded:current&&bridge.priceBasis==='direct-unit'&&!!row.receipt.unitPriceBasis&&row.receipt.unitPriceBasis.unit!==bridge.unit,familyIds:[...row.familyIds],status:current?'approved':bridge?.status==='excluded'&&bridge.sourceFingerprint===row.fingerprint?'excluded':'pending',bridge:bridge?clone(bridge):null,donors};
   });
  }
  function review(input){
   if(!plain(input)||!['approved','excluded'].includes(input.status))throw Error('Invalid Sesum bridge decision.');
-  const row=sourceRow(input.sourceKey);if(!row||input.sourceFingerprint!==row.fingerprint)throw Error('Sesum source metadata changed; review its current fingerprint.');
+  const row=sourceRow(input.sourceKey);if(!row||!sourceCurrent(row.source)||input.sourceFingerprint!==row.fingerprint)throw Error('Sesum source metadata changed; review its current fingerprint.');
   const equivalenceEvidence=text(input.equivalenceEvidence,'equivalence evidence',6000,{required:true}),packEvidence=text(input.packEvidence,'package evidence',6000,{required:input.status==='approved'}),base=rawReader();
   const next={sourceKey:input.sourceKey,sourceFingerprint:row.fingerprint,status:input.status,productKey:input.productKey??null,productFingerprint:input.productFingerprint??null,packAmount:null,unit:null,equivalenceEvidence,packEvidence,reviewedAt:clock().toISOString()};
   if(input.status==='approved'){
@@ -377,7 +401,7 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
  }
  function pending(){
   const base=rawReader(),at=clock().getTime(),horizon=base?.horizonDays??183;
-  return Object.values(state.products).filter(row=>(!validBridge(row,state.bridges[row.sourceKey],base)||state.bridges[row.sourceKey]?.priceBasis==='direct-unit'&&row.receipt.unitPriceBasis&&row.receipt.unitPriceBasis.unit!==state.bridges[row.sourceKey].unit)&&!(state.bridges[row.sourceKey]?.status==='excluded'&&state.bridges[row.sourceKey].sourceFingerprint===row.fingerprint)&&(!row.receipt.observedAt||at-Date.parse(row.receipt.observedAt)<=horizon*86400000)).map(row=>({sourceKey:row.sourceKey,sourceFingerprint:row.fingerprint,name:row.source.name,familyIds:[...row.familyIds],receiptAt:row.receipt.observedAt,basisReviewNeeded:!!(validBridge(row,state.bridges[row.sourceKey],base)&&state.bridges[row.sourceKey].priceBasis==='direct-unit'&&row.receipt.unitPriceBasis&&row.receipt.unitPriceBasis.unit!==state.bridges[row.sourceKey].unit),hasReviewedDonor:findDonors(base,row.source).some(key=>donorAllowed(row,key,base?.product(key))&&currentGroups(base,key).length>0)}));
+  return Object.values(state.products).filter(row=>sourceCurrent(row.source)).filter(row=>(!validBridge(row,state.bridges[row.sourceKey],base)||state.bridges[row.sourceKey]?.priceBasis==='direct-unit'&&row.receipt.unitPriceBasis&&row.receipt.unitPriceBasis.unit!==state.bridges[row.sourceKey].unit)&&!(state.bridges[row.sourceKey]?.status==='excluded'&&state.bridges[row.sourceKey].sourceFingerprint===row.fingerprint)&&(!row.receipt.observedAt||at-Date.parse(row.receipt.observedAt)<=horizon*86400000)).map(row=>({sourceKey:row.sourceKey,sourceFingerprint:row.fingerprint,name:row.source.name,familyIds:[...row.familyIds],receiptAt:row.receipt.observedAt,basisReviewNeeded:!!(validBridge(row,state.bridges[row.sourceKey],base)&&state.bridges[row.sourceKey].priceBasis==='direct-unit'&&row.receipt.unitPriceBasis&&row.receipt.unitPriceBasis.unit!==state.bridges[row.sourceKey].unit),hasReviewedDonor:findDonors(base,row.source).some(key=>donorAllowed(row,key,base?.product(key))&&currentGroups(base,key).length>0)}));
  }
  function sourceRecord(key){const row=sourceRow(key);return row?clone({sourceKey:row.sourceKey,sourceFingerprint:row.fingerprint,source:row.source,price:row.receipt,familyIds:row.familyIds}):null;}
  function sourceSummaries(){return Object.values(state.products).map(row=>({sourceKey:row.sourceKey,sourceFingerprint:row.fingerprint,name:row.source.name,store:row.source.store,familyIds:[...row.familyIds],receiptAt:row.receipt.observedAt}));}

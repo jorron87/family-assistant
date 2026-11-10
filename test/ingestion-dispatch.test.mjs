@@ -16,6 +16,14 @@ test('same-count Sesum review changes wake dispatch by source identity, metadata
   rows=[];assert.equal(changeSignal(store).signature,null);
 });
 
+test('chain-neutral research uses semantic dispatch identity and a future blocked retry wakes only when available',()=>{
+  let rows=[{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:72',sourceFingerprint:'metadata-a',familySetFingerprint:'all-enabled-a',fingerprint:'research-a'}];
+  const store={snapshot:()=>({rawItems:{},events:{}}),reviewQueue:()=>({items:[]}),completionReport:()=>({profileReviews:[],missingDrive:[],unsyncedCalendar:[]}),activityFacebook:()=>[],activityFeedStatus:()=>({changedPages:[]}),shopping:{queue:()=>rows}};
+  const initial=changeSignal(store);assert.equal(initial.shoppingOnly,true);rows[0].fetchedAt='2026-11-10T12:01:00Z';rows[0].receiptAt='2026-11-10T12:00:00Z';assert.equal(changeSignal(store).signature,initial.signature);
+  rows[0].sourceFingerprint='metadata-b';assert.notEqual(changeSignal(store).signature,initial.signature);rows=[];assert.equal(changeSignal(store).signature,null,'future blocked work stays out of the active queue');
+  rows=[{do:'shopping-sesum-catalog-review',sourceKey:'sesum-product:72',sourceFingerprint:'metadata-b',familySetFingerprint:'all-enabled-a',fingerprint:'research-b',familyIds:['actual-unhinted-target']}];assert.equal(changeSignal(store).count,1);assert.equal(changeSignal(store).shoppingOnly,true);
+});
+
 test('new Sesum discovery launches the existing shopping agent with research and registration instructions',()=>{
   const dir=mkdtempSync(join(tmpdir(),'familien-dispatch-sesum-'));let lease=null,launch,rows=[{do:'shopping-sesum-discovery',sourceKey:'sesum:KIWI:123',sourceFingerprint:'current-source',familyIds:['family-a']}];
   const store={snapshot:()=>({runLease:lease,rawItems:{},events:{}}),reviewQueue:()=>({items:[]}),completionReport:()=>({profileReviews:[],missingDrive:[],unsyncedCalendar:[]}),activityFacebook:()=>[],activityFeedStatus:()=>({changedPages:[]}),shopping:{queue:()=>rows},phone:{list:()=>[]},calendarActions:()=>[],beginRun:()=>({acquired:true,lease:lease={token:'test-owned-lease'}}),endRun:token=>{assert.equal(token,lease.token);lease=null;},renewRun:()=>{}};

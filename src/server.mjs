@@ -60,7 +60,7 @@ const odaCart=createOdaCart({oda,shopping:store.shopping});
 const kassal=createKassal({dataDir:DATA_DIR});
 let sesumConfig={enabled:false};
 try{sesumConfig=readConfig('shopping-sesum.json');}catch(error){if(error.code!=='ENOENT')throw error;}
-sesum=createSesumCollector({dataDir:DATA_DIR,config:sesumConfig,families:()=>store.shopping.sesumFamilies(),receivePrices:input=>store.shopping.sesumReceivePrices(input)});
+sesum=createSesumCollector({dataDir:DATA_DIR,config:sesumConfig,families:()=>store.shopping.sesumFamilies(),receivePrices:input=>store.shopping.sesumReceivePrices(input),receiveMetadata:input=>store.shopping.sesumReceiveMetadata(input)});
 const sesumStatus=()=>({...sesum.status(),priceIntegration:store.shopping.sesumPriceStatus()});
 PUBLIC_FILES.set('shopping-view.mjs','text/javascript; charset=utf-8');PUBLIC_FILES.set('barcode.mjs','text/javascript; charset=utf-8');
 PUBLIC_FILES.set('shopping.css','text/css; charset=utf-8');
@@ -115,6 +115,7 @@ async function handle(req, res) {
       if(path==='/api/shopping/sesum/register'&&method==='POST')return send(res,200,store.shopping.sesumRegister(await json(req)));
       if(path==='/api/shopping/sesum/refresh'&&method==='POST'){sesum.refresh();return send(res,200,sesumStatus());}
       if(path==='/api/shopping/sesum/retry'&&method==='POST')return send(res,200,sesum.retry(await json(req)));
+      if(path==='/api/shopping/sesum/metadata-import'&&method==='POST')return send(res,200,await sesum.replayMetadata());
       return send(res,405,{error:'Ukjent Sesum-operasjon.'});
     }
     if(path==='/shopping-setup'&&method==='GET')return send(res,200,readFileSync(join(root,'public','shopping-setup.html')),'text/html; charset=utf-8');
