@@ -3,6 +3,7 @@ import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {dirname,join} from 'node:path';
 import {readProductLibrary,productTextHash} from './product-library.mjs';
+import {odaProductIdFromUrl} from './oda-product-identity.mjs';
 
 const INDEX_VERSION=5,FRESH_MS=48*3600000,RETRY_MS=60000;
 // A product whose newest price receipt is older than this is parked: kept in the
@@ -42,8 +43,8 @@ export function createIndexReader(index,{horizonDays=PRICE_HORIZON_DAYS}={}) {
  const ean=value=>String(value??'').replace(/^0+/,'');
  for(const [key,p] of Object.entries(index.products)){
   if(p.ean){const rows=byEan.get(ean(p.ean))??[];rows.push(key);byEan.set(ean(p.ean),rows);}
-  const oda=p.store==='ODA_NO'?p.sourceUrl?.match(/\/products\/(\d+)-/)?.[1]:null;
-  if(oda)byOda.set(Number(oda),key);
+  const oda=p.store==='ODA_NO'?odaProductIdFromUrl(p.sourceUrl):null;
+  if(oda)byOda.set(oda,key);
  }
  for(const [groupId,rows] of Object.entries(index.members))for(const row of rows){const list=memberships.get(row.k)??[];list.push({groupId,...row});memberships.set(row.k,list);}
  for(const [key,p] of Object.entries(index.products))haystacks.set(key,` ${words([p.name,p.brand,...(memberships.get(key)??[]).filter(m=>m.s==='approved').map(m=>index.groups[m.groupId]?.name)].join(' ')).join(' ')} `);

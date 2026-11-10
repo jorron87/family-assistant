@@ -5,6 +5,7 @@ import {createMarketCatalog} from './shopping-catalog.mjs';
 import {createStockIntake} from './shopping-stock.mjs';
 import {createLibraryExplorer,familyDetail} from './library-explorer.mjs';
 import {withinPriceHorizon} from './shopping-library.mjs';
+import {odaProductIdFromUrl} from './oda-product-identity.mjs';
 import {createSesumPrices} from './sesum-prices.mjs';
 import {createSesumDiscovery} from './sesum-discovery.mjs';
 import {createSesumCatalogue} from './sesum-catalogue.mjs';
@@ -275,7 +276,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const quotes=[],campaigns=Object.values(s.offers).some(o=>o.sesumCampaign)?sesumCampaignContexts():new Map();
     for(const p of native.values())if(p.approved&&(!variablePack(p.name)||p.priceSource==='library')&&p.unitPrice>0&&Number.isFinite(p.unitPrice)&&freshPrice(p.lastChecked,at)){
       const store=s.settings.stores.find(x=>x.chainCode===p.store);
-      quotes.push({...p,storeId:store?.id??null,storeName:p.store==='ODA_NO'?'Oda':store?.name.replace(/\s*[–-]\s*Kassal.*$/,'')??chainName(p.store),chainCode:p.store,sourceUrl:p.priceSourceUrl??p.sourceUrl??null,kind:'catalog'});
+      quotes.push({...p,storeId:store?.id??null,storeName:p.store==='ODA_NO'?'Oda':store?.name.replace(/\s*[–-]\s*Kassal.*$/,'')??chainName(p.store),chainCode:p.store,productSourceUrl:p.sourceUrl??null,sourceUrl:p.priceSourceUrl??p.sourceUrl??null,kind:'catalog'});
     }
     for(const o of Object.values(s.offers)){
       const store=s.settings.stores.find(x=>x.id===o.storeId),w=s.watches[o.watchId];
@@ -818,14 +819,14 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   }
   function odaProducts(prices=currentPrices()) {
     const byWatch=new Map();
-    for(const e of prices.quotes){const id=e.kind==='catalog'&&e.store==='ODA_NO'&&e.packAmount?e.sourceUrl?.match(/\/products\/(\d+)-/)?.[1]:null;if(id){const list=byWatch.get(e.watchId)??[];list.push({...e,currentPrice:e.price,productId:Number(id),quality:prices.reader?.quality(`kassal:ODA_NO:${e.id}`)??null,pills:prices.reader?.pills(`kassal:ODA_NO:${e.id}`)??null});byWatch.set(e.watchId,list);}}
+    for(const e of prices.quotes){const id=e.kind==='catalog'&&e.store==='ODA_NO'&&e.packAmount?odaProductIdFromUrl(e.productSourceUrl):null;if(id){const list=byWatch.get(e.watchId)??[];list.push({...e,currentPrice:e.price,productId:id,quality:prices.reader?.quality(`kassal:ODA_NO:${e.id}`)??null,pills:prices.reader?.pills(`kassal:ODA_NO:${e.id}`)??null});byWatch.set(e.watchId,list);}}
     for(const list of byWatch.values())list.sort((x,y)=>x.unitPrice-y.unitPrice);
     // Undecided watches can still choose among their family's Oda products. These
     // rows stay out of the quotes, so they never move a price reference.
     if(prices.reader)for(const w of Object.values(s.watches)){
       const list=byWatch.get(w.id);if(!list?.length||w.enabled===false||w.variants?.length||w.family?.kind==='own')continue;
       for(const m of familyMembers(w,list.find(x=>x.productId===s.odaChoices[w.id])??list[0],prices)){
-        const p=m.product,oda=p.store==='ODA_NO'?p.sourceUrl?.match(/\/products\/(\d+)-/)?.[1]:null;
+        const p=m.product,oda=p.store==='ODA_NO'?odaProductIdFromUrl(p.sourceUrl):null;
         if(!oda||!m.eligible||!(p.pack>0)||prices.excluded.has(w.id+'|'+m.productKey)||nativeHoldsMember(p,m.productKey,w.id,prices.reviewedNative??[])||list.some(x=>x.productId===Number(oda)))continue;
         list.push({watchId:w.id,store:p.store,id:p.id,productKey:m.productKey,name:p.name,sourceUrl:p.sourceUrl,unit:w.unit,packAmount:p.pack,price:m.price.grossPackPrice??m.unitPrice*p.pack,currentPrice:m.price.grossPackPrice??m.unitPrice*p.pack,unitPrice:m.unitPrice,productId:Number(oda),quality:m.quality,pills:prices.reader.pills(m.productKey),origin:'library',kind:'catalog',image:p.image??null});
       }
