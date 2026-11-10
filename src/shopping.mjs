@@ -1657,8 +1657,15 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   };
   function sesumWork(){
     const pending=sesumPrices.pending().filter(row=>sesumCatalogue.researchable(sesumPrices.sourceRecord(row.sourceKey).source));if(!pending.length)return [];
-    const requirements=sesumRequirements(),semantic=sesumPlacementFamilies().families,research=sesumResearches();
-    return pending.map(p=>({...p,rawFamilyIds:[...p.familyIds],researchedFamilyIds:sesumResearchedFamilyIds(p,semantic),familyIds:sesumEffectiveFamilyIds(p,semantic).filter(id=>s.watches[id]?.enabled!==false&&s.watches[id]&&sesumFamilyDecision(p,id,requirements,research.get(p.sourceKey)?.registrationFingerprint??null)?.status!=='excluded')})).filter(p=>p.familyIds.length||p.basisReviewNeeded).map(p=>({...p,do:p.basisReviewNeeded||p.hasReviewedDonor?'shopping-sesum-review':'shopping-sesum-discovery',reason:p.basisReviewNeeded?'review-direct-unit-basis':p.hasReviewedDonor?'review-source-bridge':'new-product-needs-family-research'}));
+    const requirements=sesumRequirements(),semantic=sesumPlacementFamilies(),research=sesumResearches();
+    return pending.filter(p=>{
+      // A full current semantic review can settle an irrelevant unregistered
+      // source despite broad search hints. It never settles registered product,
+      // unit-basis, household-family, campaign or collection work.
+      if(p.basisReviewNeeded||research.has(p.sourceKey))return true;
+      const review=s.sesumPlacementReviews[p.sourceKey];
+      return !(review?.status==='no-active-family'&&review.reviewedAllFamilies===true&&review.noActiveFamilyVerified===true&&Array.isArray(review.targets)&&review.targets.length===0&&review.sourceFingerprint===p.sourceFingerprint&&(review.registrationFingerprint??null)===(research.get(p.sourceKey)?.registrationFingerprint??null)&&review.familySetFingerprint===semantic.familySetFingerprint);
+    }).map(p=>({...p,rawFamilyIds:[...p.familyIds],researchedFamilyIds:sesumResearchedFamilyIds(p,semantic.families),familyIds:sesumEffectiveFamilyIds(p,semantic.families).filter(id=>s.watches[id]?.enabled!==false&&s.watches[id]&&sesumFamilyDecision(p,id,requirements,research.get(p.sourceKey)?.registrationFingerprint??null)?.status!=='excluded')})).filter(p=>p.familyIds.length||p.basisReviewNeeded).map(p=>({...p,do:p.basisReviewNeeded||p.hasReviewedDonor?'shopping-sesum-review':'shopping-sesum-discovery',reason:p.basisReviewNeeded?'review-direct-unit-basis':p.hasReviewedDonor?'review-source-bridge':'new-product-needs-family-research'}));
   }
   function sesumCandidates(familyId){
     const reader=reviewedReader(),requirements=sesumRequirements(),research=sesumResearches(),placement=sesumPlacement(),work=new Map(sesumFamilyContexts().map(item=>[item.sourceKey+'\0'+item.familyId,item])),placements=new Map(placement.items.map(item=>[item.sourceKey,item]));

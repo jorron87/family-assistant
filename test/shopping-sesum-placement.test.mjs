@@ -68,6 +68,73 @@ test('explicit no-active-family resolution differs from a durable blocked unfini
   blocked.reload();assert.equal(blocked.work().length,0);blocked.clock.at='2026-11-10T13:00:01Z';assert.equal(blocked.work().length,1);
 });
 
+const identityWork=f=>f.shop.queue().filter(row=>row.sourceKey===SOURCE&&['shopping-sesum-discovery','shopping-sesum-review'].includes(row.do));
+const noFamily=f=>f.review({status:'no-active-family',targets:[],noActiveFamilyVerified:true,
+  reason:'The actual primary-labelled dishwashing brush is a cleaning tool, not honey, whole coffee beans or the exact litter formula.',
+  scopeEvidence:'Read the complete current enabled family definitions, ingredient/form/organic/brand requirements and exact litter formula against the actual brush materials and use; no current need accepts this product.'});
+
+test('a current whole-set no-family review removes redundant discovery from the actual queue without approving identity',t=>{
+  const f=setup(t,{sourceName:'Dishwashing brush 500g'});f.ingest();assert.equal(identityWork(f).length,1);
+  const before=f.shop.familyView().items.find(row=>row.id===f.target.id).prices.current;noFamily(f);
+  assert.equal(f.work().length,0);assert.equal(identityWork(f).length,0,'raw OR-search hints cannot recreate identity research after every active need was explicitly ruled out');
+  assert.equal(f.candidate().status,'pending');assert.deepEqual(f.candidate().familyIds,[f.wrong.id]);assert.equal(f.shop.catalogEntries().length,0);
+  assert.equal(f.shop.familyView().items.find(row=>row.id===f.target.id).prices.current,before);
+  f.reload();assert.equal(identityWork(f).length,0);
+  f.clock.at='2026-11-10T12:01:00Z';f.ingest({price:18});
+  f.shop.sesumReceivePrices({familyIds:[f.target.id],fetchedAt:f.clock.at,products:[{...f.source,prices:[{storeCode:'KIWI',price:18,observedAt:f.clock.at,source:'actual_source_receipt',isPromo:false}]}]});
+  assert.equal(f.row().status,'no-active-family');assert.equal(identityWork(f).length,0,'capture, receipt and raw-hint changes alone do not alter the reviewed family semantics');
+  assert.deepEqual(new Set(f.candidate().familyIds),new Set([f.wrong.id,f.target.id]));
+});
+
+test('source, enabled-family, semantic and explicit reopen changes restore identity research after no-family',t=>{
+  for(const change of ['source','new-enabled-family','family-note','reopen']){
+    const f=setup(t,{sourceName:'Dishwashing brush 500g'});f.ingest();noFamily(f);assert.equal(identityWork(f).length,0);
+    if(change==='source')f.ingest({changes:{name:'A materially changed actual source variant 500g'}});
+    else if(change==='new-enabled-family')f.shop.watch({...f.disabled,enabled:true});
+    else if(change==='family-note')f.shop.watch({...f.target,note:'Current household needs now include a different explicitly specified actual product form.'});
+    else f.review({status:'reopen',targets:[]});
+    assert.equal(f.row().status,'pending',change);assert.equal(f.work().length,1,change);assert.equal(identityWork(f).length,1,change);
+    f.reload();assert.equal(identityWork(f).length,1,change);
+  }
+});
+
+test('a suggested reviewed donor does not recreate identity-review work after current whole-set no-family research',t=>{
+  const f=setup(t,{sourceName:'Dishwashing brush 500g'});f.ingest({changes:{ean:f.p.ean}});
+  assert.equal(identityWork(f)[0].do,'shopping-sesum-review','a barcode coincidence is only a donor suggestion, never equivalence');
+  noFamily(f);assert.equal(identityWork(f).length,0);assert.equal(f.candidate().status,'pending');assert.equal(f.shop.catalogEntries().length,0);
+  f.reload();assert.equal(identityWork(f).length,0);
+});
+
+test('a no-family verdict on an old priced identity never hides changed own metadata received without chain prices',t=>{
+  const f=setup(t,{sourceName:'Dishwashing brush 500g'});f.ingest();noFamily(f);const prior=f.row();assert.equal(identityWork(f).length,0);
+  f.clock.at='2026-11-10T12:01:00Z';f.shop.sesumReceivePrices({familyIds:[f.wrong.id],fetchedAt:f.clock.at,products:[{...f.source,name:'New actual organic whole-bean variant 500g',prices:[]}]});
+  const key='sesum-product:72',current=f.shop.sesumPlacement(key).items.find(row=>row.sourceKey===key);
+  assert.ok(current,'the new actual metadata keeps its own chain-neutral placement subject');assert.equal(current.status,'pending');assert.notEqual(current.sourceFingerprint,prior.sourceFingerprint);
+  assert.ok(f.shop.queue().some(row=>row.sourceKey===key&&row.do==='shopping-sesum-placement-review'));
+  assert.equal(f.state.shopping.sesumPlacementReviews[SOURCE].sourceFingerprint,prior.sourceFingerprint,'the old decision stays historical and cannot settle different actual metadata');
+  assert.equal(identityWork(f).length,0,'an unchanged older quote does not supply a price for the new variant');
+  f.reload();assert.ok(f.shop.queue().some(row=>row.sourceKey===key&&row.do==='shopping-sesum-placement-review'));
+});
+
+test('no-family research is bound to the exact source and never drops scoped exclusions or independent source work',t=>{
+  const f=setup(t,{sourceName:'Dishwashing brush 500g'});f.ingest();
+  f.shop.sesumReceivePrices({familyIds:[f.target.id],fetchedAt:f.clock.at,products:[{...f.source,prices:[{storeCode:'KIWI',price:20,observedAt:f.clock.at,source:'actual_source_receipt',isPromo:false}]}]});
+  const wrong=f.candidate().families.find(row=>row.familyId===f.wrong.id);
+  f.shop.sesumPriceReview({sourceKey:SOURCE,sourceFingerprint:f.candidate().sourceFingerprint,registrationFingerprint:null,status:'excluded',familyIds:[f.wrong.id],familyFingerprints:{[f.wrong.id]:wrong.requirementsFingerprint},equivalenceEvidence:'Read the actual cleaning brush materials and use; this specific honey-family hint is incompatible.'});
+  const excluded=structuredClone(f.state.shopping.sesumFamilyReviews[SOURCE][f.wrong.id]);noFamily(f);assert.equal(identityWork(f).length,0);
+  f.shop.settings({stores:[{id:'kiwi',name:'KIWI',chainCode:'KIWI',url:'https://shop.example.test/kiwi'},{id:'rema',name:'REMA',chainCode:'REMA_1000',url:'https://shop.example.test/rema'}]});
+  f.shop.sesumReceivePrices({familyIds:[f.wrong.id],fetchedAt:f.clock.at,products:[{...f.source,prices:[{storeCode:'REMA_1000',price:21,observedAt:f.clock.at,source:'actual_source_receipt',isPromo:false}]}]});
+  assert.equal(identityWork(f).length,0);assert.ok(f.shop.queue().some(row=>row.sourceKey==='sesum:REMA_1000:72'&&row.do==='shopping-sesum-discovery'),'another chain is a distinct source review, not an inferred native alias');
+  assert.deepEqual(f.state.shopping.sesumFamilyReviews[SOURCE][f.wrong.id],excluded);
+  f.review({status:'reopen',targets:[]});assert.equal(identityWork(f).length,1);assert.deepEqual(identityWork(f)[0].familyIds,[f.target.id],'the still-current explicit scoped negative remains in force');
+});
+
+test('new explicit product registration reopens placement and family work instead of inheriting a prior no-family result',t=>{
+  const f=setup(t,{sourceName:'New coffee 500g'});f.ingest();f.review({status:'no-active-family',targets:[],noActiveFamilyVerified:true,reason:'Prior primary research identified ground coffee, which none of the current enabled families accept.',scopeEvidence:'Reviewed all enabled families: the coffee need accepts organic whole beans only, honey accepts actual honey and the exact litter need accepts only its non-food formula.'});assert.equal(identityWork(f).length,0);
+  f.register();assert.equal(f.row().status,'pending');assert.equal(f.work().length,1);assert.ok(f.familyWork().length>0,'new reviewed product facts require their own ordinary household family decision');
+  f.reload();assert.equal(f.row().status,'pending');assert.ok(f.familyWork().length>0);
+});
+
 test('price, receipt dates, planning quantities and repeated identical family decisions do not churn semantic placement',t=>{
   const f=setup(t);f.ingest();f.review();const fingerprint=f.row().fingerprint,setFingerprint=f.placement().familySetFingerprint;
   f.clock.at='2026-11-10T12:01:00Z';f.ingest({price:18});f.link();
