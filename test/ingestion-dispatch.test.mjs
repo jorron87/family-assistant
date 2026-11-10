@@ -3,6 +3,29 @@ import {createIngestionDispatcher,changeSignal} from '../src/ingestion-dispatch.
 import {createStore} from '../src/store.mjs';
 import {agentFamilyBasis,buildAgentContext} from '../src/shopping-agent-context.mjs';
 
+test('parallel dispatcher owns one lease, recovers its coordinator and reports only actual scoped work',()=>{
+ let active=false,last=null,launches=0,polls=0;const rows=Array.from({length:65},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+(1000+i),sourceFingerprint:'current-'+i}));
+ const pool={status:()=>({running:active,runId:active?'coordinated-run':null,last}),preferSerial:()=>[],tick(){polls++;},start(input){launches++;active=true;assert.equal(input.batches.length,3);assert.equal(input.batches.flatMap(b=>b.jobs).length,60);return this.status();}};
+ const f=shoppingDispatchFixture(rows,{shoppingWorkers:3},undefined,false,pool),runs=[];f.store.recordRun=r=>runs.push(r);const completion=f.store.completionReport;f.store.completionReport=()=>({...completion(),shopping:{complete:false,work:f.queue.rows}});
+ try{
+  f.dispatcher.tick();assert.equal(launches,1);assert.equal(f.launches.length,0);assert.equal(f.dispatcher.status().shoppingBatch.jobs.length,60);f.dispatcher.tick();assert.equal(launches,1);assert.equal(f.store.snapshot().runLease.token,'owned-test-batch');
+  // Recovered dispatcher polls the existing coordinator instead of treating a
+  // missing single-worker PID as an interrupted run or taking a second lease.
+  const recovered=createIngestionDispatcher({store:f.store,root:f.dir??'.',dataDir:f.dir??'',shoppingCoordinator:pool,clock:()=>f.clock.at,readConfig:()=>({enabled:true,shoppingWorkers:3}),alive:()=>false});
+  recovered.poll();assert.equal(recovered.status().running,true);
+  active=false;last={id:'coordinated-run',code:0,applied:3,positiveProgress:true,slots:[]};f.queue.rows=f.queue.rows.slice(60);recovered.poll();assert.equal(f.store.snapshot().runLease,null);assert.equal(runs[0].scope,'handel');assert.equal(runs[0].outcome,'continued');assert.equal(recovered.status().shoppingContinuation,true);assert.ok(polls>0);
+ }finally{f.close();}
+});
+
+test('coordinator safety stop also prevents the legacy full-tool fallback',()=>{
+ const pool={status:()=>({running:false,attention:{reason:'An explicit runtime safety stop.'}})},f=shoppingDispatchFixture([{do:'shopping-review',storeId:'one'}],{shoppingWorkers:3},undefined,false,pool);try{f.dispatcher.tick();assert.equal(f.launches.length,0);assert.equal(f.store.snapshot().runLease,null);}finally{f.close();}
+});
+
+test('serial handoff after an unchanged sixty-product wave never reuses its oversized worker manifest',()=>{
+ let active=false,last=null,serial=false;const rows=Array.from({length:65},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+(1000+i),sourceFingerprint:'unchanged-'+i})),pool={status:()=>({running:active,runId:active?'handoff-run':null,last}),tick(){},preferSerial:queue=>serial?queue.slice(0,60):[],start(){active=true;return this.status();}},f=shoppingDispatchFixture(rows,{shoppingWorkers:3},undefined,false,pool);
+ try{f.dispatcher.tick();active=false;last={id:'handoff-run',code:0,applied:0,positiveProgress:false,slots:[]};serial=true;f.dispatcher.poll();f.clock.at+=16*60000;f.dispatcher.tick();assert.equal(f.launches.length,1);assert.equal(f.dispatcher.status().shoppingBatch.jobs.length,20);assert.equal(f.dispatcher.status().shoppingBatch.summary.agentJobs.total,65);f.launches[0].onExit(0);}finally{f.close();}
+});
+
 test('shopping launch supplies complete stable family data before its variable assignment',()=>{
  const f=shoppingDispatchFixture([{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1',sourceFingerprint:'one'}]);
  const families=Array.from({length:91},(_,i)=>({familyId:'family-'+i,note:'Complete criterion '+i})),basis=agentFamilyBasis(families);
@@ -10,11 +33,11 @@ test('shopping launch supplies complete stable family data before its variable a
  try{f.dispatcher.tick();assert.ok(f.launches[0].prompt.startsWith(basis.prompt));assert.equal(f.dispatcher.status().familyBasisFingerprint,basis.familyBasisFingerprint);f.launches[0].onExit(0);assert.equal(f.dispatcher.status().familyBasisFingerprint,null);}finally{f.close();}
 });
 
-function shoppingDispatchFixture(initialRows,config={},resources=undefined,automaticShopping=false) {
+function shoppingDispatchFixture(initialRows,config={},resources=undefined,automaticShopping=false,shoppingCoordinator=null) {
   const dir=mkdtempSync(join(tmpdir(),'familien-dispatch-batch-')),clock={at:Date.parse('2026-11-10T02:00:00Z')},queue={rows:initialRows},launches=[];let lease=null;
   const store={snapshot:()=>({runLease:lease,rawItems:{},events:{}}),phone:{list:()=>[]},calendarActions:()=>[],activityFacebook:()=>[],activityFeedStatus:()=>({changedPages:[]}),reviewQueue:()=>({items:[]}),completionReport:()=>({profileReviews:[],missingDrive:[],unsyncedCalendar:[],shopping:{complete:false,blockedPlacements:[{status:'blocked',retryAt:'2026-11-11T02:00:00Z'}]}}),shopping:{queue:()=>queue.rows},beginRun:()=>({acquired:true,lease:lease={token:'owned-test-batch'}}),endRun:token=>{assert.equal(token,lease.token);lease=null;},renewRun(){}};
-  const dispatcher=createIngestionDispatcher({store,resources,root:dir,dataDir:dir,automaticShopping,clock:()=>clock.at,readConfig:()=>({enabled:true,minGapMinutes:15,...config}),alive:()=>true,launch:input=>{launches.push(input);return {pid:123};}});
-  return {dispatcher,clock,queue,launches,store,close(){assert.ok(dir.startsWith(join(tmpdir(),'familien-dispatch-batch-')));rmSync(dir,{recursive:true,force:true});}};
+  const dispatcher=createIngestionDispatcher({store,resources,root:dir,dataDir:dir,shoppingCoordinator,automaticShopping,clock:()=>clock.at,readConfig:()=>({enabled:true,minGapMinutes:15,...config}),alive:()=>true,launch:input=>{launches.push(input);return {pid:123};}});
+  return {dir,dispatcher,clock,queue,launches,store,close(){assert.ok(dir.startsWith(join(tmpdir(),'familien-dispatch-batch-')));rmSync(dir,{recursive:true,force:true});}};
 }
 
 test('dispatcher prepares the exact frozen context file before launch and releases its lease on preparation failure',()=>{

@@ -9,6 +9,7 @@ import {shoppingAgentBatch} from './shopping-agent-jobs.mjs';
 import {agentManifest,agentStartupContext} from './shopping-agent-context.mjs';
 import {shoppingProtocol} from './shopping-agent-protocol.mjs';
 import {activitySourcePhaseRows} from './source-phase-checkpoint.mjs';
+import {planShoppingWorkers} from './shopping-worker-contract.mjs';
 
 const shoppingSignalRows=(store,items,{perFamily=false}={})=>items
   .flatMap(item=>perFamily&&item.do==='shopping-market-refresh'&&Array.isArray(item.watchIds)&&item.watchIds.length?[...new Set(item.watchIds)].map(id=>({...item,watchIds:[id]})):[item])
@@ -67,12 +68,13 @@ function fullRunRecorded(store,day) {
   return false;
 }
 
-export function createIngestionDispatcher({store,resources,root,dataDir,automaticShopping=false,automaticMarketPlan=()=>[],launch=launchLuna,clock=Date.now,readConfig,alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}}}) {
+export function createIngestionDispatcher({store,resources,root,dataDir,shoppingCoordinator=null,automaticShopping=false,automaticMarketPlan=()=>[],launch=launchLuna,clock=Date.now,readConfig,alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}}}) {
   const file=join(dataDir,'ingestion-dispatch.enc'),key=loadKey(dataDir);
   let state=existsSync(file)?JSON.parse(decrypt(readFileSync(file),key).toString('utf8')):{};
   state.sourceBudget??={attempts:0,lastSignature:null,retryAt:null};
   let running=!!state.worker;
   let retryAfterLogin=false;
+  let continuationTimer=null;
   const config=readConfig ?? (()=>readDeploymentConfig('collector.json').dispatch ?? {});
   const agentQueue=()=> {
     const automaticMarket=new Set(automaticShopping?automaticMarketPlan():[]);
@@ -85,6 +87,28 @@ export function createIngestionDispatcher({store,resources,root,dataDir,automati
     if(latest&&Date.parse(latest.finishedAt)> (state.lastFinishedAt??0)){state.lastError=null;save();}
   };
   const release=token=>{if(store.snapshot().runLease?.token===token)store.endRun(token);};
+  const scheduleContinuation=()=>{const cfg=config();if(clock!==Date.now||!state.shoppingContinuation||cfg.enabled!==true)return;const seconds=cfg.shoppingProgressGapSeconds;if(!Number.isInteger(seconds)||seconds<10||seconds>900)return;clearTimeout(continuationTimer);continuationTimer=setTimeout(()=>tick(),seconds*1000);continuationTimer.unref();};
+  function poll(){
+    if(state.worker?.mode!=='shopping-coordinator')return;
+    shoppingCoordinator?.tick();const pool=shoppingCoordinator?.status();if(pool?.running)return;
+    const worker=state.worker,result=pool?.last,owned=store.snapshot().runLease?.token===worker.token;
+    state.lastFinishedAt=clock();state.lastError=pool?.attention?'Handelsarbeideren meldte en eksplisitt sikkerhetsstopp.':!result||result.id!==worker.coordinatorId||result.code!==0?'En handelsarbeider ble avbrutt; alle uavklarte varer er bevart.':null;
+    state.shoppingContinuation=owned&&!result?.preempted&&!state.lastError&&result?.positiveProgress===true;
+    state.lastMetrics={scope:'handel',assignedJobs:worker.shoppingBatch.jobs.length,workers:result?.slots?.map(s=>s.metrics)??[],applied:result?.applied??0};
+    const actual=new Set(shoppingCohortSignal(store,agentQueue()).items),progress=worker.assignedSignals.some(i=>!actual.has(i));
+    if(progress){state.attempts=0;state.shoppingCohort=null;state.lastSignature=null;}
+    state.retryAt=actual.size&&(state.attempts??0)<3?clock()+[0,30,120][state.attempts??0]*60000:null;
+    if(owned){
+      try{
+        const report=store.completionReport().shopping;
+        if(report.complete)store.recordRun({scope:'handel',outcome:'ok',summary:'Koordinatoren har kontrollert faktisk fullført handelsarbeid etter lagrede domenekvitteringer.'});
+        else if(report.work?.length)store.recordRun({scope:'handel',outcome:'continued',summary:`Avgrenset koordinert handelsbolk: ${result?.applied??0} lagrede forslag. Uavklarte og utsatte varer er bevart.`,resumeHint:'Fortsett gjeldende kø med nye frosne varejobber; kontroller eventuelle konkrete kildebehov før godkjenning.'});
+        else {const blockers=Object.entries(report).filter(([k,v])=>k.startsWith('blocked')&&Array.isArray(v)).flatMap(([,v])=>v).map(v=>String(v.reason??v.details??v.evidence??JSON.stringify(v)).slice(0,480)).filter(s=>s.length>=12);if(blockers.length)store.recordRun({scope:'handel',outcome:'partial',summary:'Tilgjengelig tildelt arbeid er behandlet; konkrete dokumenterte restanser består.',blockers:blockers.slice(0,20),resumeHint:'Les de konkrete blokkerte kildene i shopping-completion og fortsett når nødvendig belegg er tilgjengelig.'});}
+      }catch(error){state.lastError='Koordinatorens sluttkontroll kunne ikke registreres: '+error.message;state.shoppingContinuation=false;}
+      finally{release(worker.token);}
+    }
+    state.worker=null;running=false;save();scheduleContinuation();
+  }
   function knownBlockedOriginalsOnly(work) {
     if(!resources || !work.originalsOnly)return false;
     const missing=store.completionReport().missingDrive,raws=store.snapshot().rawItems;
@@ -113,6 +137,9 @@ export function createIngestionDispatcher({store,resources,root,dataDir,automati
   }
   function tick() {
     clearRecoveredLoginError();
+    poll();
+    if(state.worker?.mode==='shopping-coordinator')return;
+    if(shoppingCoordinator?.status().attention)return;
     if(state.worker){
       if(alive(state.worker.pid))return;
       release(state.worker.token);
@@ -121,6 +148,7 @@ export function createIngestionDispatcher({store,resources,root,dataDir,automati
       state.worker=null;running=false;state.lastError='Agentprosessen ble avbrutt; arbeidet er bevart.';save();
     }
     const cfg=config();if(running||cfg.enabled!==true)return;
+    if(cfg.shoppingWorkers!=null&&(!Number.isInteger(cfg.shoppingWorkers)||cfg.shoppingWorkers<1||cfg.shoppingWorkers>3)){state.lastError='dispatch.shoppingWorkers må være et heltall fra 1 til 3.';save();return;}
     // Family-submitted work has priority over automatically discovered work.
     if(store.phone.list().some(item=>['queued','processing'].includes(item.status))||store.calendarActions().length)return;
     if(store.shopping?.stockIntake?.work().some(item=>!item.retryAt||Date.parse(item.retryAt)<=clock()))return;
@@ -146,12 +174,15 @@ export function createIngestionDispatcher({store,resources,root,dataDir,automati
       if(wait){if(!state.retryAt||state.retryAt<wait){state.retryAt=wait;save();}return;}
     }
     const shoppingOnly=!fullDue&&work.shoppingOnly;
-    const shoppingQueue=shoppingOnly?agentQueue():null;
+    let shoppingQueue=shoppingOnly?agentQueue():null;
     if(shoppingOnly&&!shoppingQueue.length)return;
+    const serial=shoppingOnly?shoppingCoordinator?.preferSerial(shoppingQueue)??[]:[];
+    if(serial.length){const selected=new Set(serial);shoppingQueue=[...serial,...shoppingQueue.filter(i=>!selected.has(i))];}
     const currentShopping=shoppingOnly?new Set(shoppingCohortSignal(store,shoppingQueue).items):null;
     const heldCohort=shoppingOnly&&state.shoppingCohort?.signals?.length&&state.shoppingCohort.signals.every(item=>currentShopping.has(item))?state.shoppingCohort:null;
-    const plannedBatch=shoppingOnly?shoppingAgentBatch(shoppingQueue):null;
-    const retryBatch=heldCohort?{items:heldCohort.items,jobs:heldCohort.jobs??shoppingAgentBatch(heldCohort.items).jobs,summary:shoppingAgentBatch(shoppingQueue,{limit:Math.min(20,heldCohort.jobCount??heldCohort.shown)}).summary}:plannedBatch;
+    const poolPlan=shoppingOnly&&shoppingCoordinator&&!serial.length&&cfg.shoppingWorkers>1?planShoppingWorkers(shoppingQueue,cfg.shoppingWorkers):null;
+    const plannedBatch=shoppingOnly?(poolPlan?.batch??shoppingAgentBatch(shoppingQueue)):null;
+    const retryBatch=heldCohort&&!poolPlan&&(heldCohort.jobCount??20)<=20?{items:heldCohort.items,jobs:heldCohort.jobs??shoppingAgentBatch(heldCohort.items).jobs,summary:shoppingAgentBatch(shoppingQueue,{limit:Math.min(20,heldCohort.jobCount??heldCohort.shown)}).summary}:plannedBatch;
     const assignedSignal=shoppingOnly?shoppingCohortSignal(store,retryBatch.items):null;
     const dispatchSignature=shoppingOnly?assignedSignal.signature:work?.signature;
     const budget=shoppingOnly?state:state.sourceBudget;
@@ -172,6 +203,12 @@ export function createIngestionDispatcher({store,resources,root,dataDir,automati
     state.lastWorkScope=scope;
     if(shoppingOnly)state.shoppingCohort={items:structuredClone(shoppingBatch.items),jobs:structuredClone(shoppingBatch.jobs),signals:assignedSignal.items,shown:shoppingBatch.summary.shown,jobCount:shoppingBatch.summary.agentJobs.shown};
     state.lastStartedAt=clock();save();
+    if(scope==='handel'&&poolPlan){
+      state.worker={mode:'shopping-coordinator',token,scope,startedAt:clock(),shoppingBatch,assignedSignals:assignedSignal.items};save();
+      try{const pool=shoppingCoordinator.start({token,batches:poolPlan.batches});state.worker.coordinatorId=pool.runId??pool.last?.id;save();poll();}
+      catch(error){state.lastError=error.message;state.worker=null;running=false;state.retryAt=clock()+30*60000;release(token);save();}
+      return;
+    }
     const prompt=fullDue?`Gjør den daglige fulle kildekontrollen for Familien. Den planlagte kl. 07-kjøringen ble ikke registrert som utført; dette er reservekjøringen. Les AGENTS.md, config/sources.json, familieprofilen, relevante deler av docs/runbook.md og docs/aktiviteter.md. Kjøringslåsen er allerede tatt: ${token}. Ikke kall begin-run; forny og frigjør bare denne låsen.
 Start med next, behandle telefoninnboks og kalenderhandlinger, kjør waste-refresh og kontroller faktisk 30-dagersdekning og kommende avtaler for alle konfigurerte barna, Vigilo-tilleggsflater, Spond, konfigurerte Facebook-grupper og aktivitetskilder. Prioriter kommende 14 dager. Bruk samlerdata, ressursuttrekk og dokumentkvitteringer før nettleser; les alle sider og relevante lenker i nye/endrede vedlegg uansett filformat. Vurder profil, publiser originaler/råkort privat til Drive og synkroniser Calendar med faktiske kvitteringer og familiens varige skjulvalg. Bruk publish hvis Google direktepublisering er koblet til, ellers tilgjengelige Google-verktøy. Ingen kjøp, påmeldinger eller meldinger til andre.
 Fortsett til completion er true, eller registrer konkrete eksterne blockers og resumeHint ved faktisk utilgjengelige deler. Avslutt med run scope:"alle" og end-run ${token} i finally. Vær stille når alt er uendret og dekket; varsle nye betydelige funn, tapt innlogging og ny eller forverret manglende dekning.`:`Behandle nye/endrede kildeelementer og ventende publisering i Familien. Dette er en avgrenset kjøring med scope:"kildeendringer", ikke daglig full kildekontroll. Les AGENTS.md, config/sources.json, profile og runbookens nye avsnitt om datahenting. Kjøringslåsen er allerede tatt: ${token}. Ikke kall begin-run; forny og frigjør bare denne låsen.
@@ -212,7 +249,7 @@ Kontroller faktisk lagrede kvitteringer og completion før avslutning. Påstå a
         budget.retryAt=left.count && budget.attempts<3?clock()+[0,30,120][budget.attempts]*60000:null;
         const wait=shoppingOnly?null:resourceWait(left);if(wait)budget.retryAt=Math.max(budget.retryAt??0,wait);
       }
-      state.worker=null;release(token);running=false;save();
+      state.worker=null;release(token);running=false;save();scheduleContinuation();
     };
     try{
       let familyBasis=scope==='handel'?store.shopping?.agentFamilyBasis?.():null;
@@ -220,6 +257,8 @@ Kontroller faktisk lagrede kvitteringer og completion før avslutning. Påstå a
         const assignment=agentManifest(shoppingBatch),packet=store.shopping.agentContext(assignment),directory=join(root,'tmp','agent','contexts'),contextFile=join(directory,packet.contextFingerprint+'.json');
         familyBasis=agentStartupContext(packet,contextFile,400000,{compactBindings:true});
         if(familyBasis.contextIncluded){mkdirSync(directory,{recursive:true});writeFileSync(contextFile,JSON.stringify({assignment,packet}),'utf8');}
+        const research=shoppingCoordinator?.researchFor(packet)??[];
+        if(research.length){mkdirSync(directory,{recursive:true});const manifest=research.map((row,i)=>{const file=join(directory,packet.contextFingerprint+'-research-'+i+'.json');writeFileSync(file,JSON.stringify(row),'utf8');return {sourceKey:row.sourceKey,sourceFingerprint:row.sourceFingerprint,file,notes:row.notes.length};});familyBasis.prompt+='\nTidligere bevart uavklart primærresearch for akkurat disse gjeldende kildefingerprintene: '+JSON.stringify(manifest)+'. Les de relevante filene fullstendig før ny kildeforskning. Dette er uavklart belegg, aldri produkt-, familie-, pris- eller lesegodkjenning. Fortsett den ordinære domenekontrakten.\n';}
       }
       const child=launch({root,prompt:(familyBasis?.prompt??'')+scopedPrompt+'\n'+researchPrompts+(scope==='handel'?'':'\n'+originalReuse),onExit:finish});if(!finished&&child?.pid){state.worker={pid:child.pid,token,scope,startedAt:clock(),...(shoppingBatch?{shoppingBatch}:{} ),...(familyBasis?{familyBasisFingerprint:familyBasis.familyBasisFingerprint,providedContextFingerprint:familyBasis.providedContextFingerprint??null}:{})};save();}}catch(error){finish(-1,error.message);}
   }
@@ -232,5 +271,5 @@ Kontroller faktisk lagrede kvitteringer og completion før avslutning. Påstå a
     if(state.daily?.day===osloDayAndHour(clock()).day){state.daily.retryAt=null;state.daily.attempts=0;}
     save();retryAfterLogin=true;tick();return status();
   }
-  return {tick,renew,resumeAfterLogin,status};
+  return {tick,poll,renew,resumeAfterLogin,status};
 }

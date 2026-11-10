@@ -28,6 +28,7 @@ import {createOda} from './oda.mjs';
 import {createShoppingMaintenance} from './shopping-maintenance.mjs';
 import {createKassal} from './kassal.mjs';
 import {createSesumCollector,sesumSenderAllowed} from './shopping-sesum.mjs';
+import {createShoppingCoordinator} from './shopping-coordinator.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 let libraryPrices;
@@ -44,7 +45,8 @@ const feedRunner=createFeedRunner({store,root});
 const weatherConfig=readConfig('weather.json');
 const weather=createWeather({config:weatherConfig,dataDir:DATA_DIR});
 const phoneDispatcher=createPhoneDispatcher({store,root});
-const ingestionDispatcher=createIngestionDispatcher({store,resources,root,dataDir:DATA_DIR,automaticShopping:true,automaticMarketPlan:()=>shoppingMaintenance.marketPlan()});
+const shoppingCoordinator=createShoppingCoordinator({store,root,dataDir:DATA_DIR,endpoint:`http://127.0.0.1:${Number(process.env.FAMILIEN_PORT??4318)}/api/shopping/agent-worker`,shouldYield:()=>process.env.FAMILIEN_NO_DISPATCH||readConfig('agent.json').enabled!==true||readConfig('collector.json').dispatch?.enabled!==true||store.phone.list().some(i=>['queued','processing'].includes(i.status))||store.calendarActions().length>0||store.shopping.stockIntake.work().some(i=>!i.retryAt||Date.parse(i.retryAt)<=Date.now())});
+const ingestionDispatcher=createIngestionDispatcher({store,resources,root,dataDir:DATA_DIR,shoppingCoordinator,automaticShopping:true,automaticMarketPlan:()=>shoppingMaintenance.marketPlan()});
 // Nye visningsfiler serveres fra public/ etter navn (ingen stier fra klienten).
 const PUBLIC_FILES=new Map([['kiosk.css','text/css; charset=utf-8'],['kiosk-home.mjs','text/javascript; charset=utf-8'],['event-display.mjs','text/javascript; charset=utf-8'],['weather-widget.mjs','text/javascript; charset=utf-8'],['login-status.mjs','text/javascript; charset=utf-8'],['sun.mjs','text/javascript; charset=utf-8'],['dtf.mjs','text/javascript; charset=utf-8'],['home-tasks.mjs','text/javascript; charset=utf-8'],['celebrate.mjs','text/javascript; charset=utf-8']]);
 PUBLIC_FILES.set('doorbell-view.mjs','text/javascript; charset=utf-8');PUBLIC_FILES.set('doorbell.css','text/css; charset=utf-8');
@@ -53,7 +55,7 @@ let wasteRefresh;
 let restarting=false;
 const inFlight=new Set(),RESTART_BUSY_MS=Number(process.env.FAMILIEN_RESTART_BUSY_MS??3000),RESTART_DRAIN_MS=Number(process.env.FAMILIEN_RESTART_DRAIN_MS??45000);
 const servers=[];
-const dispatchTick=()=>{if(!restarting&&!process.env.FAMILIEN_NO_DISPATCH)phoneDispatcher.tick();};
+const dispatchTick=()=>{if(!restarting&&!process.env.FAMILIEN_NO_DISPATCH){ingestionDispatcher.poll();phoneDispatcher.tick();}};
 const host = "127.0.0.1";
 const port = Number(process.env.FAMILIEN_PORT ?? 4318);
 oda=createOda({dataDir:DATA_DIR,shopping:store.shopping,redirectUrl:`http://127.0.0.1:${port}/api/shopping/oda/callback`});
@@ -124,6 +126,10 @@ async function handle(req, res) {
       return send(res,405,{error:'Ukjent Sesum-operasjon.'});
     }
     if(path==='/shopping-setup'&&method==='GET')return send(res,200,readFileSync(join(root,'public','shopping-setup.html')),'text/html; charset=utf-8');
+    if(path==='/api/shopping/agent-worker'&&method==='POST'){
+      if(!String(req.headers['content-type']??'').startsWith('application/json'))return send(res,403,{error:'Worker requires JSON.'});
+      const input=await json(req);try{return send(res,200,await shoppingCoordinator.handle(input.workerId,req.headers['x-family-worker'],input.call,input.input));}catch(error){return send(res,/capability.*revoked/.test(error.message)?403:409,{error:error.message});}
+    }
     if(path==='/api/shopping/agent-context'&&method==='POST'){
       if(req.headers['x-family-request']!=='1')return send(res,403,{error:'Ugyldig avsender.'});
       return send(res,200,store.shopping.agentContext(await json(req)));
@@ -287,7 +293,7 @@ async function handle(req, res) {
       store.phone.submit(item.id,'family-chat');send(res,200,item);queueMicrotask(dispatchTick);return;
     }
     if(path==='/api/phone/dispatcher'&&method==='GET')return send(res,200,phoneDispatcher.status());
-    if(path==='/api/ingestion/dispatcher'&&method==='GET')return send(res,200,{...ingestionDispatcher.status(),automaticShopping:shoppingMaintenance.status()});
+    if(path==='/api/ingestion/dispatcher'&&method==='GET')return send(res,200,{...ingestionDispatcher.status(),shoppingCoordinator:shoppingCoordinator.status(),automaticShopping:shoppingMaintenance.status()});
     if(path==='/api/ingestion/dispatcher/resume-after-login'&&method==='POST'){
       if(req.headers['x-family-request']!=='1'||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host))return send(res,403,{error:'Ugyldig avsender.'});
       return send(res,200,ingestionDispatcher.resumeAfterLogin());
@@ -515,7 +521,7 @@ servers.push(createServer((req,res) => {
     if(req.method==='POST'&&/^\/api\/shopping\/(?:stock-action|stock-scan|stock-intake(?:\/[a-f0-9-]{36}\/(?:submit|files\/[0-7]))?)$/.test(kioskStock))return handle(req,res);
     return send(res,req.method==='GET'?403:405,{error:'Gjennomgang og bildeoriginaler er bare tilgjengelige på agentporten.'});
   }
-  if(/^\/(?:api\/(?:resources|collector|google)(?:[/?]|$)|google-setup|shopping-setup|api\/shopping\/oda\/(?:connect|callback|tools|refresh(?:-plan)?)|api\/shopping\/(?:sesum\/|agent-(?:context|placement)|market-refresh|orders|settings|offer|review|nutrition|catalog|link|feed|library-))/.test(req.url))return send(res,req.method==='GET'?403:405,{error:'Kildeoriginaler og integrasjonsoppsett er bare tilgjengelige lokalt på agentporten.'});
+  if(/^\/(?:api\/(?:resources|collector|google)(?:[/?]|$)|google-setup|shopping-setup|api\/shopping\/oda\/(?:connect|callback|tools|refresh(?:-plan)?)|api\/shopping\/(?:sesum\/|agent-(?:context|placement|worker)|market-refresh|orders|settings|offer|review|nutrition|catalog|link|feed|library-))/.test(req.url))return send(res,req.method==='GET'?403:405,{error:'Kildeoriginaler og integrasjonsoppsett er bare tilgjengelige lokalt på agentporten.'});
   if (req.method !== "GET" && !(req.method === "POST" && /^(?:\/api\/shopping\/(?:watch|pantry|item|deal|list|oda\/(?:sync|search|add|cart|probe|review|line|swap))|\/api\/home-assistant\/command|\/api\/doorbell\/frame|\/api\/profile\/edit|\/api\/events\/[a-f0-9]{24}\/(?:tasks\/[a-zA-Z0-9:_-]{1,100}|visibility)|\/api\/activities\/[a-f0-9]{24}\/reaction)$/.test(new URL(req.url,`http://${host}`).pathname))) return send(res,405,{error:"Handlingen er bare tilgjengelig lokalt på agentporten."});
   return handle(req,res);
 }));

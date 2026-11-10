@@ -7,8 +7,21 @@ import {shoppingStore} from '../src/shopping.mjs';
 import {libraryPriceProvider} from '../src/shopping-library.mjs';
 import {productMetadataFingerprint,groupMetadataFingerprint} from '../src/product-library.mjs';
 import {sesumDonorFingerprint} from '../src/sesum-prices.mjs';
+import {workerManifest,applyWorkerProposal} from '../src/shopping-worker-contract.mjs';
+import {shoppingAgentBatch} from '../src/shopping-agent-jobs.mjs';
 
 const NOW='2026-11-10T12:00:00Z',SOURCE='sesum:KIWI:72';
+
+test('one scoped product job follows real placement, native registration and additive household family approval',t=>{
+ const f=setup(t);f.ingest();const assignment=workerManifest(shoppingAgentBatch(f.shop.queue().filter(i=>i.sourceKey===SOURCE))),store={shopping:f.shop,snapshot:()=>f.state},before=structuredClone(f.state.shopping.watches[f.w.id]);
+ const packet=()=>f.shop.agentContext(assignment),apply=(operation,input,groupReads=new Map())=>applyWorkerProposal({store,assignment,packet:packet(),operation,input,groupReads}),place=()=>{const p=packet();return apply('placement',{scopeEvidence:'Every active family criterion was read against this actual original whole-bean label and fixed 500g bag.',reviewedAllFamilies:true,decisions:[{sourceKey:SOURCE,status:'reviewed',evidence:'Actual plain whole roasted beans and fixed 500g package were read.',targets:[{familyIndex:p.families.findIndex(x=>x.familyId===f.w.id),equivalenceEvidence:'Same whole-bean contents, plain roast, physical form, fixed package and household use.'}]}]});};
+ place();assert.ok(packet().jobs.flatMap(j=>j.items).some(i=>i.do==='shopping-sesum-discovery'));
+ const result=apply('source-register',{sourceKey:SOURCE,identityEvidence:'Actual source product and original label identify this specific whole-bean variant and fixed bag.',packAmount:.5,unit:'kg',packEvidence:'Actual original bag and matching source metadata show one fixed 500g net package.',product:{ingredients:'Whole roasted coffee beans',description:'Plain whole-bean roast',brand:f.source.brand,attributes:{organic:true}},groups:[f.B],memberships:[{groupId:f.B.id,equivalenceEvidence:'Actual complete plain whole-bean contents match these explicit reviewed group rules.',qualityEvidence:'Original ingredient label, whole-bean form and all declared differences were read.'}],sourceReceipts:[{url:'https://producer.example.test/new-original-label',observedAt:NOW,evidence:'Actual original whole-bean label and fixed 500g package read.'}]});
+ assert.equal(result.registration.productKey,SOURCE);assert.ok(packet().sources[0].reviewedIdentity);if(packet().jobs.flatMap(j=>j.items).some(i=>i.do==='shopping-sesum-placement-review'))place();
+ const g=f.shop.agentGroup(f.B.id);assert.equal(g.fingerprint,groupMetadataFingerprint(f.B));assert.ok(packet().jobs.flatMap(j=>j.items).some(i=>i.do==='shopping-sesum-family-review'));
+ apply('family-add-variant',{sourceKey:SOURCE,familyId:f.w.id,evidence:'Actual new whole-bean subgroup matches this household need without changing previous variants or constraints.',variant:{groupId:f.B.id,brands:[],requires:[],excludeProductKeys:[],evidence:'Actual complete ingredients, physical form, use and fixed package satisfy this precise household family.'}},new Map([[g.groupId,g.fingerprint]]));
+ if(packet().jobs.flatMap(j=>j.items).some(i=>i.do==='shopping-sesum-placement-review'))place();assert.equal(f.work().length,0);assert.deepEqual(f.state.shopping.watches[f.w.id].variants[0].groupId,before.variants[0].groupId);assert.equal(f.state.shopping.watches[f.w.id].stockAmount,before.stockAmount);assert.equal(f.state.shopping.watches[f.w.id].purchaseAmount,before.purchaseAmount);assert.equal(packet().assignmentChanges.length,0);
+});
 function group(id,name){return {id,name,category:'Coffee',canonicalUnit:'kg',inclusionCriteria:'Plain whole roasted coffee beans with a separately reviewed physical variant.',exclusions:['Ground coffee','Added flavourings'],qualityBasis:'Actual whole-bean form and ingredients',comparisonBasis:'Per kg'};}
 function setup(t,{linked=true,nativeIdentity=false,ordinaryBridge=false}={}){
   const dir=mkdtempSync(join(tmpdir(),'sesum-family-flow-'));t.after(()=>{if(!resolve(dir).startsWith(resolve(tmpdir(),'sesum-family-flow-')))throw Error('Unsafe test cleanup.');rmSync(dir,{recursive:true,force:true});});

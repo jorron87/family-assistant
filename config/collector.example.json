@@ -4,6 +4,7 @@
   "dispatch": {
     "enabled": false,
     "minGapMinutes": 15,
+    "shoppingWorkers": 1,
     "shoppingProgressGapSeconds": 30,
     "dailyFullFallback": false
   },

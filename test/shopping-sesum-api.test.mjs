@@ -19,6 +19,8 @@ test('Sesum is opt-in, accepts only local/extension workers, and stays off kiosk
     assert.equal((await fetch(api+'/api/shopping/sesum/work',{headers:{Origin:'https://www.sesum.no'}})).status,403);
     assert.equal((await fetch(api+'/api/shopping/sesum/work',{headers:{Origin:'chrome-extension://'+'a'.repeat(32)}})).status,200);
     const post=(path,headers)=>fetch(api+path,{method:'POST',headers,body:'{}'});
+    assert.equal((await post('/api/shopping/agent-worker',{'Content-Type':'application/json','X-Family-Request':'1'})).status,403,'ordinary local request headers cannot impersonate a scoped worker');
+    for(const listener of [port+1,port+2])assert.ok([401,403,405].includes((await fetch(`http://127.0.0.1:${listener}/api/shopping/agent-worker`,{method:'POST',headers:{'Content-Type':'application/json','X-Family-Worker':'invalid-test-capability'},body:'{}'})).status));
     assert.equal((await post('/api/shopping/sesum/receive',{'Content-Type':'application/json'})).status,403);
     assert.equal((await post('/api/shopping/sesum/receive',{'Content-Type':'text/plain','X-Family-Request':'1'})).status,403);
     assert.equal((await post('/api/shopping/sesum/refresh',{'Content-Type':'application/json','X-Family-Request':'1',Origin:'chrome-extension://'+'a'.repeat(32)})).status,403);

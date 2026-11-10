@@ -1815,21 +1815,28 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     }).map(p=>({...p,rawFamilyIds:[...p.familyIds],researchedFamilyIds:sesumResearchedFamilyIds(p,semantic.families),familyIds:(p.basisReviewNeeded?sesumEffectiveFamilyIds(p,semantic.families):sesumResearchFamilyIds(p,semantic,research.get(p.sourceKey)?.registrationFingerprint??null)).filter(id=>sesumFamilyDecision(p,id,requirements,research.get(p.sourceKey)?.registrationFingerprint??null)?.status!=='excluded')})).filter(p=>p.familyIds.length||p.basisReviewNeeded).map(p=>({...p,do:p.basisReviewNeeded||p.hasReviewedDonor?'shopping-sesum-review':'shopping-sesum-discovery',reason:p.basisReviewNeeded?'review-direct-unit-basis':p.hasReviewedDonor?'review-source-bridge':'new-product-needs-family-research'}));
   }
   function sesumCandidates(...args){return inReadContext(()=>sesumCandidatesInContext(...args));}
-  function agentContext(assignment){return inReadContext(()=>{
-    const work=queue(),placement=sesumPlacement(),native=catalog.entries(),reader=libReader(),research=sesumResearches(reader);
+  function prepareAgentContext(){
+    const work=queue(),placement=sesumPlacement(),native=catalog.entries(),reader=libReader(),research=sesumResearches(reader),stagesBySource=new Map(),placementBySource=new Map(placement.items.map(p=>[p.sourceKey,p])),nativeByKey=new Map();
+    for(const item of work)for(const row of [item,...(item.relatedSources??[])])if(row.sourceKey){const stages=stagesBySource.get(row.sourceKey)??new Set();stages.add(item.do);stagesBySource.set(row.sourceKey,stages);}
+    for(const e of native){const key=catalogKey(e),rows=nativeByKey.get(key)??[];rows.push(e);nativeByKey.set(key,rows);}
+    return {work,placement,native,reader,research,stagesBySource,placementBySource,nativeByKey};
+  }
+  function agentContexts(assignments){if(!Array.isArray(assignments)||!assignments.length||assignments.length>3)throw Error('Prepare one to three worker contexts.');return inReadContext(()=>{const basis=prepareAgentContext();return assignments.map(a=>agentContext(a,basis));});}
+  function agentContext(assignment,basis=null){return inReadContext(()=>{
+    const {work,placement,reader,research,stagesBySource,placementBySource,nativeByKey}=basis??prepareAgentContext();
     const reviewedIdentity=key=>{
       const identity=research.get(key),p=identity&&reader.product(identity.productKey);if(!p)return null;
       const facts=p.reviewFacts??{};
       return {productKey:identity.productKey,productFingerprint:identity.productFingerprint,registrationFingerprint:identity.registrationFingerprint,sourceFingerprint:identity.sourceFingerprint,identityEvidence:s.sesumPrices.bridges[key]?.equivalenceEvidence??null,identityPackEvidence:s.sesumPrices.bridges[key]?.packEvidence??null,
         product:{name:p.name,brand:p.brand,ean:p.ean,ingredients:facts.ingredients??p.ingredients,description:facts.description??p.description,packAmount:identity.packAmount,unit:identity.unit,packEvidence:facts.packEvidence??p.packEvidence,rawPack:facts.rawPack??p.rawPack,attributes:p.attributes,nutrition:p.nutrition,nutritionObservation:facts.nutritionObservation??null,sourceUrl:p.sourceUrl},
         completeTextAvailable:!!p.reviewFacts,groups:identity.groups.map(g=>{const m=reader.groupsOf(key).find(m=>m.groupId===g.groupId&&m.s==='approved'&&m.r);return {...g,equivalenceEvidence:m?.reviewFacts?.equivalenceEvidence??m?.e??null,qualityEvidence:m?.reviewFacts?.qualityEvidence??m?.qe??null,sourceReceipts:m?.reviewFacts?.sourceReceipts??[],reviewedAt:m?.reviewFacts?.reviewedAt??null};}),
-        nativeFamilyReviews:native.filter(e=>[identity.productKey,key].includes(catalogKey(e))).map(e=>({watchId:e.watchId,status:e.status,fingerprint:e.fingerprint,equivalenceEvidence:e.equivalenceEvidence,review:e.review??null})),
+        nativeFamilyReviews:[...new Set([...(nativeByKey.get(identity.productKey)??[]),...(nativeByKey.get(key)??[])])].map(e=>({watchId:e.watchId,status:e.status,fingerprint:e.fingerprint,equivalenceEvidence:e.equivalenceEvidence,review:e.review??null})),
         authority:'Reviewed identity and label facts only. No household family approval, fresh price, availability or campaign terms are inferred.'};
     };
     return buildAgentContext(work,assignment,{
       families:()=>placement.families,
-      sources:key=>{const observation=sesumSubjectRecord(key);if(!observation)return null;const stages=work.filter(i=>i.sourceKey===key).map(i=>i.do),row=placement.items.find(i=>i.sourceKey===key);return {sourceKey:key,observation,placement:row??null,registration:key.startsWith('sesum-product:')?null:discovery.record(key),reviewedIdentity:reviewedIdentity(key),...(stages.some(s=>s!=='shopping-sesum-placement-review')&&!key.startsWith('sesum-product:')?{candidate:sesumCandidates(undefined,key)}:{})};},
-      products:key=>({productKey:key,entries:native.filter(e=>catalogKey(e)===key),detail:productInfo({key})})
+      sources:key=>{const observation=sesumSubjectRecord(key);if(!observation)return null;const stages=[...(stagesBySource.get(key)??[])],row=placementBySource.get(key);return {sourceKey:key,observation,placement:row??null,registration:key.startsWith('sesum-product:')?null:discovery.record(key),reviewedIdentity:reviewedIdentity(key),...(stages.some(s=>s!=='shopping-sesum-placement-review')&&!key.startsWith('sesum-product:')?{candidate:sesumCandidates(undefined,key)}:{})};},
+      products:key=>({productKey:key,entries:nativeByKey.get(key)??[],detail:productInfo({key})})
     });
   });}
   function agentPlacement(input){return inReadContext(()=>{
@@ -1903,5 +1910,5 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     }
   }
   });
-  return {agentPlacement,agentProgressSince,agentContext,agentFamilyBasis:()=>inReadContext(()=>agentFamilyBasis(sesumPlacementFamilies().families)),marketRefreshPlan,odaRefreshPlan,odaRefreshReceive,sesumFamilies,sesumPlacement,sesumReceivePrices,sesumReceiveMetadata:input=>sesumCatalogue.ingest(input),sesumCandidates,sesumRegister,sesumPriceReview,sesumOfferCandidates,sesumOfferReview,sesumPriceStatus:()=>inReadContext(()=>({...sesumPrices.status(),discovery:discovery.status(),catalogue:sesumCatalogue.status()})),familyReopen,listFamily,listFamilyWork,explorer,productInfo,libraryAudit,libraryAuditAck,libraryLink,libraryLinkCandidates,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
+  return {agentPlacement,agentProgressSince,agentContext,agentContexts,agentGroup:id=>inReadContext(()=>{const group=libReader()?.group(id);return group?{groupId:id,...structuredClone(group)}:null;}),agentFamilyBasis:()=>inReadContext(()=>agentFamilyBasis(sesumPlacementFamilies().families)),marketRefreshPlan,odaRefreshPlan,odaRefreshReceive,sesumFamilies,sesumPlacement,sesumReceivePrices,sesumReceiveMetadata:input=>sesumCatalogue.ingest(input),sesumCandidates,sesumRegister,sesumPriceReview,sesumOfferCandidates,sesumOfferReview,sesumPriceStatus:()=>inReadContext(()=>({...sesumPrices.status(),discovery:discovery.status(),catalogue:sesumCatalogue.status()})),familyReopen,listFamily,listFamilyWork,explorer,productInfo,libraryAudit,libraryAuditAck,libraryLink,libraryLinkCandidates,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
 }
