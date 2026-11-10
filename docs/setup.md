@@ -51,6 +51,8 @@ Handelsagenten får høyst 20 frosne varejobber og leser paginert kontekst med `
 
 Dispatch forbereder den avgrensede kontekstfilen i kode og leverer hele produktbolken direkte ved oppstart når datadelen er innenfor 400000 tegn; store pakker bruker paginering. Komplette familiekriterier leveres først som et stabilt oppstartsgrunnlag når de passer; kontekstleseren gjenbruker dette bare ved identisk fingerprint. Nye indekser bevarer også full produkttekst for agentarbeid, mens vanlige visninger fortsatt bruker korte utdrag. Eldre indeksformat bygges på nytt automatisk. Arbeidspakken tilbyr kun fortsatt gyldige, gjennomgåtte donoropplysninger; familiebruk og prisbelegg har egne kontroller. `--mode=packet --inline-context` måler denne oppstartsflyten i den isolerte benchmarken.
 
+Før større kjøringer kan `--dataset=expanded --mode=packet --inline-context --compact-bindings --repetitions=1 --effort=high` brukes til 140 unike produkter mot 91 konkrete familier. `--chains=3` tester separate kjeder innen samme produktjobb. Bekreft både kvalitet og tid; null feilaktige familietreff eller utrygge avklaringer er et eget krav. Benchmarken endrer ingen modell-, tillatelses- eller dispatchvalg i produksjon. Rene plasseringsbolker lar kode binde tekniske fingerprints fra den komplette kontekstfilen, og CLI gjenbruker bare faktisk levert input med identisk kontekst- og familiefingerprint.
+
 Oda dekker ikke nødvendigvis hele matbudsjettet eller forbruket. Kostholdsanalyse trenger næringsdeklarasjoner og målbar mengde; den gjetter ikke næringsinnhold eller barnas energibehov fra handlekurven.
 
 ## Lagerinnsendinger

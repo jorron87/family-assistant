@@ -22,7 +22,7 @@ test('dispatcher prepares the exact frozen context file before launch and releas
  f.store.shopping.agentContext=assignment=>buildAgentContext(f.queue.rows,assignment,{families:()=>[{familyId:'beans',familyFingerprint:'criteria'}],sources:key=>({sourceKey:key,observation:{sourceFingerprint:'one'},label:'Complete original label'}),products:()=>null});
  try{
   f.dispatcher.tick();const launch=f.launches[0],document=JSON.parse(launch.prompt.split('\n').find(line=>line.startsWith('{"contextFile"'))),saved=JSON.parse(readFileSync(document.contextFile,'utf8'));
-  assert.equal(saved.packet.contextFingerprint,document.contextFingerprint);assert.deepEqual(saved.assignment.jobs[0].sourceKeys,['sesum-product:1']);assert.equal(document.sources[0].label,'Complete original label');
+  assert.equal(saved.packet.contextFingerprint,document.contextFingerprint);assert.deepEqual(saved.assignment.jobs[0].sourceKeys,['sesum-product:1']);assert.equal(document.sources[0].label,'Complete original label');assert.equal(f.dispatcher.status().providedContextFingerprint,saved.packet.contextFingerprint);
   launch.onExit(0);f.clock.at+=16*60000;f.queue.rows[0].sourceFingerprint='genuinely-changed';f.store.shopping.agentContext=()=>{throw Error('Synthetic preparation failure');};f.dispatcher.tick();assert.equal(f.launches.length,1);assert.equal(f.store.snapshot().runLease,null);assert.equal(f.dispatcher.status().running,false);assert.match(f.dispatcher.status().lastError,/preparation failure/);
  }finally{f.close();}
 });

@@ -86,7 +86,7 @@ async function execute(command, args, flags) {
       const assignment=args[0]?json(args[0]):agentManifest(dispatcher.shoppingBatch??{jobs:[]});
       const packet=await request('/api/shopping/agent-context','POST',assignment),contextFile=outputPath('tmp/agent/contexts/'+packet.contextFingerprint+'.json');
       writeFileSync(contextFile,JSON.stringify({assignment,packet}),'utf8');
-      result={contextFile,contextFingerprint:packet.contextFingerprint,assignmentChanges:packet.assignmentChanges,activeStagesEmpty:packet.activeStagesEmpty,completionAuthority:packet.completionAuthority,...agentContextSummary(packet,dispatcher?.familyBasisFingerprint),next:packet.assignmentChanges.length?'Checkpoint this changed assignment; obtain a new assignment before writes.':'Read every required page with shopping-agent-page FILE SECTION PAGE (zero-based). Decide using sourceIndex/familyIndex; shopping-agent-decide FILE DECISIONS_FILE binds current fingerprints in code.'};break;
+      result={contextFile,contextFingerprint:packet.contextFingerprint,assignmentChanges:packet.assignmentChanges,activeStagesEmpty:packet.activeStagesEmpty,completionAuthority:packet.completionAuthority,...agentContextSummary(packet,dispatcher?.familyBasisFingerprint,dispatcher?.providedContextFingerprint),next:packet.assignmentChanges.length?'Checkpoint this changed assignment; obtain a new assignment before writes.':'Read every required page with shopping-agent-page FILE SECTION PAGE (zero-based). Decide using sourceIndex/familyIndex; shopping-agent-decide FILE DECISIONS_FILE binds current fingerprints in code.'};break;
     }
     case 'shopping-agent-page': {
       const {packet}=json(args[0]),pages=agentContextPages(packet)[args[1]],page=Number(args[2]??0);

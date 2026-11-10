@@ -34,6 +34,34 @@ test('bounded startup supplies the complete source view and falls back to full p
  assert.ok(agentContextPages(packet).sources.length>0,'fallback retains complete paged evidence');
  const noPrefix=agentStartupContext({...packet,families:[{familyId:'huge',criteria:'ø'.repeat(5000)}]},'tmp/context.json',1000);assert.equal(noPrefix.prompt,'');assert.equal(noPrefix.familyBasisFingerprint,null);assert.equal(noPrefix.contextIncluded,false);
 });
+
+test('compact placement bindings preserve every semantic field and never change the bound write',()=>{
+ const key='sesum-product:1',assignment=agentManifest(shoppingAgentBatch([{do:'shopping-sesum-placement-review',sourceKey:key}]));
+ const packet=buildAgentContext([{do:'shopping-sesum-placement-review',sourceKey:key}],assignment,{...facts,sources:key=>({sourceKey:key,observation:{sourceFingerprint:'exact-source',source:{id:'1',name:'Actual whole beans',weight:500,weightUnit:'g'}},placement:{sourceFingerprint:'exact-source',registrationFingerprint:null,familySetFingerprint:'exact-set',reviewDelta:{familiesToReview:['beans'],retainedTargets:[]}},ingredients:'Coffee beans',priorExclusion:{reason:'Concrete previously excluded variant',sourceFingerprint:'previous'}})});
+ const original=structuredClone(packet),startup=agentStartupContext(packet,'context.json',400000,{compactBindings:true}),full=agentStartupContext(packet,'context.json');
+ assert.ok(startup.prompt.length<full.prompt.length);assert.deepEqual(packet,original);
+ const data=JSON.parse(startup.prompt.split('\n').find(line=>line.startsWith('{"contextFile"'))),familyData=JSON.parse(startup.prompt.split('\n')[1]);assert.equal(data.bindingsInContextFile,true);
+ assert.equal(data.sources[0].ingredients,'Coffee beans');assert.equal(data.sources[0].priorExclusion.reason,'Concrete previously excluded variant');assert.equal(data.sources[0].observation.source.weight,500);assert.equal(familyData.families[0].familyId,'beans');assert.equal(familyData.families[0].familyFingerprint,undefined);
+ assert.equal(data.contextFingerprint,packet.contextFingerprint);assert.equal(data.familyBasisFingerprint,agentFamilyBasis(packet.families).familyBasisFingerprint);
+ const bound=bindPlacementDecisions(packet,[{sourceIndex:0,status:'reviewed',targets:[{familyIndex:0,equivalenceEvidence:'Read original whole beans and documented fixed pack.'}]}])[0];assert.equal(bound.sourceFingerprint,'exact-source');assert.equal(bound.familySetFingerprint,'exact-set');assert.equal(bound.targets[0].familyFingerprint,'criteria');
+ const multiStage=structuredClone(packet);multiStage.jobs[0].items.push({do:'shopping-sesum-family-review',sourceKey:key});const other=agentStartupContext(multiStage,'context.json',400000,{compactBindings:true});assert.equal(JSON.parse(other.prompt.split('\n')[1]).bindingsInContextFile,false);
+});
+
+test('complete context is reused only when the actually supplied packet and family basis are still identical',()=>{
+ const packet={version:1,contextFingerprint:'current-complete-packet',jobs:[],families:facts.families(),sources:[{sourceKey:'sesum-product:1',label:'Actual source label'}],products:[]},basis=agentFamilyBasis(packet.families);
+ const same=agentContextSummary(packet,basis.familyBasisFingerprint,packet.contextFingerprint);assert.equal(same.contextDataProvidedInPrompt,true);assert.ok(Object.values(same.pages).every(n=>n===0));
+ const changed=agentContextSummary({...packet,contextFingerprint:'new-label-or-review'},basis.familyBasisFingerprint,packet.contextFingerprint);assert.equal(changed.contextDataProvidedInPrompt,false);assert.ok(changed.pages.sources>0);assert.equal(changed.pages.families,0);
+ const familyChanged=agentContextSummary(packet,'old-family-basis',packet.contextFingerprint);assert.equal(familyChanged.contextDataProvidedInPrompt,false);assert.ok(familyChanged.pages.families>0);
+ const manual=agentContextSummary(packet);assert.equal(manual.contextDataProvidedInPrompt,false);assert.ok(manual.pages.sources>0);
+});
+
+test('compact bindings retain explicit stale group and prior-review comparisons',()=>{
+ const packet={version:1,contextFingerprint:'current',assignmentChanges:[],activeStagesEmpty:false,jobs:[{items:[{do:'shopping-sesum-placement-review'}]}],families:[{familyId:'beans',variants:[{groupId:'actual-group',groupFingerprint:'new-rules',reviewedGroupFingerprint:'old-rules',group:{inclusion:'Current complete inclusion rule'}}]}],sources:[{sourceKey:'sesum-product:1',placement:{sourceFingerprint:'new-source',registrationFingerprint:'new-identity',familySetFingerprint:'new-families',review:{sourceFingerprint:'old-source',registrationFingerprint:'old-identity',familySetFingerprint:'old-families',evidence:'Old concrete evidence stays visible'}},nativeFamilyReviews:[{fingerprint:'new-metadata',status:'pending',review:{fingerprint:'old-metadata',status:'approved'}}]}],products:[]};
+ const startup=agentStartupContext(packet,'context.json',400000,{compactBindings:true}),family=JSON.parse(startup.prompt.split('\n')[1]),data=JSON.parse(startup.prompt.split('\n').find(line=>line.startsWith('{"contextFile"')));
+ assert.equal(family.families[0].variants[0].groupReviewCurrent,false);assert.equal(family.families[0].variants[0].group.inclusion,'Current complete inclusion rule');
+ assert.deepEqual(data.sources[0].placement.priorReviewBindings,{sourceCurrent:false,registrationCurrent:false,familySetCurrent:false});assert.equal(data.sources[0].placement.review.evidence,'Old concrete evidence stays visible');assert.equal(data.sources[0].nativeFamilyReviews[0].reviewBindingCurrent,false);
+ packet.families[0].variants[0].reviewedGroupFingerprint='new-rules';assert.equal(JSON.parse(agentStartupContext(packet,'context.json',400000,{compactBindings:true}).prompt.split('\n')[1]).families[0].variants[0].groupReviewCurrent,true);
+});
 test('one context shares family criteria and follows assigned products across stages without adding new chain sources',()=>{
  const a='sesum:KIWI:1',b='sesum:REMA_1000:1',c='sesum:COOP_EXTRA:1';
  const assignment=agentManifest(shoppingAgentBatch([{do:'shopping-sesum-placement-review',sourceKey:a,relatedSources:[{sourceKey:b}]}]));
