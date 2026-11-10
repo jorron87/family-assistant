@@ -28,6 +28,8 @@ test('Sesum is opt-in, accepts only local/extension workers, and stays off kiosk
     }
     assert.equal((await post('/api/shopping/sesum/offer-review',{'Content-Type':'application/json'})).status,403);
     assert.equal((await post('/api/shopping/sesum/offer-review',{'Content-Type':'application/json','X-Family-Request':'1',Origin:'chrome-extension://'+'a'.repeat(32)})).status,403);
+    assert.equal((await post('/api/shopping/sesum/review',{'Content-Type':'application/json','X-Family-Request':'1',Origin:'chrome-extension://'+'a'.repeat(32)})).status,403);
+    for(const listener of [port+1,port+2])assert.ok([401,403,405].includes((await fetch(`http://127.0.0.1:${listener}/api/shopping/sesum/review`,{method:'POST',headers:{'Content-Type':'application/json','X-Family-Request':'1'},body:JSON.stringify({status:'blocked',reason:'Unresolved source family membership'})})).status));
   }finally{
     const ended=new Promise(r=>child.once('exit',r));child.kill();await ended;
     assert.ok(dir.startsWith(join(tmpdir(),'family-sesum-api-')));rmSync(dir,{recursive:true,force:true});

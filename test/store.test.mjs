@@ -23,6 +23,10 @@ test('a campaign waiting for a future retry counts as blocked shopping even with
   assert.equal(report.shopping.complete,false);assert.deepEqual(report.shopping.work,[]);assert.deepEqual(report.shopping.blockedCampaigns,[campaign]);
   assert.equal(report.counts.shoppingPending,0);assert.equal(report.counts.shoppingBlocked,1);assert.equal(report.complete,false);
   assert.equal(store.changeCompletion().counts.shoppingBlocked,1,'change completion reports the same unresolved shopping blocker');
+  const family={do:'shopping-sesum-family-review',sourceKey:'sesum:KIWI:456',familyId:'synthetic-family',status:'blocked',reason:'A required product label fact is unresolved.',retryAt:campaign.retryAt};
+  store.shopping.completion=()=>({complete:false,work:[],blockedStores:[],blockedRoutes:[],blockedCampaigns:[],blockedFamilies:[family]});
+  assert.equal(store.completionReport().shopping.complete,false);assert.equal(store.completionReport().counts.shoppingPending,0);assert.equal(store.completionReport().counts.shoppingBlocked,1);
+  assert.equal(store.changeCompletion().counts.shoppingBlocked,1,'a future family retry is also an unresolved shopping blocker');
   store.shopping.completion=()=>({complete:true,work:[],blockedStores:[],blockedRoutes:[]});
   assert.equal(store.completionReport().counts.shoppingBlocked,0,'older shopping providers without campaign blockers remain compatible');
 }));

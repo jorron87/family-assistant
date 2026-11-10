@@ -83,6 +83,16 @@ test('a raw Sesum offer cannot bypass conditions review, including previously st
   assert.equal(f.shop.familyView().deals.some(d=>d.offerId===ordinary.id),false);assert.equal(f.item().prices.current,70);
 });
 
+test('a trailing-dot Sesum hostname still requires campaign review and never becomes primary evidence',t=>{
+  const f=setup(t);f.ingest();f.approve();
+  const sourceUrl='https://www.sesum.no./produkt/71-synthetic-whole-beans-500g';
+  assert.throws(()=>f.shop.offer(f.offer({sourceUrl})),/shopping-sesum-offer-review/);
+  const ordinary=f.shop.offer(f.offer());f.state.shopping.offers[ordinary.id].sourceUrl=sourceUrl;
+  assert.equal(f.shop.familyView().deals.some(row=>row.offerId===ordinary.id),false);assert.equal(f.item().prices.current,70);
+  assert.throws(()=>f.review({sourceReceipts:[f.primary({url:sourceUrl})]}),/primary|prim/i);
+  assert.throws(()=>f.review({offer:undefined,status:'not-actionable',reason:'not-a-real-offer',resolutionVerified:true,sourceReceipts:[f.primary({url:sourceUrl})]}),/prim/i);
+});
+
 test('first source binding of an unchanged declined or bought ordinary offer preserves the household decision',t=>{
   for(const action of ['snooze','bought']){
     const f=setup(t);f.ingest();f.approve();const ordinary=f.shop.offer(f.offer());
