@@ -65,14 +65,17 @@ function fullRunRecorded(store,day) {
   return false;
 }
 
-export function createIngestionDispatcher({store,resources,root,dataDir,automaticShopping=false,launch=launchLuna,clock=Date.now,readConfig,alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}}}) {
+export function createIngestionDispatcher({store,resources,root,dataDir,automaticShopping=false,automaticMarketPlan=()=>[],launch=launchLuna,clock=Date.now,readConfig,alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}}}) {
   const file=join(dataDir,'ingestion-dispatch.enc'),key=loadKey(dataDir);
   let state=existsSync(file)?JSON.parse(decrypt(readFileSync(file),key).toString('utf8')):{};
   state.sourceBudget??={attempts:0,lastSignature:null,retryAt:null};
   let running=!!state.worker;
   let retryAfterLogin=false;
   const config=readConfig ?? (()=>readDeploymentConfig('collector.json').dispatch ?? {});
-  const agentQueue=()=> (store.shopping?.queue()??[]).filter(item=>!['shopping-list-route','shopping-stock-review',...(automaticShopping?['shopping-oda-refresh']:[])].includes(item.do));
+  const agentQueue=()=> {
+    const automaticMarket=new Set(automaticShopping?automaticMarketPlan():[]);
+    return (store.shopping?.queue()??[]).filter(item=>!['shopping-list-route','shopping-stock-review',...(automaticShopping?['shopping-oda-refresh']:[])].includes(item.do)).map(item=>item.do==='shopping-market-refresh'?{...item,watchIds:item.watchIds.filter(id=>!automaticMarket.has(id))}:item).filter(item=>item.do!=='shopping-market-refresh'||item.watchIds.length);
+  };
   const save=()=>{writeFileSync(file+'.tmp',encrypt(Buffer.from(JSON.stringify(state)),key));renameSync(file+'.tmp',file);};
   const clearRecoveredLoginError=()=>{
     if(!/innlogging/.test(state.lastError??'')||typeof store.runHistory!=='function')return;

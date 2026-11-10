@@ -25,6 +25,14 @@ function setup(t,{donorStore='KIWI'}={}) {
   return {shop,state,w,p,g,data,clock,write,ingest,approve,provider};
 }
 
+test('explorer family and offers share one reader snapshot, with no reuse across requests',t=>{
+ const f=setup(t);f.ingest();f.approve();
+ const original=f.provider.reader;let calls=0;f.provider.reader=(...args)=>{calls++;return original(...args);};
+ f.shop.explorer.family(f.g.id);const first=calls;assert.equal(first,1);
+ f.shop.explorer.family(f.g.id);assert.equal(calls,first+1);
+ calls=0;f.shop.explorer.offers();assert.equal(calls,1);
+});
+
 test('all followed families enter the manifest and price observations require an explicit bridge',t=>{
   const f=setup(t);
   for(let i=0;i<100;i++)f.shop.watch({name:`Family ${i}`,unit:'kg',storage:'pantry'});

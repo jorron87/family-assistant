@@ -80,7 +80,9 @@ async function execute(command, args, flags) {
     case 'shopping-sesum-register': result=await request('/api/shopping/sesum/register','POST',json(args[0]));break;
     case 'shopping-jobs': {
       const queue=await request('/api/shopping/queue');
-      result={...shoppingAgentBatch(queue.filter(i=>i.do!=='shopping-oda-refresh'),{id:option('--id')??args[0]??null}),automaticWork:{type:'shopping-oda-refresh',count:queue.filter(i=>i.do==='shopping-oda-refresh').length}};break;
+      const automaticMarket=await request('/api/shopping/market-refresh-plan'),marketIds=new Set(automaticMarket.watchIds);
+      const agentItems=queue.filter(i=>i.do!=='shopping-oda-refresh').map(i=>i.do==='shopping-market-refresh'?{...i,watchIds:i.watchIds.filter(id=>!marketIds.has(id))}:i).filter(i=>i.do!=='shopping-market-refresh'||i.watchIds.length);
+      result={...shoppingAgentBatch(agentItems,{id:option('--id')??args[0]??null}),automaticWork:{type:'shopping-oda-refresh',count:queue.filter(i=>i.do==='shopping-oda-refresh').length,marketWatchIds:[...marketIds]}};break;
     }
     case 'shopping-queue': {
       const queue = await request('/api/shopping/queue');

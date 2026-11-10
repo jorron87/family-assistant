@@ -15,10 +15,17 @@ export function groupPlacementWork(rows,identity){
 
 // A review is reusable only on the exact same source, registration and whole
 // family basis. Newer holds and explicit reopen tombstones always win.
-export function placementProof(source,familySetFingerprint,registrationFingerprint,latest,history=[]){
+export function placementDelta(source,registrationFingerprint,latest,families){
+ const valid=latest&&['reviewed','no-active-family'].includes(latest.status)&&latest.reviewedAllFamilies===true&&latest.sourceFingerprint===source.sourceFingerprint&&latest.registrationFingerprint===registrationFingerprint&&latest.familyProofVersion===1&&Array.isArray(latest.reviewedFamilies);
+ const prior=new Map(valid?latest.reviewedFamilies.map(f=>[f.familyId,f.familyFingerprint]):[]);
+ const retained=families.filter(f=>prior.get(f.familyId)===f.familyFingerprint),ids=new Set(retained.map(f=>f.familyId));
+ return {familiesToReview:families.filter(f=>!ids.has(f.familyId)).map(f=>f.familyId),retainedFamilyIds:[...ids],retainedTargets:valid?(latest.targets??[]).filter(t=>ids.has(t.familyId)):[]};
+}
+export function placementProof(source,familySetFingerprint,registrationFingerprint,latest,history=[],families=null){
  const same=r=>r?.sourceKey===source.sourceKey&&r.sourceFingerprint===source.sourceFingerprint&&r.registrationFingerprint===registrationFingerprint&&r.familySetFingerprint===familySetFingerprint;
  if(same(latest))return latest;
  if(!latest||!['reviewed','no-active-family'].includes(latest.status)||latest.reviewedAllFamilies!==true||latest.sourceFingerprint!==source.sourceFingerprint||latest.registrationFingerprint!==registrationFingerprint)return null;
+ if(families){const delta=placementDelta(source,registrationFingerprint,latest,families);if(!delta.familiesToReview.length&&(latest.status==='no-active-family'||delta.retainedTargets.length))return {...latest,familySetFingerprint,targets:delta.retainedTargets};}
  const previous=[...history].reverse().find(r=>r.historyProofVersion===2&&same(r));
  return previous?.reviewedAllFamilies===true&&['reviewed','no-active-family'].includes(previous.status)?previous:null;
 }
