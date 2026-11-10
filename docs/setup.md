@@ -53,6 +53,8 @@ Dispatch forbereder den avgrensede kontekstfilen i kode og leverer hele produktb
 
 Før større kjøringer kan `--dataset=expanded --mode=packet --inline-context --compact-bindings --repetitions=1 --effort=high` brukes til 140 unike produkter mot 91 konkrete familier. `--chains=3` tester separate kjeder innen samme produktjobb. Bekreft både kvalitet og tid; null feilaktige familietreff eller utrygge avklaringer er et eget krav. Benchmarken endrer ingen modell-, tillatelses- eller dispatchvalg i produksjon. Rene plasseringsbolker lar kode binde tekniske fingerprints fra den komplette kontekstfilen, og CLI gjenbruker bare faktisk levert input med identisk kontekst- og familiefingerprint.
 
+Valgfri `--parallel=2 --batches=0,1` sammenligner samtidige, isolerte testarbeidere. Hver arbeider har eget syntetisk arkiv; dette aktiverer ingen parallell produksjonskjøring. Der eier fortsatt én koordinator kjørelåsen og må fordele identiteter og validere domeneskrivinger.
+
 Oda dekker ikke nødvendigvis hele matbudsjettet eller forbruket. Kostholdsanalyse trenger næringsdeklarasjoner og målbar mengde; den gjetter ikke næringsinnhold eller barnas energibehov fra handlekurven.
 
 ## Lagerinnsendinger
