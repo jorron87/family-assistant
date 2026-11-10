@@ -88,3 +88,11 @@ test('basis-specific placement history survives a reversible family edit but exp
  w.note='Changed exact synthetic detergent requirement, still excluding cleaning brushes.';f.place(101,{status:'no-active-family',targets:[]});w.note=original;
  assert.equal(f.shop.sesumPlacement(KEY(101)).items[0].status,'pending','a newer exact-basis reopen tombstone prevents resurrecting the previous result');
 });
+test('old wrong-family exclusions stay as holds without becoming ninety new family tasks after registration',t=>{
+ const f=fixture(t,1),row=f.shop.sesumCandidates(undefined,KEY(100))[0],wrong=row.families.filter(x=>x.familyId.startsWith('unrelated-'));
+ f.shop.sesumPriceReview({sourceKey:row.sourceKey,sourceFingerprint:row.sourceFingerprint,registrationFingerprint:null,status:'excluded',familyIds:wrong.map(x=>x.familyId),familyFingerprints:Object.fromEntries(wrong.map(x=>[x.familyId,x.requirementsFingerprint])),equivalenceEvidence:'Actual whole coffee beans cannot meet these ninety exact non-food liquid formula requirements.'});
+ f.place(100);f.register(100);const holds=JSON.stringify(f.state.shopping.sesumFamilyReviews);
+ assert.deepEqual(f.sourceWork(100).map(x=>x.do),['shopping-sesum-placement-review']);assert.equal(JSON.stringify(f.state.shopping.sesumFamilyReviews),holds,'old exclusions are retained without auto-approving any family');
+ f.place(100);assert.deepEqual(f.sourceWork(100).map(x=>[x.do,x.familyId]),[['shopping-sesum-family-review',f.target.id]]);
+ assert.equal(Object.keys(f.state.shopping.sesumFamilyReviews[KEY(100)]).length,90);assert.equal(f.shop.completion().researchScope.unaccountedSourceRows,0);
+});

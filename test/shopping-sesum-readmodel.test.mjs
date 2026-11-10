@@ -55,12 +55,14 @@ test('family-review reads observe scoped exclusions, blocks and reopening immedi
 test('source, household criteria and current group changes invalidate the next family-review read',()=>{
   const f=fixture();f.scoped('71','excluded');const before=f.family('71','organic');
   f.shop.watch({...f.state.shopping.watches.organic,note:'The household changed its concrete acceptable roast requirements; the original organic declaration still needs review.'});
-  const changed=f.family('71','organic');assert.notEqual(changed.requirementsFingerprint,before.requirementsFingerprint);assert.equal(changed.sourceDecision,null);assert.equal(changed.familyReview.status,'pending');
+  const changed=f.family('71','organic');assert.notEqual(changed.requirementsFingerprint,before.requirementsFingerprint);assert.equal(changed.sourceDecision,null);assert.equal(changed.familyReview,null,'a rejected OR hint returns to whole-set placement before opening new family work');
   f.ingest('72',{name:'Changed actual source variant 500g'});
   assert.equal(f.candidate('72').status,'pending','a current source metadata change withdraws its old bridge');assert.equal(f.family('72','organic').familyReview,null,'unapproved identity returns to its separate identity work');
-  assert.equal(f.family('71','organic').familyReview.status,'pending','another unchanged source remains in family review');
+  assert.equal(f.family('71','organic').familyReview,null,'an unchanged source without a researched organic target does not become organic-family work');
   const groupBefore=f.family('71','organic').requirementsFingerprint;f.index.groups.organic={...f.index.groups.organic,fingerprint:'c'.repeat(64),inclusion:'A materially revised organic roast definition.'};
-  const groupAfter=f.family('71','organic');assert.notEqual(groupAfter.requirementsFingerprint,groupBefore);assert.deepEqual(groupAfter.groups,[],'a changed group link is visible immediately and cannot lend old group approval');assert.equal(groupAfter.familyReview.status,'pending');
+  const groupAfter=f.family('71','organic');assert.notEqual(groupAfter.requirementsFingerprint,groupBefore);assert.deepEqual(groupAfter.groups,[],'a changed group link is visible immediately and cannot lend old group approval');assert.equal(groupAfter.familyReview,null);
+  assert.equal(f.state.shopping.sesumFamilyReviews['sesum:KIWI:71'].organic.status,'excluded','the original exclusion stays intact');
+  assert.ok(f.shop.queue().some(row=>row.sourceKey==='sesum:KIWI:71'&&row.do==='shopping-sesum-placement-review'));
 });
 
 test('repeated reads recheck actual price freshness and parked family work when the clock changes',()=>{

@@ -25,6 +25,7 @@ import {createIngestionDispatcher} from './ingestion-dispatch.mjs';
 import {createGooglePublisher} from './google-publisher.mjs';
 import {weeklyLetters} from './weekly-letters.mjs';
 import {createOda} from './oda.mjs';
+import {createShoppingMaintenance} from './shopping-maintenance.mjs';
 import {createKassal} from './kassal.mjs';
 import {createSesumCollector,sesumSenderAllowed} from './shopping-sesum.mjs';
 
@@ -43,7 +44,7 @@ const feedRunner=createFeedRunner({store,root});
 const weatherConfig=readConfig('weather.json');
 const weather=createWeather({config:weatherConfig,dataDir:DATA_DIR});
 const phoneDispatcher=createPhoneDispatcher({store,root});
-const ingestionDispatcher=createIngestionDispatcher({store,resources,root,dataDir:DATA_DIR});
+const ingestionDispatcher=createIngestionDispatcher({store,resources,root,dataDir:DATA_DIR,automaticShopping:true});
 // Nye visningsfiler serveres fra public/ etter navn (ingen stier fra klienten).
 const PUBLIC_FILES=new Map([['kiosk.css','text/css; charset=utf-8'],['kiosk-home.mjs','text/javascript; charset=utf-8'],['event-display.mjs','text/javascript; charset=utf-8'],['weather-widget.mjs','text/javascript; charset=utf-8'],['login-status.mjs','text/javascript; charset=utf-8'],['sun.mjs','text/javascript; charset=utf-8'],['dtf.mjs','text/javascript; charset=utf-8'],['home-tasks.mjs','text/javascript; charset=utf-8'],['celebrate.mjs','text/javascript; charset=utf-8']]);
 PUBLIC_FILES.set('doorbell-view.mjs','text/javascript; charset=utf-8');PUBLIC_FILES.set('doorbell.css','text/css; charset=utf-8');
@@ -56,6 +57,7 @@ const dispatchTick=()=>{if(!restarting&&!process.env.FAMILIEN_NO_DISPATCH)phoneD
 const host = "127.0.0.1";
 const port = Number(process.env.FAMILIEN_PORT ?? 4318);
 oda=createOda({dataDir:DATA_DIR,shopping:store.shopping,redirectUrl:`http://127.0.0.1:${port}/api/shopping/oda/callback`});
+const shoppingMaintenance=createShoppingMaintenance({store,oda,enabled:()=>!restarting&&!process.env.FAMILIEN_NO_DISPATCH&&readConfig('collector.json').dispatch?.enabled===true&&oda.status().connected===true});
 const odaCart=createOdaCart({oda,shopping:store.shopping});
 const kassal=createKassal({dataDir:DATA_DIR});
 let sesumConfig={enabled:false};
@@ -222,7 +224,7 @@ async function handle(req, res) {
     if(path==='/api/maintenance/restart'&&method==='POST') {
       if(req.headers['x-family-request']!=='1'||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host))return send(res,403,{error:'Ugyldig avsender.'});
       // Independent ingestion retains its lease; a child agent needs this parent.
-      if(phoneDispatcher.status().running||ingestionDispatcher.status().running)return send(res,409,{error:'En agent startet av tjenesten kjører. Prøv omstart når denne er ferdig.'});
+      if(phoneDispatcher.status().running||ingestionDispatcher.status().running||shoppingMaintenance.status().running)return send(res,409,{error:'En agent eller prisoppfriskning startet av tjenesten kjører. Prøv omstart når denne er ferdig.'});
       if(restarting)return send(res,409,{error:'Omstart pågår.'});
       // The listeners close for good once a drain starts, so let slow work finish
       // first. Until then the family keeps a working service.
@@ -272,7 +274,7 @@ async function handle(req, res) {
       store.phone.submit(item.id,'family-chat');send(res,200,item);queueMicrotask(dispatchTick);return;
     }
     if(path==='/api/phone/dispatcher'&&method==='GET')return send(res,200,phoneDispatcher.status());
-    if(path==='/api/ingestion/dispatcher'&&method==='GET')return send(res,200,ingestionDispatcher.status());
+    if(path==='/api/ingestion/dispatcher'&&method==='GET')return send(res,200,{...ingestionDispatcher.status(),automaticShopping:shoppingMaintenance.status()});
     if(path==='/api/ingestion/dispatcher/resume-after-login'&&method==='POST'){
       if(req.headers['x-family-request']!=='1'||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host))return send(res,403,{error:'Ugyldig avsender.'});
       return send(res,200,ingestionDispatcher.resumeAfterLogin());
@@ -486,7 +488,7 @@ if(!process.env.FAMILIEN_NO_DISPATCH&&!process.env.FAMILIEN_NO_FEED){setInterval
 if(!process.env.FAMILIEN_NO_DISPATCH){setInterval(()=>{if(!restarting)resources.tick().catch(()=>{});},15000).unref();}
 setInterval(()=>phoneDispatcher.renew(),15*60000).unref();
 setInterval(()=>ingestionDispatcher.renew(),15*60000).unref();
-if(!process.env.FAMILIEN_NO_DISPATCH)setInterval(()=>{if(!restarting)ingestionDispatcher.tick();},60000).unref();
+if(!process.env.FAMILIEN_NO_DISPATCH)setInterval(()=>{if(!restarting){shoppingMaintenance.tick().catch(()=>{});ingestionDispatcher.tick();}},60000).unref();
 setTimeout(dispatchTick,1000).unref();
 servers.push(createServer(mobileHandle));
 servers.at(-1).listen(port+2,process.env.FAMILIEN_PHONE_HOST??'127.0.0.1',()=>console.log(`Familien mobil: port ${port+2}`));

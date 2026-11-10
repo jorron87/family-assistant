@@ -55,6 +55,14 @@ test('a normally bridged existing library product also needs family review when 
   assert.ok(!f.shop.queue().some(row=>row.do==='shopping-sesum-review'&&row.sourceKey===SOURCE));
   f.link([f.A,f.B]);assert.equal(f.work().length,0);
 });
+test('registered chain bridges share placement research only on identical physical metadata and the same reviewed donor basis',t=>{
+ const f=setup(t,{ordinaryBridge:true});f.ingest();f.bridge();
+ f.shop.sesumReceivePrices({familyIds:[f.w.id],fetchedAt:NOW,products:[{...f.source,prices:[{storeCode:'COOP_EXTRA',price:21,observedAt:NOW,source:'actual_extra_receipt',isPromo:false}]}]});
+ const extra=f.shop.sesumCandidates(undefined,'sesum:COOP_EXTRA:72')[0],donor=extra.donors.find(x=>x.productKey===f.q.productKey);
+ f.shop.sesumPriceReview({sourceKey:extra.sourceKey,sourceFingerprint:extra.sourceFingerprint,productKey:f.q.productKey,productFingerprint:donor.productFingerprint,status:'approved',packAmount:.5,unit:'kg',equivalenceEvidence:'Both independently read chain source records show the same physical whole-bean variant as this exact reviewed donor.',packEvidence:'Both source records and this reviewed donor show the same fixed500g bag.'});
+ const before=JSON.stringify(f.state),work=f.shop.queue().filter(x=>x.do==='shopping-sesum-placement-review');
+ assert.equal(work.length,1);assert.equal(work[0].relatedSources.length,1);assert.equal(new Set([work[0].registrationFingerprint,...work[0].relatedSources.map(x=>x.registrationFingerprint)]).size,2,'each chain retains its own registration proof');assert.equal(JSON.stringify(f.state),before);
+});
 
 test('own narrow, brand and required-attribute decisions cannot be replaced by source registration',t=>{
   const f=setup(t,{linked:false});f.ingest();f.register();f.place();assert.equal(f.work().length,1);

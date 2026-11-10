@@ -2,12 +2,22 @@ import test from 'node:test';import assert from 'node:assert/strict';import {mkd
 import {createIngestionDispatcher,changeSignal} from '../src/ingestion-dispatch.mjs';
 import {createStore} from '../src/store.mjs';
 
-function shoppingDispatchFixture(initialRows,config={},resources=undefined) {
+function shoppingDispatchFixture(initialRows,config={},resources=undefined,automaticShopping=false) {
   const dir=mkdtempSync(join(tmpdir(),'familien-dispatch-batch-')),clock={at:Date.parse('2026-11-10T02:00:00Z')},queue={rows:initialRows},launches=[];let lease=null;
   const store={snapshot:()=>({runLease:lease,rawItems:{},events:{}}),phone:{list:()=>[]},calendarActions:()=>[],activityFacebook:()=>[],activityFeedStatus:()=>({changedPages:[]}),reviewQueue:()=>({items:[]}),completionReport:()=>({profileReviews:[],missingDrive:[],unsyncedCalendar:[],shopping:{complete:false,blockedPlacements:[{status:'blocked',retryAt:'2026-11-11T02:00:00Z'}]}}),shopping:{queue:()=>queue.rows},beginRun:()=>({acquired:true,lease:lease={token:'owned-test-batch'}}),endRun:token=>{assert.equal(token,lease.token);lease=null;},renewRun(){}};
-  const dispatcher=createIngestionDispatcher({store,resources,root:'.',dataDir:dir,clock:()=>clock.at,readConfig:()=>({enabled:true,minGapMinutes:15,...config}),alive:()=>true,launch:input=>{launches.push(input);return {pid:123};}});
+  const dispatcher=createIngestionDispatcher({store,resources,root:'.',dataDir:dir,automaticShopping,clock:()=>clock.at,readConfig:()=>({enabled:true,minGapMinutes:15,...config}),alive:()=>true,launch:input=>{launches.push(input);return {pid:123};}});
   return {dispatcher,clock,queue,launches,store,close(){assert.ok(dir.startsWith(join(tmpdir(),'familien-dispatch-batch-')));rmSync(dir,{recursive:true,force:true});}};
 }
+
+test('code-owned Oda price work never launches a model and real product work still dispatches',()=>{
+  const f=shoppingDispatchFixture([{do:'shopping-oda-refresh',watchId:'known',fingerprint:'price-gap'}],{},undefined,true);
+  try{
+    f.dispatcher.tick();assert.equal(f.launches.length,0);assert.equal(f.store.snapshot().runLease,null);
+    f.queue.rows.push({do:'shopping-product-review',productKey:'kassal:ODA_NO:1',productId:'1',watchId:'family',fingerprint:'needs-label'});
+    f.dispatcher.tick();assert.equal(f.launches.length,1);assert.equal(f.dispatcher.status().shoppingBatch.items.length,1);assert.equal(f.dispatcher.status().shoppingBatch.items[0].do,'shopping-product-review');
+    assert.match(f.launches[0].prompt,/shopping-jobs --id/);assert.match(f.launches[0].prompt,/samme tildelte identitetene/);f.queue.rows=[];f.launches[0].onExit(0);
+  }finally{f.close();}
+});
 
 test('unchanged blocked source work cannot be restarted by shopping arrivals or starve independent shopping',()=>{
  const f=shoppingDispatchFixture([{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1',sourceFingerprint:'one'}]);

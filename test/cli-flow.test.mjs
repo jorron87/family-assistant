@@ -24,6 +24,8 @@ test('shopping-queue and next expose a bounded cohort while full exports every b
   try{
     const view=await cli('shopping-queue');assert.equal(view.shopping.length,20);assert.equal(view.shoppingSummary.total,8000);assert.equal(view.shoppingSummary.shown,20);assert.equal(view.shoppingSummary.remaining,7980);assert.match(view.shoppingSummary.resumeHint,/next/);
     const full=await cli('shopping-queue','--full');assert.equal(full.length,8000);assert.deepEqual(full.at(-1),shopping.at(-1));
+    const jobs=await cli('shopping-jobs');assert.equal(jobs.jobs.length,20);assert.equal(jobs.summary.agentJobs.total,8000);assert.equal(jobs.summary.total,8000);
+    const oneJob=await cli('shopping-jobs','--id','sesum-product:7999');assert.equal(oneJob.jobs.length,1);assert.deepEqual(oneJob.jobs[0].sourceKeys,['sesum-product:7999']);
     const exact=await cli('shopping-queue','--type','shopping-sesum-placement-review','--id','sesum-product:7999');assert.equal(exact.shopping.length,1);assert.equal(exact.shopping[0].sourceKey,'sesum-product:7999');
     const batch=await cli('batch',JSON.stringify([{cmd:'shopping-queue',args:['--type','shopping-sesum-placement-review','--id','sesum-product:7999']},{cmd:'shopping-queue',args:['--id','sesum-product:7998'],flags:['--full']}]));
     assert.equal(batch.ok,true);assert.equal(batch.results[0].result.shopping.length,1);assert.equal(batch.results[0].result.shopping[0].sourceKey,'sesum-product:7999');assert.deepEqual(batch.results[1].result,[shopping[7998]]);

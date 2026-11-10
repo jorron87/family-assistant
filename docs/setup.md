@@ -11,6 +11,8 @@
 
 ## Handel (valgfritt)
 
+Når handel, Oda-tilkobling og `collector.dispatch` er aktivert, oppfrisker tjenesten kjente gjennomgåtte Oda-priser med kode uten agentstart. Se runbookens «Varejobber og automatisk rutinearbeid» for avgrensning, pauser og status. Automatisk prislesing gir ingen kurv- eller variantgodkjenning.
+
 Sesum kan supplere kjedeprisene gjennom den eksisterende Chrome-utvidelsen. `config/shopping-sesum.example.json` er avslått som standard; opprett en privat `config/shopping-sesum.json`, velg kjeder som faktisk brukes, og prøv innhentingen med syntetiske familier i separat datamappe før aktivering. Last inn den oppdaterte utvidelsen og bruk én ledig Sesum-fane. Samleren leser bare offentlige søke- og varesider på `https://www.sesum.no`; den kopierer ingen cookies og oppretter ingen Sesum-konto. Tilgangsfeil og rategrenser gir pause, ikke omgåelse.
 
 Innhentingen dekker alle aktiverte varefamilier, alle resultatsider som kilden faktisk lenker videre til og alle oppdagede varer. `shopping-sesum` viser fremdrift per familie og kjede; innhenting er forskjellig fra godkjente produkter og ferske priser. Gjennomgå nye kildebroer med `shopping-sesum-candidates` og `shopping-sesum-review` før prisene brukes. Nye varianter uten eksisterende gjennomgått donor behandles som `shopping-sesum-discovery`: undersøk faktisk innhold og pakning, og registrer dem med `shopping-sesum-register`. Manglende EAN er ikke et automatisk avslag, og en ny gruppe blir aldri automatisk et familievalg. En priskvittering uten faktisk prisdato blir aldri fersk av hentingen. API-et og de krypterte innhentingskvitteringene er bare tilgjengelige på agentporten. Se Sesum-kontrakten i runbooken.

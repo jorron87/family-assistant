@@ -483,6 +483,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   const priceTooOld=entry=>entry.lastChecked!=null&&!withinPriceHorizon(entry.lastChecked,now().getTime(),libraryPrices?.horizonDays);
   function odaRefreshPlan(...args){return inReadContext(()=>odaRefreshPlanInContext(...args));}
   function odaRefreshPlanInContext(input={}) {
+    if(input.automatic===true&&!s.settings.monitoringEnabled)return [];
     return odaPriceRefreshPlan({entries:catalog.entries().filter(e=>!variablePack(e.name)),watches:Object.values(s.watches),prices:currentPrices().entries,attempts:s.odaRefreshAttempts,at:now().getTime(),force:input.force===true,ignoreRetry:input.ignoreRetry===true,watchId:input.watchId??null,horizonDays:libraryPrices?.horizonDays??183});
   }
   function odaRefreshReceive({plan,receipts,observedAt,searchComplete,searchError=null}) {
@@ -555,7 +556,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const alreadyInFamily=p=>{const w=s.watches[p.watchId];if(!reader||!w)return false;if(!familyMembers.has(w.id))familyMembers.set(w.id,linkedMembers(w,reader,{allChains:true}));return familyMembers.get(w.id).has(`kassal:${p.store}:${p.id}`);};
     const named=x=>x.watchId?{...x,familyId:x.watchId,familyName:x.watchName}:x;
     const flyers=s.settings.stores.filter(x=>!x.facebookGroup).map(store=>({store,...flyerReviewState(store,familySetFingerprint,today)})).filter(x=>x.due).map(({store,review,requiresRescan})=>({do:'shopping-review',storeId:store.id,name:store.name,url:store.url,lastReview:review?structuredClone(review):null,familySetFingerprint,requiresRescan,reason:requiresRescan&&review?'family-checklist-changed':review?'check-due':'unreviewed',fingerprint:hash(JSON.stringify([store.id,familySetFingerprint]))}));
-    return [...stock,...odaRefreshWork(),...catalog.pending().filter(p=>s.watches[p.watchId]?.enabled!==false&&!priceTooOld(p)&&(nativeReviewHeld(p)||!alreadyInFamily(p))).map(p=>({do:'shopping-product-review',watchId:p.watchId,watchName:s.watches[p.watchId]?.name,productId:p.id,store:p.store,name:p.name,fingerprint:p.fingerprint,sourceUrl:p.sourceUrl,...(nativeReviewHeld(p)?{reason:'reopened',reviewHold:structuredClone(p.reviewHold)}:{})})),...feedWork(),...flyers,...marketRefreshDue(today),...sesumOfferWork(),...sesumFamilyWork(),...sesumWork(),...sesumPlacementWork(),...sesumCatalogueWork(),...libraryWork(),...listFamilyWork(),...unlinkedOrderLines(),...routes].map(named);
+    return [...stock,...odaRefreshWork(),...catalog.pending().filter(p=>s.watches[p.watchId]?.enabled!==false&&!priceTooOld(p)&&(nativeReviewHeld(p)||!alreadyInFamily(p))).map(p=>({do:'shopping-product-review',watchId:p.watchId,watchName:s.watches[p.watchId]?.name,productId:p.id,productKey:catalogKey(p),store:p.store,name:p.name,fingerprint:p.fingerprint,sourceUrl:p.sourceUrl,...(nativeReviewHeld(p)?{reason:'reopened',reviewHold:structuredClone(p.reviewHold)}:{})})),...feedWork(),...flyers,...marketRefreshDue(today),...sesumOfferWork(),...sesumFamilyWork(),...sesumWork(),...sesumPlacementWork(),...sesumCatalogueWork(),...libraryWork(),...listFamilyWork(),...unlinkedOrderLines(),...routes].map(named);
   }
   function completion() {
     return inReadContext(completionInContext);
@@ -1505,9 +1506,11 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   function sesumResearchFamilyIds(source,semantic,registrationFingerprint){
     const review=currentSesumPlacement(source,semantic,registrationFingerprint);
     const targets=review?.status==='reviewed'&&review.reviewedAllFamilies===true&&Array.isArray(review.targets)?review.targets.map(target=>target.familyId):[];
-    // Explicit earlier scoped decisions remain independent research debt. Raw
-    // OR-search hints never create downstream family work after full placement.
-    const prior=Object.entries(s.sesumFamilyReviews[source.sourceKey]??{}).filter(([,row])=>row.status==='blocked'||row.status==='excluded'||row.holdExcluded===true).map(([id])=>id);
+    // Keep exclusions as price holds, not new research against every old OR
+    // hint. Revisit one only for an actual current target or reviewed variant.
+    const researched=sesumResearchedFamilyIds(source,semantic.families);
+    const intended=id=>researched.includes(id)||(s.watches[id]?.variants??[]).some(v=>(source.groups??[]).some(g=>g.groupId===v.groupId))||catalog.entries(id).some(e=>e.status==='approved'&&catalogKey(e)===source.productKey);
+    const prior=Object.entries(s.sesumFamilyReviews[source.sourceKey]??{}).filter(([id,row])=>row.status==='blocked'||row.holdExcluded===true||row.status==='excluded'&&intended(id)).map(([id])=>id);
     return [...new Set([...targets,...prior])].filter(id=>s.watches[id]&&s.watches[id].enabled!==false);
   }
   const sesumSubjectRecord=key=>key?.startsWith('sesum-product:')?sesumCatalogue.record(key):sesumPrices.sourceRecord(key);
@@ -1538,7 +1541,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   function sesumPlacementWork({all=false}={}){
     const rows=sesumPlacement().items.filter(item=>!['reviewed','no-active-family'].includes(item.status)&&(all||item.status!=='blocked'||!item.retryAt||Date.parse(item.retryAt)<=now().getTime()));
     const rank=i=>i.discoveryScope.candidate?0:i.discoveryScope.reason==='await-current-price'?1:2;rows.sort((a,b)=>rank(a)-rank(b));
-    return groupPlacementWork(rows,item=>item.registrationFingerprint?item.sourceKey:JSON.stringify([sesumCatalogueFingerprint(sesumSubjectRecord(item.sourceKey).source),item.status,item.retryAt])).map(item=>{const project=({sourceKey,sourceFingerprint,registrationFingerprint,familySetFingerprint,fingerprint,status,reason,retryAt,discoveryScope})=>({do:'shopping-sesum-placement-review',sourceKey,sourceFingerprint,registrationFingerprint,familySetFingerprint,fingerprint,status,reason,retryAt,discoveryScope});return {...project(item),...(item.relatedSources.length?{relatedSources:item.relatedSources.map(project),sourceCount:item.sourceCount,fingerprint:hash(JSON.stringify([item.fingerprint,item.relatedSources.map(r=>r.fingerprint)]))}:{} )};});
+    const registrations=sesumResearches();
+    return groupPlacementWork(rows,item=>{const r=registrations.get(item.sourceKey);return item.registrationFingerprint&&!r?item.sourceKey:JSON.stringify([sesumCatalogueFingerprint(sesumSubjectRecord(item.sourceKey).source),r?[r.productKey,r.productFingerprint,r.packAmount,r.unit,r.groups]:null,item.status,item.retryAt]);}).map(item=>{const project=({sourceKey,sourceFingerprint,registrationFingerprint,familySetFingerprint,fingerprint,status,reason,retryAt,discoveryScope})=>({do:'shopping-sesum-placement-review',sourceKey,sourceFingerprint,registrationFingerprint,familySetFingerprint,fingerprint,status,reason,retryAt,discoveryScope});return {...project(item),...(item.relatedSources.length?{relatedSources:item.relatedSources.map(project),sourceCount:item.sourceCount,fingerprint:hash(JSON.stringify([item.fingerprint,item.relatedSources.map(r=>r.fingerprint)]))}:{} )};});
   }
   function sesumPlacementReview(input){
     if(!['reviewed','no-active-family','blocked','reopen'].includes(input.status))throw Error('Ugyldig global familievurdering.');

@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { activityCoverage, validateActivityRun } from './activity-coverage.mjs';
 import { readJsonArg, slimCompletion, slimReviewQueue, slimResult, slimProfile, slimPhone, buildNext, shoppingOverview } from './cli-lib.mjs';
 import { filterShoppingWork } from './shopping-work-batch.mjs';
+import { shoppingAgentBatch } from './shopping-agent-jobs.mjs';
 
 const base = process.env.FAMILIEN_API ?? "http://127.0.0.1:4318";
 const rawArgs = process.argv.slice(2);
@@ -77,6 +78,10 @@ async function execute(command, args, flags) {
     case 'shopping-sesum-catalog': result=await request('/api/shopping/sesum/catalog'+(args[0]?'?familyId='+encodeURIComponent(args[0]):''));break;
     case 'shopping-sesum-review': result=await request('/api/shopping/sesum/review','POST',json(args[0]));break;
     case 'shopping-sesum-register': result=await request('/api/shopping/sesum/register','POST',json(args[0]));break;
+    case 'shopping-jobs': {
+      const queue=await request('/api/shopping/queue');
+      result={...shoppingAgentBatch(queue.filter(i=>i.do!=='shopping-oda-refresh'),{id:option('--id')??args[0]??null}),automaticWork:{type:'shopping-oda-refresh',count:queue.filter(i=>i.do==='shopping-oda-refresh').length}};break;
+    }
     case 'shopping-queue': {
       const queue = await request('/api/shopping/queue');
       const type=option('--type'),id=option('--id');
