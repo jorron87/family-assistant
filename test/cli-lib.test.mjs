@@ -3,7 +3,39 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readJsonArg, slimCompletion, slimReviewQueue, slimResult, slimProfile, slimPhone, buildNext } from '../src/cli-lib.mjs';
+import { readJsonArg, slimCompletion, slimReviewQueue, slimResult, slimProfile, slimPhone, buildNext, shoppingOverview } from '../src/cli-lib.mjs';
+
+test('large shopping queues stay bounded without losing counts, priority or export access', () => {
+  const shopping = Object.freeze(Array.from({ length: 10000 }, (_, i) => Object.freeze({ do: i % 2 ? 'shopping-review' : 'shopping-product-review', id: 'item-' + i })));
+  const view = shoppingOverview(shopping);
+  assert.equal(view.shopping.length, 20);
+  assert.equal(view.shoppingSummary.total, 10000);
+  assert.equal(view.shoppingSummary.remaining, 9980);
+  assert.deepEqual(view.shoppingSummary.byType, { 'shopping-product-review': 5000, 'shopping-review': 5000 });
+  const full = shoppingOverview(shopping, { full: true });
+  assert.equal(full.shopping, shopping);
+  assert.equal(full.shoppingSummary.remaining, 0);
+  const next = buildNext({ phone: [{ id: 'phone', status: 'queued' }], shopping, completion: { complete: false, counts: { shoppingPending: 10000 } } });
+  assert.equal(next.complete, false);
+  assert.equal(next.work[0].do, 'phone');
+  assert.equal(next.remaining, 10001);
+  assert.equal(next.moreWork, 9961);
+  assert.ok(JSON.stringify({ ...next, ...view }).length < 10000);
+});
+
+test('compact completion retains blocked shopping and exact counts past the visible rows', () => {
+  const report = { complete: false, counts: { shoppingPending: 100 }, shopping: { complete: false, work: Array.from({ length: 100 }, (_, i) => ({ id: 'item-' + i })), blockedStores: [{ storeId: 'example', evidence: 'Unavailable' }] } };
+  const view = slimCompletion(report);
+  assert.equal(view.shopping.complete, false);
+  assert.equal(view.shopping.work.length, 20);
+  assert.equal(view.shopping.workCount, 100);
+  assert.equal(view.shopping.moreWork, 80);
+  assert.deepEqual(view.shopping.blockedStores, report.shopping.blockedStores);
+  assert.deepEqual(view.counts, report.counts);
+  assert.equal(slimCompletion(report, { full: true }), report);
+  assert.equal(report.shopping.work.length, 100);
+  assert.deepEqual(shoppingOverview([]).shoppingSummary, { total: 0, shown: 0, remaining: 0, byType: {} });
+});
 
 test('readJsonArg leser inline JSON, stdin og gir tydelig feil', () => {
   assert.deepEqual(readJsonArg('{"a":1}'), { a: 1 });

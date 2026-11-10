@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { createHash } from "node:crypto";
 import { activityCoverage, validateActivityRun } from './activity-coverage.mjs';
-import { readJsonArg, slimCompletion, slimReviewQueue, slimResult, slimProfile, slimPhone, buildNext } from './cli-lib.mjs';
+import { readJsonArg, slimCompletion, slimReviewQueue, slimResult, slimProfile, slimPhone, buildNext, shoppingOverview } from './cli-lib.mjs';
 
 const base = process.env.FAMILIEN_API ?? "http://127.0.0.1:4318";
 const rawArgs = process.argv.slice(2);
@@ -101,7 +101,7 @@ async function execute(command, args, flags) {
         request('/api/phone/inbox'), request('/api/calendar-actions'), request('/api/completion'), request('/api/review-queue'), activityState(), request('/api/collector/status'), request('/api/activity-feed'), request('/api/shopping/queue')
       ]);
       result = buildNext({ phone, calendarActions, completion, queue, activities, collector, feed, shopping });
-      result.shopping=shopping;
+      Object.assign(result, shoppingOverview(shopping, { full: flags.has('--full') }));
       break;
     }
     case 'event': {

@@ -513,4 +513,6 @@ Konfigurer egne kilder i activity-sources.json og activity-feeds.json. activity-
 
 ## Drift
 
+`next` viser høyst 20 handleoppgaver i `shopping`, med fullstendige totaltall og typefordeling i `shoppingSummary`. `remaining` og `moreWork` gjelder fortsatt hele arbeidskøen, og `completion` beholder alle fullføringskrav selv om `shopping.work` forkortes til 20 rader (`workCount`/`moreWork` viser resten). Behandle en avgrenset batch og les på nytt; en kort visningsliste betyr aldri at resten er ferdig. Bruk `next --full` eller `completion --full` ved eksplisitt eksport til fil, ikke som vanlig agent-preflight. API-køen er uendret.
+
 Se docs/operations.md. Run-rapporter skal beskrive faktisk arbeid og scope. partial krever konkrete blockers/resumeHint. Historiske hull beholdes, men kontroller ikke uendrede avslåtte dokumenter på nytt uten ny informasjon. Ikke kall full dekning ok fra en frisk probe eller en tom endringskø.

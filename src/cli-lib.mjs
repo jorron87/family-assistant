@@ -14,11 +14,28 @@ export function readJsonArg(arg, stdin = () => readFileSync(0, "utf8")) {
 const LIST_LIMIT = 20;
 const cap = (list) => Array.isArray(list) && list.length > LIST_LIMIT ? [...list.slice(0, LIST_LIMIT), { truncated: list.length - LIST_LIMIT }] : list;
 
+// Keep queue counts authoritative without sending thousands of review
+// fingerprints into every agent turn. This is a view, never a queue mutation.
+export function shoppingOverview(queue = [], { full = false } = {}) {
+  const shopping = full ? queue : queue.slice(0, LIST_LIMIT);
+  const byType = {};
+  for (const item of queue) byType[item.do] = (byType[item.do] ?? 0) + 1;
+  return {
+    shopping,
+    shoppingSummary: { total: queue.length, shown: shopping.length, remaining: queue.length - shopping.length, byType,
+      ...(shopping.length < queue.length ? { hint: 'Read next again after each batch; next --full retains every row for an explicit export.' } : {}) }
+  };
+}
+
 // completion uten historikk (blokkerer aldri) og med kappede lister; counts er alltid fullstendig.
 export function slimCompletion(report, { history = false, full = false } = {}) {
   if (full) return report;
   const { historicalMissingDrive, historicalSurfaces, historicalItems, ...rest } = report;
   const slim = Object.fromEntries(Object.entries(rest).map(([key, value]) => [key, Array.isArray(value) ? cap(value) : value]));
+  if (rest.shopping && Array.isArray(rest.shopping.work)) {
+    const { shopping: work, shoppingSummary } = shoppingOverview(rest.shopping.work);
+    slim.shopping = { ...rest.shopping, work, workCount: shoppingSummary.total, moreWork: shoppingSummary.remaining };
+  }
   if (history) return { ...slim, historicalMissingDrive, historicalSurfaces, historicalItems };
   return { ...slim, historical: { missingDrive: historicalMissingDrive?.length ?? 0, surfaces: historicalSurfaces?.length ?? 0, items: historicalItems?.length ?? 0, note: "Bruk --history for detaljer." } };
 }
