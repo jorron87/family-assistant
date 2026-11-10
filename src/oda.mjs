@@ -80,9 +80,11 @@ export function createOda({dataDir,shopping,redirectUrl,now=()=>new Date(),makeC
     return call('product_search',{queries:[query],page:1,size:10});
   });}
   async function tools() {return exclusive(async()=>{const c=await connect();if(!c)throw Error('Fullfør Oda-innloggingen i nettleseren.');return c.listTools();});}
-  async function refreshPrices(input={}) {return exclusive(async()=>{
+  async function refreshPrices(input={}) {
     const maxPages=input.maxPages??5;
     if(!Number.isInteger(maxPages)||maxPages<1||maxPages>5||input.watchIds!==undefined&&(!Array.isArray(input.watchIds)||input.watchIds.length>10||input.watchIds.some(id=>typeof id!=='string')))throw Error('Velg høyst ti varefamilier og én til fem sider.');
+    if(busy)return {families:0,results:[],deferred:true,reason:'oda-busy',retryAfterMs:1000};
+    return exclusive(async()=>{
     const plans=shopping.odaRefreshPlan({force:input.force===true}).filter(p=>!input.watchIds||input.watchIds.includes(p.watchId)).slice(0,10);
     if(!plans.length)return {families:0,results:[]};
     const queries=[...new Set(plans.map(p=>p.query))],collected=new Map(queries.map(query=>[query,{receipts:[],complete:false,observedAt:null}]));
@@ -101,7 +103,13 @@ export function createOda({dataDir,shopping,redirectUrl,now=()=>new Date(),makeC
       pending=more;
     }
     }catch{searchError='Oda MCP kunne ikke leses fullstendig. Kontroller tilkoblingen før neste forsøk.';}
-    const results=plans.map(plan=>shopping.odaRefreshReceive({plan,...collected.get(plan.query),searchComplete:collected.get(plan.query).complete,searchError}));
+    const results=[];
+    for(const plan of plans){
+      results.push(shopping.odaRefreshReceive({plan,...collected.get(plan.query),searchComplete:collected.get(plan.query).complete,searchError}));
+      // Each family is a complete synchronous update. Let dashboard requests
+      // run before starting another one; no reader cache crosses this await.
+      await new Promise(resolve=>setImmediate(resolve));
+    }
     return {families:results.length,results};
   });}
   // Adds a large quantity, reads what Oda says, and always takes it back out.

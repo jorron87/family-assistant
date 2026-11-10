@@ -123,3 +123,17 @@ test('shared library prices use the verified Oda receipt with tolerant canonical
  clock.at='2026-11-13T12:00:00Z';assert.equal(overlay(read(Date.parse(clock.at))).quote(key).price.fresh,false);
  assert.deepEqual(state.shopping.odaChoices,{});
 });
+
+test('a busy Oda connection defers background refresh without a failed price or extra tool call',async t=>{
+ const dir=mkdtempSync(join(tmpdir(),'oda-price-busy-'));t.after(()=>{assert.ok(resolve(dir).startsWith(resolve(tmpdir(),'oda-price-busy-')));rmSync(dir,{recursive:true,force:true});});
+ const {shop,state}=fixture();let release,started,calls=0;
+ const entered=new Promise(resolve=>{started=resolve;}),waiting=new Promise(resolve=>{release=resolve;});
+ const client={connect:async()=>{},close:async()=>{},callTool:async()=>{calls++;started();await waiting;return {structuredContent:{result:[{query:'plain oil',hasMore:false,products:[product()]}]}};}};
+ const oda=createOda({dataDir:dir,shopping:shop,redirectUrl:'http://127.0.0.1:1/callback',now:()=>new Date(NOW),makeClient:()=>client,makeTransport:()=>({})});
+ await oda.authorize();try{
+  const first=oda.search({query:'plain oil'});await entered;
+  assert.deepEqual(await oda.refreshPrices(),{families:0,results:[],deferred:true,reason:'oda-busy',retryAfterMs:1000});
+  assert.equal(calls,1);assert.equal(Object.keys(state.shopping.odaPriceReceipts).length,0);assert.equal(Object.keys(state.shopping.odaRefreshAttempts).length,0);
+  release();await first;
+ }finally{release();await oda.close();}
+});
