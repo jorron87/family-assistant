@@ -242,13 +242,14 @@ export function createProductLibrary(input,{now=new Date()}={}) {
    out.members[id]=listed.map(m=>{
     const a=assess(m,g,{ageless:true}),q=a.quality;
     if(q.status==='scored')out.qualityNotes[q.comparisonKey]=q.limitations;
-    return {k:m.productKey,s:m.status,r:a.reviewCurrent,u:a.eligible?a.unitPrice:null,q:q.status==='scored'?{score:q.score,key:q.comparisonKey,label:q.label,criterion:q.criterion,value:q.measurement?.value??null,unit:q.measurement?.unit??null,evidence:short(q.measurement?.evidence?.[0]?.text,200)}:null,n:nutrition.get(m.productKey)??null,qs:q.status,qr:q.reasons?.[0]??null,e:short(m.equivalenceEvidence,400),qe:short(m.qualityEvidence,300)};
+    return {k:m.productKey,s:m.status,r:a.reviewCurrent,u:a.eligible?a.unitPrice:null,q:q.status==='scored'?{score:q.score,key:q.comparisonKey,label:q.label,criterion:q.criterion,value:q.measurement?.value??null,unit:q.measurement?.unit??null,evidence:short(q.measurement?.evidence?.[0]?.text,200)}:null,n:nutrition.get(m.productKey)??null,qs:q.status,qr:q.reasons?.[0]??null,e:short(m.equivalenceEvidence,400),qe:short(m.qualityEvidence,300),reviewFacts:{equivalenceEvidence:m.equivalenceEvidence??null,qualityEvidence:m.qualityEvidence??null,sourceReceipts:m.sourceReceipts??[],reviewedAt:m.reviewedAt??null}};
    });
   }
   for(const [key,p] of products){
    if(invalidProducts.has(key)||badFingerprints.has(key))continue;
    const q=priceOf(key,{ageless:true}),n=p.nutrition;
    out.products[key]={source:p.source,metadataFingerprint:p.metadataFingerprint,store:p.store,id:p.id,name:p.name,ean:p.ean??null,brand:p.brand??null,ingredients:short(p.ingredients,2000),description:short(p.description,800),packEvidence:short(p.packEvidence,160),textHash:productTextHash(p),pack:positive(p.canonicalPackAmount)?p.canonicalPackAmount:null,packKnown:nonempty(p.packEvidence),unit:p.unit??null,rawPack:p.rawPack?{weight:p.rawPack.weight??null,weightUnit:p.rawPack.weightUnit??null}:null,sourceUrl:p.sourceUrl??null,attributes:p.attributes??null,available:p.available!==false&&p.delisted!==true,nutrition:n?{basis:n.basis,per100:n.per100&&p.nutritionObservation?.fiberConflict?{...n.per100,fiber:null}:n.per100,sourceUrl:n.sourceUrl??null,...(p.nutritionObservation?.fiberConflict?{fiberConflict:true}:{})}:null,
+    reviewFacts:{ingredients:p.ingredients??null,description:p.description??null,packEvidence:p.packEvidence??null,rawPack:p.rawPack??null,nutritionObservation:p.nutritionObservation??null},
     quote:{grossPackPrice:q.grossPackPrice,grossUnitPrice:q.grossUnitPrice,unit:q.unit,directUnitVerified:q.directUnitVerified,receiptAt:q.receiptAt,reasons:q.reasons,sourceUrl:q.sourceUrl}};
   }
   return out;

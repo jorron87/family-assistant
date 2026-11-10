@@ -1,9 +1,39 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {shoppingAgentBatch} from '../src/shopping-agent-jobs.mjs';
-import {agentManifest,buildAgentContext,agentContextPages,bindPlacementDecisions} from '../src/shopping-agent-context.mjs';
+import {agentManifest,buildAgentContext,agentContextPages,bindPlacementDecisions,agentFamilyBasis,agentContextSummary,agentStartupContext,agentContextView} from '../src/shopping-agent-context.mjs';
 import {shoppingProtocol} from '../src/shopping-agent-protocol.mjs';
 const facts={families:()=>[{familyId:'beans',familyFingerprint:'criteria'}],sources:key=>({sourceKey:key,ingredients:'Coffee beans'}),products:key=>({key})};
+
+test('family prompt contains every complete criterion and shortcut requires identical current data',()=>{
+ const families=Array.from({length:91},(_,i)=>({familyId:'family-'+i,familyFingerprint:'fp-'+i,note:'ø'.repeat(3000),variants:[{requires:['actual label '+i]}]}));
+ const basis=agentFamilyBasis(families),document=JSON.parse(basis.prompt.split('\n')[1]);
+ assert.deepEqual(document.families,families.map((f,familyIndex)=>({...f,familyIndex})));
+ const packet={version:1,jobs:[],families,sources:[],products:[]};
+ assert.equal(agentContextSummary(packet,basis.familyBasisFingerprint).pages.families,0);
+ assert.ok(agentContextSummary(packet).pages.families>0,'manual requests retain all family pages');
+ families[90].note+=' changed';assert.equal(agentContextSummary(packet,basis.familyBasisFingerprint).familiesProvidedInPrompt,false);
+ assert.ok(agentContextSummary(packet,basis.familyBasisFingerprint).pages.families>0);
+});
+
+test('repeated long evidence uses lossless explicit text references without changing raw context',()=>{
+ const text='Actual complete label ø '.repeat(100),packet={version:1,jobs:[],families:[],sources:[{sourceKey:'one',label:text},{sourceKey:'two',label:text}],products:[]};
+ const pages=agentContextPages(packet),rows=pages.sources.flatMap(p=>p.items),texts=pages.texts.flatMap(p=>p.items);
+ assert.equal(texts.length,1);for(const row of rows)assert.equal(texts[row.label.contextTextIndex].text,text);
+ assert.equal(packet.sources[0].label,text);assert.equal(packet.sources[1].label,text);
+});
+
+test('bounded startup supplies the complete source view and falls back to full pages for large packets',()=>{
+ const packet={version:1,contextFingerprint:'current',assignmentChanges:[],activeStagesEmpty:false,jobs:[{id:'one'}],families:facts.families(),sources:[{sourceKey:'sesum-product:1',label:'Full original label ø '.repeat(500)}],products:[]};
+ const startup=agentStartupContext(packet,'tmp/context.json'),view=agentContextView(packet);
+ assert.equal(startup.contextIncluded,true);assert.ok(startup.prompt.startsWith(agentFamilyBasis(packet.families).prompt));
+ const document=JSON.parse(startup.prompt.split('\n').find(line=>line.startsWith('{"contextFile"')));
+ const {families,...rest}=view;for(const [key,value] of Object.entries(rest))assert.deepEqual(document[key],value);
+ assert.equal(document.contextFile,'tmp/context.json');assert.equal(document.contextFingerprint,'current');
+ const large=agentStartupContext(packet,'tmp/context.json',1000);assert.equal(large.contextIncluded,false);assert.equal(large.prompt,agentFamilyBasis(packet.families).prompt);
+ assert.ok(agentContextPages(packet).sources.length>0,'fallback retains complete paged evidence');
+ const noPrefix=agentStartupContext({...packet,families:[{familyId:'huge',criteria:'ø'.repeat(5000)}]},'tmp/context.json',1000);assert.equal(noPrefix.prompt,'');assert.equal(noPrefix.familyBasisFingerprint,null);assert.equal(noPrefix.contextIncluded,false);
+});
 test('one context shares family criteria and follows assigned products across stages without adding new chain sources',()=>{
  const a='sesum:KIWI:1',b='sesum:REMA_1000:1',c='sesum:COOP_EXTRA:1';
  const assignment=agentManifest(shoppingAgentBatch([{do:'shopping-sesum-placement-review',sourceKey:a,relatedSources:[{sourceKey:b}]}]));

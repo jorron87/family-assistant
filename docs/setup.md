@@ -49,6 +49,8 @@ Bruk `shopping-settings` til historisk startdato, lagringsnotat og eksplisitt va
 
 Handelsagenten får høyst 20 frosne varejobber og leser paginert kontekst med `shopping-agent-context`/`shopping-agent-page`. `shopping-agent-decide` binder plasseringsbeslutninger til gjeldende fingerprints i kode. Prøv den isolerte `scripts/benchmark-shopping-agent.mjs --execute` før større kjøringer; den bruker syntetiske data og endrer ingen dispatchinnstillinger. Valgfri `dispatch.shoppingProgressGapSeconds` i collector-konfigurasjonen gir raskere fortsettelse bare etter en faktisk lagret gyldig vurderingskvittering. Den aktiverer ikke en pauset agent, og vanlig kilde-/familieprioritet og feilpauser består. Se runbook for kommando- og kvitteringskontraktene.
 
+Dispatch forbereder den avgrensede kontekstfilen i kode og leverer hele produktbolken direkte ved oppstart når datadelen er innenfor 400000 tegn; store pakker bruker paginering. Komplette familiekriterier leveres først som et stabilt oppstartsgrunnlag når de passer; kontekstleseren gjenbruker dette bare ved identisk fingerprint. Nye indekser bevarer også full produkttekst for agentarbeid, mens vanlige visninger fortsatt bruker korte utdrag. Eldre indeksformat bygges på nytt automatisk. Arbeidspakken tilbyr kun fortsatt gyldige, gjennomgåtte donoropplysninger; familiebruk og prisbelegg har egne kontroller. `--mode=packet --inline-context` måler denne oppstartsflyten i den isolerte benchmarken.
+
 Oda dekker ikke nødvendigvis hele matbudsjettet eller forbruket. Kostholdsanalyse trenger næringsdeklarasjoner og målbar mengde; den gjetter ikke næringsinnhold eller barnas energibehov fra handlekurven.
 
 ## Lagerinnsendinger

@@ -27,6 +27,27 @@ function setup(t,{donorStore='KIWI'}={}) {
   return {shop,state,w,p,g,data,clock,write,ingest,approve,provider};
 }
 
+test('placement packet prepares complete reviewed identity facts without borrowing prices or family approvals',t=>{
+ const f=setup(t);f.p.ingredients='Whole roasted coffee beans ø '.repeat(150);f.p.description='Original detailed label '.repeat(80);f.p.packEvidence='Original package evidence '.repeat(20);
+ f.p.metadataFingerprint=productMetadataFingerprint(f.p);f.data.memberships[0].reviewedFingerprint=f.p.metadataFingerprint;f.write();f.ingest();f.approve();
+ const assignment=agentManifest(shoppingAgentBatch(f.shop.queue().filter(i=>i.do==='shopping-sesum-placement-review'))),packet=f.shop.agentContext(assignment),source=packet.sources[0],facts=source.reviewedIdentity;
+ assert.equal(source.registration,null);assert.equal(facts.product.ingredients,f.p.ingredients);assert.equal(facts.product.description,f.p.description);assert.equal(facts.product.packEvidence,f.p.packEvidence);assert.equal(facts.completeTextAvailable,true);
+ assert.equal(facts.product.sourceUrl,f.p.sourceUrl);assert.equal(facts.product.packAmount,.5);assert.equal(facts.product.unit,'kg');assert.match(facts.identityEvidence,/Same GTIN/);assert.match(facts.groups[0].equivalenceEvidence,/Same whole beans/);
+ assert.equal('price' in facts.product,false);assert.equal(JSON.stringify(facts).includes('grossPackPrice'),false);assert.equal(source.observation.price.price,20);assert.equal(source.placement.status,'pending');
+ f.p.ingredients+=' changed';f.p.metadataFingerprint=productMetadataFingerprint(f.p);f.write();
+ assert.equal(f.shop.agentContext(assignment).sources[0].reviewedIdentity,null,'changed unreviewed donor never supplies old reviewed facts');
+ assert.throws(()=>f.shop.agentPlacement({assignment,contextFingerprint:packet.contextFingerprint,decisions:[]}),/context changed/);
+});
+
+test('prepared donor facts respect changed group and source fingerprints',t=>{
+ for(const change of ['group','source']){
+  const f=setup(t);f.ingest();f.approve();const assignment=agentManifest(shoppingAgentBatch(f.shop.queue().filter(i=>i.do==='shopping-sesum-placement-review')));
+  assert.ok(f.shop.agentContext(assignment).sources[0].reviewedIdentity);
+  if(change==='group'){f.g.inclusionCriteria+=' Changed actual group requirements';f.write();}else{f.p.brand='Changed actual source brand';f.ingest();}
+  assert.equal(f.shop.agentContext(assignment).sources[0].reviewedIdentity,null,change+' changes invalidate the borrowed identity facts');
+ }
+});
+
 test('explorer family and offers share one reader snapshot, with no reuse across requests',t=>{
  const f=setup(t);f.ingest();f.approve();
  const original=f.provider.reader;let calls=0;f.provider.reader=(...args)=>{calls++;return original(...args);};

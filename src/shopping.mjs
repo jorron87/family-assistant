@@ -4,7 +4,7 @@ import {calibrateMarket} from './shopping-market.mjs';
 import {createMarketCatalog} from './shopping-catalog.mjs';
 import {createStockIntake} from './shopping-stock.mjs';
 import {createLibraryExplorer,familyDetail} from './library-explorer.mjs';
-import {buildAgentContext,bindPlacementDecisions} from './shopping-agent-context.mjs';
+import {buildAgentContext,bindPlacementDecisions,agentFamilyBasis} from './shopping-agent-context.mjs';
 import {withinPriceHorizon} from './shopping-library.mjs';
 import {odaProductIdFromUrl} from './oda-product-identity.mjs';
 import {createSesumPrices} from './sesum-prices.mjs';
@@ -1816,10 +1816,19 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   }
   function sesumCandidates(...args){return inReadContext(()=>sesumCandidatesInContext(...args));}
   function agentContext(assignment){return inReadContext(()=>{
-    const work=queue(),placement=sesumPlacement(),native=catalog.entries();
+    const work=queue(),placement=sesumPlacement(),native=catalog.entries(),reader=libReader(),research=sesumResearches(reader);
+    const reviewedIdentity=key=>{
+      const identity=research.get(key),p=identity&&reader.product(identity.productKey);if(!p)return null;
+      const facts=p.reviewFacts??{};
+      return {productKey:identity.productKey,productFingerprint:identity.productFingerprint,registrationFingerprint:identity.registrationFingerprint,sourceFingerprint:identity.sourceFingerprint,identityEvidence:s.sesumPrices.bridges[key]?.equivalenceEvidence??null,identityPackEvidence:s.sesumPrices.bridges[key]?.packEvidence??null,
+        product:{name:p.name,brand:p.brand,ean:p.ean,ingredients:facts.ingredients??p.ingredients,description:facts.description??p.description,packAmount:identity.packAmount,unit:identity.unit,packEvidence:facts.packEvidence??p.packEvidence,rawPack:facts.rawPack??p.rawPack,attributes:p.attributes,nutrition:p.nutrition,nutritionObservation:facts.nutritionObservation??null,sourceUrl:p.sourceUrl},
+        completeTextAvailable:!!p.reviewFacts,groups:identity.groups.map(g=>{const m=reader.groupsOf(key).find(m=>m.groupId===g.groupId&&m.s==='approved'&&m.r);return {...g,equivalenceEvidence:m?.reviewFacts?.equivalenceEvidence??m?.e??null,qualityEvidence:m?.reviewFacts?.qualityEvidence??m?.qe??null,sourceReceipts:m?.reviewFacts?.sourceReceipts??[],reviewedAt:m?.reviewFacts?.reviewedAt??null};}),
+        nativeFamilyReviews:native.filter(e=>[identity.productKey,key].includes(catalogKey(e))).map(e=>({watchId:e.watchId,status:e.status,fingerprint:e.fingerprint,equivalenceEvidence:e.equivalenceEvidence,review:e.review??null})),
+        authority:'Reviewed identity and label facts only. No household family approval, fresh price, availability or campaign terms are inferred.'};
+    };
     return buildAgentContext(work,assignment,{
       families:()=>placement.families,
-      sources:key=>{const observation=sesumSubjectRecord(key);if(!observation)return null;const stages=work.filter(i=>i.sourceKey===key).map(i=>i.do),row=placement.items.find(i=>i.sourceKey===key);return {sourceKey:key,observation,placement:row??null,registration:key.startsWith('sesum-product:')?null:discovery.record(key),...(stages.some(s=>s!=='shopping-sesum-placement-review')&&!key.startsWith('sesum-product:')?{candidate:sesumCandidates(undefined,key)}:{})};},
+      sources:key=>{const observation=sesumSubjectRecord(key);if(!observation)return null;const stages=work.filter(i=>i.sourceKey===key).map(i=>i.do),row=placement.items.find(i=>i.sourceKey===key);return {sourceKey:key,observation,placement:row??null,registration:key.startsWith('sesum-product:')?null:discovery.record(key),reviewedIdentity:reviewedIdentity(key),...(stages.some(s=>s!=='shopping-sesum-placement-review')&&!key.startsWith('sesum-product:')?{candidate:sesumCandidates(undefined,key)}:{})};},
       products:key=>({productKey:key,entries:native.filter(e=>catalogKey(e)===key),detail:productInfo({key})})
     });
   });}
@@ -1894,5 +1903,5 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     }
   }
   });
-  return {agentPlacement,agentProgressSince,agentContext,marketRefreshPlan,odaRefreshPlan,odaRefreshReceive,sesumFamilies,sesumPlacement,sesumReceivePrices,sesumReceiveMetadata:input=>sesumCatalogue.ingest(input),sesumCandidates,sesumRegister,sesumPriceReview,sesumOfferCandidates,sesumOfferReview,sesumPriceStatus:()=>inReadContext(()=>({...sesumPrices.status(),discovery:discovery.status(),catalogue:sesumCatalogue.status()})),familyReopen,listFamily,listFamilyWork,explorer,productInfo,libraryAudit,libraryAuditAck,libraryLink,libraryLinkCandidates,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
+  return {agentPlacement,agentProgressSince,agentContext,agentFamilyBasis:()=>inReadContext(()=>agentFamilyBasis(sesumPlacementFamilies().families)),marketRefreshPlan,odaRefreshPlan,odaRefreshReceive,sesumFamilies,sesumPlacement,sesumReceivePrices,sesumReceiveMetadata:input=>sesumCatalogue.ingest(input),sesumCandidates,sesumRegister,sesumPriceReview,sesumOfferCandidates,sesumOfferReview,sesumPriceStatus:()=>inReadContext(()=>({...sesumPrices.status(),discovery:discovery.status(),catalogue:sesumCatalogue.status()})),familyReopen,listFamily,listFamilyWork,explorer,productInfo,libraryAudit,libraryAuditAck,libraryLink,libraryLinkCandidates,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
 }

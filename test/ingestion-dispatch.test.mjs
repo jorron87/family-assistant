@@ -1,13 +1,31 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';
+import test from 'node:test';import assert from 'node:assert/strict';import {mkdtempSync,rmSync,readFileSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';
 import {createIngestionDispatcher,changeSignal} from '../src/ingestion-dispatch.mjs';
 import {createStore} from '../src/store.mjs';
+import {agentFamilyBasis,buildAgentContext} from '../src/shopping-agent-context.mjs';
+
+test('shopping launch supplies complete stable family data before its variable assignment',()=>{
+ const f=shoppingDispatchFixture([{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1',sourceFingerprint:'one'}]);
+ const families=Array.from({length:91},(_,i)=>({familyId:'family-'+i,note:'Complete criterion '+i})),basis=agentFamilyBasis(families);
+ f.store.shopping.agentFamilyBasis=()=>basis;
+ try{f.dispatcher.tick();assert.ok(f.launches[0].prompt.startsWith(basis.prompt));assert.equal(f.dispatcher.status().familyBasisFingerprint,basis.familyBasisFingerprint);f.launches[0].onExit(0);assert.equal(f.dispatcher.status().familyBasisFingerprint,null);}finally{f.close();}
+});
 
 function shoppingDispatchFixture(initialRows,config={},resources=undefined,automaticShopping=false) {
   const dir=mkdtempSync(join(tmpdir(),'familien-dispatch-batch-')),clock={at:Date.parse('2026-11-10T02:00:00Z')},queue={rows:initialRows},launches=[];let lease=null;
   const store={snapshot:()=>({runLease:lease,rawItems:{},events:{}}),phone:{list:()=>[]},calendarActions:()=>[],activityFacebook:()=>[],activityFeedStatus:()=>({changedPages:[]}),reviewQueue:()=>({items:[]}),completionReport:()=>({profileReviews:[],missingDrive:[],unsyncedCalendar:[],shopping:{complete:false,blockedPlacements:[{status:'blocked',retryAt:'2026-11-11T02:00:00Z'}]}}),shopping:{queue:()=>queue.rows},beginRun:()=>({acquired:true,lease:lease={token:'owned-test-batch'}}),endRun:token=>{assert.equal(token,lease.token);lease=null;},renewRun(){}};
-  const dispatcher=createIngestionDispatcher({store,resources,root:'.',dataDir:dir,automaticShopping,clock:()=>clock.at,readConfig:()=>({enabled:true,minGapMinutes:15,...config}),alive:()=>true,launch:input=>{launches.push(input);return {pid:123};}});
+  const dispatcher=createIngestionDispatcher({store,resources,root:dir,dataDir:dir,automaticShopping,clock:()=>clock.at,readConfig:()=>({enabled:true,minGapMinutes:15,...config}),alive:()=>true,launch:input=>{launches.push(input);return {pid:123};}});
   return {dispatcher,clock,queue,launches,store,close(){assert.ok(dir.startsWith(join(tmpdir(),'familien-dispatch-batch-')));rmSync(dir,{recursive:true,force:true});}};
 }
+
+test('dispatcher prepares the exact frozen context file before launch and releases its lease on preparation failure',()=>{
+ const f=shoppingDispatchFixture([{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1',sourceFingerprint:'one'}]);
+ f.store.shopping.agentContext=assignment=>buildAgentContext(f.queue.rows,assignment,{families:()=>[{familyId:'beans',familyFingerprint:'criteria'}],sources:key=>({sourceKey:key,observation:{sourceFingerprint:'one'},label:'Complete original label'}),products:()=>null});
+ try{
+  f.dispatcher.tick();const launch=f.launches[0],document=JSON.parse(launch.prompt.split('\n').find(line=>line.startsWith('{"contextFile"'))),saved=JSON.parse(readFileSync(document.contextFile,'utf8'));
+  assert.equal(saved.packet.contextFingerprint,document.contextFingerprint);assert.deepEqual(saved.assignment.jobs[0].sourceKeys,['sesum-product:1']);assert.equal(document.sources[0].label,'Complete original label');
+  launch.onExit(0);f.clock.at+=16*60000;f.queue.rows[0].sourceFingerprint='genuinely-changed';f.store.shopping.agentContext=()=>{throw Error('Synthetic preparation failure');};f.dispatcher.tick();assert.equal(f.launches.length,1);assert.equal(f.store.snapshot().runLease,null);assert.equal(f.dispatcher.status().running,false);assert.match(f.dispatcher.status().lastError,/preparation failure/);
+ }finally{f.close();}
+});
 
 test('code-owned Oda price work never launches a model and real product work still dispatches',()=>{
   const f=shoppingDispatchFixture([{do:'shopping-oda-refresh',watchId:'known',fingerprint:'price-gap'}],{},undefined,true);
