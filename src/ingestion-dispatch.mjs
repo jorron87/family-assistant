@@ -146,7 +146,7 @@ export function createIngestionDispatcher({store,resources,root,dataDir,automati
     const currentShopping=shoppingOnly?new Set(shoppingCohortSignal(store,shoppingQueue).items):null;
     const heldCohort=shoppingOnly&&state.shoppingCohort?.signals?.length&&state.shoppingCohort.signals.every(item=>currentShopping.has(item))?state.shoppingCohort:null;
     const plannedBatch=shoppingOnly?shoppingAgentBatch(shoppingQueue):null;
-    const retryBatch=heldCohort?{items:heldCohort.items,jobs:heldCohort.jobs??[],summary:shoppingAgentBatch(shoppingQueue,{limit:Math.min(20,heldCohort.jobCount??heldCohort.shown)}).summary}:plannedBatch;
+    const retryBatch=heldCohort?{items:heldCohort.items,jobs:heldCohort.jobs??shoppingAgentBatch(heldCohort.items).jobs,summary:shoppingAgentBatch(shoppingQueue,{limit:Math.min(20,heldCohort.jobCount??heldCohort.shown)}).summary}:plannedBatch;
     const assignedSignal=shoppingOnly?shoppingCohortSignal(store,retryBatch.items):null;
     const dispatchSignature=shoppingOnly?assignedSignal.signature:work?.signature;
     const budget=shoppingOnly?state:state.sourceBudget;
