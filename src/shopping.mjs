@@ -369,9 +369,19 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   function offer(input) {const entry=buildOffer(input);return update(()=>s.offers[entry.id]=entry);}
   function review(input) {
     if(!s.settings.stores.some(x=>x.id===input.storeId)||!['ok','blocked'].includes(input.status))throw Error('Ugyldig butikkontroll.');
-    const entry={storeId:input.storeId,status:input.status,checkedAt:now().toISOString(),evidence:required(input.evidence,'Kontrollbelegg'),sourceUrl:url(input.sourceUrl),nextCheck:day(input.nextCheck)};
+    const familySetFingerprint=sesumPlacementFamilies().familySetFingerprint;
+    if(input.familySetFingerprint!==undefined&&input.familySetFingerprint!==familySetFingerprint)throw Error('Varefamilienes krav er endret; les gjeldende shopping-checklist før butikkontrollen kvitteres.');
+    const entry={storeId:input.storeId,status:input.status,checkedAt:now().toISOString(),evidence:required(input.evidence,'Kontrollbelegg'),sourceUrl:url(input.sourceUrl),nextCheck:day(input.nextCheck),familySetFingerprint};
     if(entry.nextCheck<=shoppingDay(now()))throw Error('Neste kontroll må være i fremtiden.');
     return update(()=>s.reviews[entry.storeId]=entry);
+  }
+  // A source reading only covers the family criteria that were actually current
+  // then. Prices and household quantities are not part of that semantic basis.
+  function flyerReviewState(store,familySetFingerprint,today=shoppingDay(now())) {
+    const review=s.reviews[store.id]??null;
+    const requiresRescan=!store.facebookGroup&&review?.familySetFingerprint!==familySetFingerprint;
+    const blocked=review?.status==='blocked',dateDue=!review||review.nextCheck<=today;
+    return {review,requiresRescan,due:dateDue||requiresRescan&&!blocked,status:store.facebookGroup?review?.status??'unchecked':blocked?'blocked':!review||requiresRescan||dateDue?'unchecked':review.status};
   }
   function analysis() {
     const today=shoppingDay(now()),from=s.settings.historyFrom??`${Number(today.slice(0,4))-1}${today.slice(4)}`;
@@ -474,14 +484,15 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const routes=listRouteWork().map(e=>({do:'shopping-list-route',id:e.id,name:e.name,need:e.need,addedAt:e.addedAt,retryAt:e.routeRetryAt??null}));
     const stock=stockIntake.work().map(x=>({do:'shopping-stock-review',id:x.id,text:x.text,location:x.location,images:x.images.length,submittedAt:x.submittedAt,retryAt:x.retryAt}));
     if(!s.settings.monitoringEnabled)return [...stock,...routes];
-    const today=shoppingDay(now());
+    const today=shoppingDay(now()),familySetFingerprint=sesumPlacementFamilies().familySetFingerprint;
     const reader=libReader(),familyMembers=new Map();
     const alreadyInFamily=p=>{const w=s.watches[p.watchId];if(!reader||!w)return false;if(!familyMembers.has(w.id))familyMembers.set(w.id,linkedMembers(w,reader,{allChains:true}));return familyMembers.get(w.id).has(`kassal:${p.store}:${p.id}`);};
     const named=x=>x.watchId?{...x,familyId:x.watchId,familyName:x.watchName}:x;
-    return [...stock,...catalog.pending().filter(p=>s.watches[p.watchId]?.enabled!==false&&!priceTooOld(p)&&!alreadyInFamily(p)).map(p=>({do:'shopping-product-review',watchId:p.watchId,watchName:s.watches[p.watchId]?.name,productId:p.id,store:p.store,name:p.name,fingerprint:p.fingerprint,sourceUrl:p.sourceUrl})),...feedWork(),...s.settings.stores.filter(x=>!x.facebookGroup&&(!s.reviews[x.id]||s.reviews[x.id].nextCheck<=today)).map(x=>({do:'shopping-review',storeId:x.id,name:x.name,url:x.url,lastReview:s.reviews[x.id]??null})),...marketRefreshDue(today),...sesumWork(),...sesumPlacementWork(),...sesumCatalogueWork(),...sesumFamilyWork(),...sesumOfferWork(),...libraryWork(),...listFamilyWork(),...unlinkedOrderLines(),...routes].map(named);
+    const flyers=s.settings.stores.filter(x=>!x.facebookGroup).map(store=>({store,...flyerReviewState(store,familySetFingerprint,today)})).filter(x=>x.due).map(({store,review,requiresRescan})=>({do:'shopping-review',storeId:store.id,name:store.name,url:store.url,lastReview:review?structuredClone(review):null,familySetFingerprint,requiresRescan,reason:requiresRescan&&review?'family-checklist-changed':review?'check-due':'unreviewed',fingerprint:hash(JSON.stringify([store.id,familySetFingerprint]))}));
+    return [...stock,...catalog.pending().filter(p=>s.watches[p.watchId]?.enabled!==false&&!priceTooOld(p)&&!alreadyInFamily(p)).map(p=>({do:'shopping-product-review',watchId:p.watchId,watchName:s.watches[p.watchId]?.name,productId:p.id,store:p.store,name:p.name,fingerprint:p.fingerprint,sourceUrl:p.sourceUrl})),...feedWork(),...flyers,...marketRefreshDue(today),...sesumWork(),...sesumPlacementWork(),...sesumCatalogueWork(),...sesumFamilyWork(),...sesumOfferWork(),...libraryWork(),...listFamilyWork(),...unlinkedOrderLines(),...routes].map(named);
   }
   function completion() {
-    const work=queue(),blockedStores=s.settings.monitoringEnabled?s.settings.stores.filter(x=>s.reviews[x.id]?.status==='blocked').map(x=>({storeId:x.id,name:x.name,evidence:s.reviews[x.id].evidence})):[];
+    const work=queue(),familySetFingerprint=s.settings.monitoringEnabled?sesumPlacementFamilies().familySetFingerprint:null,blockedStores=s.settings.monitoringEnabled?s.settings.stores.filter(x=>s.reviews[x.id]?.status==='blocked').map(x=>({storeId:x.id,name:x.name,evidence:s.reviews[x.id].evidence,requiresRescan:flyerReviewState(x,familySetFingerprint).requiresRescan})):[];
     const blockedRoutes=[...s.shoppingList.filter(e=>!e.checkedAt&&(e.routing==='blocked'||e.cartError)).map(({id,name,reason,cartError})=>({id,name,reason:cartError??reason})),...stockIntake.blocked().map(x=>({id:x.id,name:'Lagertelling',reason:x.note}))];
     const blockedCampaigns=s.settings.monitoringEnabled?sesumOfferWork({all:true}).filter(item=>item.status==='blocked'):[];
     const blockedFamilies=s.settings.monitoringEnabled?sesumFamilyWork({all:true}).filter(item=>item.status==='blocked'):[];
@@ -598,8 +609,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   // The price table an agent holds each flyer page against. Keep it complete: the
   // server, not the reader, decides what is worth a trip or how much to buy.
   function checklist() {
-    const a=analysis(),at=now().getTime(),context=currentPrices();
-    return Object.values(s.watches).filter(w=>w.enabled!==false).map(w=>itemView(w,a,at,new Map(),new Map(),context)).map(({id,name,unit,storage,prices,libraryGroups})=>({watchId:id,name,unit,storage,libraryGroups,normal:prices.normal,good:prices.good,excellent:prices.excellent,cheapestNow:prices.current,chain:prices.currentChain}));
+    const a=analysis(),at=now().getTime(),context=currentPrices(),familySetFingerprint=sesumPlacementFamilies().familySetFingerprint;
+    return Object.values(s.watches).filter(w=>w.enabled!==false).map(w=>itemView(w,a,at,new Map(),new Map(),context)).map(({id,name,unit,storage,prices,libraryGroups})=>({watchId:id,name,unit,storage,libraryGroups,normal:prices.normal,good:prices.good,excellent:prices.excellent,cheapestNow:prices.current,chain:prices.currentChain,familySetFingerprint}));
   }
   function view() {const a=analysis(),entries=catalog.entries(),found=deals(a);return {families:structuredClone(Object.values(s.watches)),settings:structuredClone(s.settings),analysis:a,nutrition:purchaseNutrition(orders().filter(o=>o.deliveryDate>=a.from&&o.deliveryDate<=a.to),nutritionRecords()),watches:structuredClone(Object.values(s.watches)),opportunities:found.opportunities,belowTripOffers:found.belowTrip,coveredOffers:found.covered,heldOffers:found.held,offerCounts:offerCounts(),reviews:structuredClone(Object.values(s.reviews)),queue:queue(),purchases:structuredClone(s.purchases),catalog:{total:entries.length,pending:entries.filter(p=>p.status==='pending').length,approved:entries.filter(p=>p.status==='approved').length,excluded:entries.filter(p=>p.status==='excluded').length}};}
   function catalogPackMap(prices=currentPrices()) {
@@ -632,8 +643,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const main=primary.filter(d=>d.tier!=='small'),small=primary.filter(d=>d.tier==='small');
     const offerLow=new Map();for(const d of [...found.opportunities,...found.belowTrip,...found.covered])if(d.validFrom<=today&&(!offerLow.has(d.watchId)||d.unitPrice<offerLow.get(d.watchId).unitPrice))offerLow.set(d.watchId,d);
     const catalogPacks=catalogPackMap(found.prices),items=Object.values(s.watches).map(w=>itemView(w,a,at,catalogPacks,offerLow,found.prices)).sort((x,y)=>y.spent-x.spent);
-    const reviews=Object.values(s.reviews);
-    const stores=s.settings.stores.map(x=>{const r=reviews.find(y=>y.storeId===x.id);return {id:x.id,name:x.name,status:r?.status??'unchecked',checkedAt:r?.checkedAt??null};});
+    const familySetFingerprint=sesumPlacementFamilies().familySetFingerprint;
+    const stores=s.settings.stores.map(x=>{const r=flyerReviewState(x,familySetFingerprint,today);return {id:x.id,name:x.name,status:r.status,checkedAt:r.review?.checkedAt??null,requiresRescan:r.requiresRescan};});
     const n=purchaseNutrition(orders().filter(o=>o.deliveryDate>=a.from&&o.deliveryDate<=a.to),nutritionRecords());
     const sum=list=>round(list.reduce((x,p)=>x+(p.saving??0),0));
     const stockImages=new Map(catalog.entries().filter(e=>e.status==='approved'&&e.image).map(e=>[e.watchId,imageRef(e.image)]));

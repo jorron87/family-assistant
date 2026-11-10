@@ -32,6 +32,7 @@ test('new Sesum discovery launches the existing shopping agent with research and
     d.tick();assert.equal(d.status().workerScope,'handel');assert.match(launch.prompt,/shopping-sesum-discovery/);assert.match(launch.prompt,/shopping-sesum-register/);assert.match(launch.prompt,/shopping-sesum-catalog/);assert.match(launch.prompt,/familyFingerprints/);assert.match(launch.prompt,/Manglende EAN eller gjennomgått donor er aldri automatisk avslag/);assert.match(launch.prompt,/shopping-sesum-offer-review/);assert.match(launch.prompt,/conditionsVerified:true/);assert.match(launch.prompt,/bare arbeid som faktisk krever nettleseren/);assert.match(launch.prompt,/En faktisk eksplisitt sikkerhetsstopp/);
     assert.match(launch.prompt,/shopping-sesum-family-review/);assert.match(launch.prompt,/registrationFingerprint/);assert.match(launch.prompt,/vanlige web-\/søkeverktøy/);assert.match(launch.prompt,/aldri bare søkeutdrag/);
     assert.match(launch.prompt,/shopping-sesum-placement-review/);assert.match(launch.prompt,/reviewedAllFamilies:true/);assert.match(launch.prompt,/noActiveFamilyVerified:true/);
+    assert.match(launch.prompt,/familySetFingerprint fra den faktisk leste gjeldende sjekklisten i shopping-review/);assert.match(launch.prompt,/hele den nye sjekklisten før ny kvittering/);
     rows=[];launch.onExit(0);assert.equal(lease,null);assert.equal(d.status().running,false);
   }finally{assert.ok(dir.startsWith(join(tmpdir(),'familien-dispatch-sesum-')));rmSync(dir,{recursive:true,force:true});}
 });
