@@ -7,6 +7,7 @@ import {createLibraryExplorer,familyDetail} from './library-explorer.mjs';
 import {withinPriceHorizon} from './shopping-library.mjs';
 import {createSesumPrices} from './sesum-prices.mjs';
 import {createSesumDiscovery} from './sesum-discovery.mjs';
+import {sesumCollectionCompletion} from './sesum-completion.mjs';
 import {campaignFingerprint,offerTermsFingerprint,validateCampaignOffer} from './sesum-campaigns.mjs';
 import {productTextHash} from './product-library.mjs';
 import {annualNeed,chainName,commonPacks,dealScore,packsFor,dealTier,defaultShelfLifeMonths,estimateStock,packBreakdown,planQuantities,shelfLifeMonths,shelfWithDate} from './shopping-planning.mjs';
@@ -151,7 +152,7 @@ export function collapseSameProduct(rows,aliases={}) {
   return out;
 }
 
-export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices}={}) {
+export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices,sesumCollectionStatus}={}) {
   state.shopping??={orders:{},watches:{},offers:{},reviews:{},cartReceipts:{},settings:{monitoringEnabled:false,historyFrom:null,stores:[],storageNote:'',stockUpDays:60}};
   const s=state.shopping;
   s.nutrition??={};
@@ -477,7 +478,12 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const blockedRoutes=[...s.shoppingList.filter(e=>!e.checkedAt&&(e.routing==='blocked'||e.cartError)).map(({id,name,reason,cartError})=>({id,name,reason:cartError??reason})),...stockIntake.blocked().map(x=>({id:x.id,name:'Lagertelling',reason:x.note}))];
     const blockedCampaigns=s.settings.monitoringEnabled?sesumOfferWork({all:true}).filter(item=>item.status==='blocked'):[];
     const blockedFamilies=s.settings.monitoringEnabled?sesumFamilyWork({all:true}).filter(item=>item.status==='blocked'):[];
-    return {complete:!work.length&&!blockedStores.length&&!blockedRoutes.length&&!blockedCampaigns.length&&!blockedFamilies.length,work,blockedStores,blockedRoutes,blockedCampaigns,blockedFamilies};
+    let collection;
+    if(s.settings.monitoringEnabled&&typeof sesumCollectionStatus==='function'){
+      let status;try{status=sesumCollectionStatus();}catch{status=null;}
+      collection=sesumCollectionCompletion(status,status?.enabled?sesumFamilies():[]);
+    }
+    return {complete:!work.length&&!blockedStores.length&&!blockedRoutes.length&&!blockedCampaigns.length&&!blockedFamilies.length&&collection?.complete!==false,work,blockedStores,blockedRoutes,blockedCampaigns,blockedFamilies,...(collection?{collection}:{})};
   }
   function listRouteAttempt(ids) {return update(()=>{for(const e of listRouteWork())if(ids.includes(e.id)){e.routeAttempts=(e.routeAttempts??0)+1;e.routeRetryAt=null;}return true;});}
   function listRouteFinish(ids,note) {return update(()=>{for(const e of listRouteWork())if(ids.includes(e.id)){if(e.routeAttempts>=3){e.routing='blocked';e.storeName??=NEAREST;e.reason=note??'Kunne ikke sorteres automatisk. Velg butikk selv eller legg varen inn på nytt.';}else e.routeRetryAt=new Date(now().getTime()+(e.routeAttempts>=2?300000:60000)).toISOString();}return true;});}
