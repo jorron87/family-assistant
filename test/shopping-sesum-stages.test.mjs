@@ -76,3 +76,15 @@ test('a followed identity candidate survives missing category words without acqu
  f.shop.sesumReceivePrices({familyIds:[f.target.id],fetchedAt:NOW,products:[{id:'999',name:'Opaque new brand 500g',ean:['12345678'],weight:500,weightUnit:'g',sourceUrl:'https://www.sesum.no/produkt/999-opaque',prices:[{storeCode:'KIWI',price:10,observedAt:NOW,source:'actual_synthetic_receipt',isPromo:false}]}]});
  const row=f.shop.sesumPlacement(KEY(999)).items[0];assert.equal(row.discoveryScope.candidate,true);assert.equal(row.discoveryScope.reviewedIdentityCandidate,true);assert.equal(row.status,'pending');assert.equal(row.registrationFingerprint,null);assert.equal(f.shop.familyView().items.find(x=>x.id===f.target.id).prices.current,60);assert.equal(f.shop.completion().researchScope.unaccountedSourceRows,0);
 });
+test('basis-specific placement history survives a reversible family edit but explicit reopen stays open',t=>{
+ const f=fixture(t,2),w=f.state.shopping.watches['unrelated-0'],original=w.note;
+ f.place(101,{status:'no-active-family',targets:[]});
+ w.note='Changed exact synthetic detergent requirement, still excluding cleaning brushes.';
+ f.place(101,{status:'no-active-family',targets:[]});w.note=original;
+ assert.equal(f.shop.sesumPlacement(KEY(101)).items[0].status,'no-active-family');
+ const c=f.shop.sesumPlacement(KEY(101)),r=c.items[0];
+ f.shop.sesumPriceReview({kind:'placement',sourceKey:r.sourceKey,sourceFingerprint:r.sourceFingerprint,registrationFingerprint:r.registrationFingerprint,familySetFingerprint:c.familySetFingerprint,status:'reopen',evidence:'Explicitly reopen this actual synthetic relevance decision for fresh research.'});
+ assert.equal(f.shop.sesumPlacement(KEY(101)).items[0].status,'pending');
+ w.note='Changed exact synthetic detergent requirement, still excluding cleaning brushes.';f.place(101,{status:'no-active-family',targets:[]});w.note=original;
+ assert.equal(f.shop.sesumPlacement(KEY(101)).items[0].status,'pending','a newer exact-basis reopen tombstone prevents resurrecting the previous result');
+});

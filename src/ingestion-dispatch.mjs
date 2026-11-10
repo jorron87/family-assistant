@@ -68,6 +68,7 @@ function fullRunRecorded(store,day) {
 export function createIngestionDispatcher({store,resources,root,dataDir,launch=launchLuna,clock=Date.now,readConfig,alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}}}) {
   const file=join(dataDir,'ingestion-dispatch.enc'),key=loadKey(dataDir);
   let state=existsSync(file)?JSON.parse(decrypt(readFileSync(file),key).toString('utf8')):{};
+  state.sourceBudget??={attempts:0,lastSignature:null,retryAt:null};
   let running=!!state.worker;
   let retryAfterLogin=false;
   const config=readConfig ?? (()=>readDeploymentConfig('collector.json').dispatch ?? {});
@@ -126,9 +127,12 @@ export function createIngestionDispatcher({store,resources,root,dataDir,launch=l
     const dailyReady=state.daily.attempts<3&&(!state.daily.retryAt||state.daily.retryAt<=clock());
     const finalizeFull=!!(dailyPending&&dailyReady&&resumeSourcePhase&&report.complete);
     const fullDue=finalizeFull||dailyPending&&dailyReady&&!resumeSourcePhase;
-    const work=fullDue?null:changeSignal(store,resources,resumeSourcePhase?{shoppingOnly:true}:{});
+    const sourceWork=fullDue||resumeSourcePhase?null:changeSignal(store,resources,{sourceOnly:true}),sourceBudget=state.sourceBudget;
+    const sourceWait=sourceWork?.signature?resourceWait(sourceWork):null;if(sourceWait&&(!sourceBudget.retryAt||sourceBudget.retryAt<sourceWait)){sourceBudget.retryAt=sourceWait;save();}
+    const sourceDue=sourceWork?.signature&&!knownBlockedOriginalsOnly(sourceWork)&&!sourceWait&&(retryAfterLogin||sourceWork.signature!==sourceBudget.lastSignature||sourceBudget.retryAt&&sourceBudget.retryAt<=clock()&&sourceBudget.attempts<3);
+    const work=fullDue?null:sourceDue?sourceWork:changeSignal(store,resources,{shoppingOnly:true});
     if(!fullDue&&!work.signature)return;
-    if(!fullDue){
+    if(!fullDue&&!work.shoppingOnly){
       // A repeatedly rejected unchanged original is checked by the daily full
       // run or after new data/access. Do not start Luna just to rediscover it.
       if(knownBlockedOriginalsOnly(work)){if(state.retryAt!==null){state.retryAt=null;save();}return;}
@@ -143,16 +147,18 @@ export function createIngestionDispatcher({store,resources,root,dataDir,launch=l
     const retryBatch=heldCohort?{items:heldCohort.items,summary:shoppingWorkBatch(shoppingQueue,{limit:heldCohort.shown}).summary}:plannedBatch;
     const assignedSignal=shoppingOnly?shoppingCohortSignal(store,retryBatch.items):null;
     const dispatchSignature=shoppingOnly?assignedSignal.signature:work?.signature;
-    const changed=!fullDue&&dispatchSignature!==state.lastSignature;
+    const budget=shoppingOnly?state:state.sourceBudget;
+    const changed=!fullDue&&dispatchSignature!==budget.lastSignature;
     if(!retryAfterLogin&&clock()-(state.lastStartedAt??0)<(cfg.minGapMinutes??15)*60000)return;
-    if(!fullDue&&!changed && (!state.retryAt || state.retryAt>clock() || (state.attempts??0)>=3))return;
+    if(!fullDue&&!changed && (!budget.retryAt || budget.retryAt>clock() || (budget.attempts??0)>=3))return;
     const lease=store.beginRun();if(!lease.acquired)return;
     retryAfterLogin=false;
     const token=lease.lease.token;running=true;
     const scope=fullDue?'alle':work.shoppingOnly?'handel':'kildeendringer';
     const shoppingBatch=scope!=='kildeendringer'?structuredClone(retryBatch??shoppingWorkBatch((store.shopping?.queue()??[]).filter(item=>!['shopping-list-route','shopping-stock-review'].includes(item.do)))):null;
     if(fullDue){state.daily.attempts++;state.daily.retryAt=null;}
-    else{state.lastSignature=dispatchSignature;state.attempts=changed?1:(state.attempts??0)+1;state.retryAt=null;}
+    else{budget.lastSignature=dispatchSignature;budget.attempts=changed?1:(budget.attempts??0)+1;budget.retryAt=null;}
+    state.lastWorkScope=scope;
     if(shoppingOnly)state.shoppingCohort={items:structuredClone(shoppingBatch.items),signals:assignedSignal.items,shown:shoppingBatch.summary.shown};
     state.lastStartedAt=clock();save();
     const prompt=fullDue?`Gjør den daglige fulle kildekontrollen for Familien. Den planlagte kl. 07-kjøringen ble ikke registrert som utført; dette er reservekjøringen. Les AGENTS.md, config/sources.json, familieprofilen, relevante deler av docs/runbook.md og docs/aktiviteter.md. Kjøringslåsen er allerede tatt: ${token}. Ikke kall begin-run; forny og frigjør bare denne låsen.
@@ -188,29 +194,29 @@ Kontroller faktisk lagrede kvitteringer og completion før avslutning. Påstå a
         state.daily.retryAt=!fullRunRecorded(store,state.daily.day)&&state.daily.attempts<3?clock()+[0,30,120][state.daily.attempts]*60000:null;
       }else{
         const phase=store.completionReport().sourcePhase;
-        const left=changeSignal(store,resources,phase?.current&&state.sourcePhaseRunId===phase.checkpoint.runId?{shoppingOnly:true}:{});
+        const left=changeSignal(store,resources,shoppingOnly?{shoppingOnly:true}:{sourceOnly:true});
         if(shoppingOnly){
           const actual=new Set(shoppingCohortSignal(store,store.shopping?.queue()??[]).items),progress=assignedSignal.items.some(item=>!actual.has(item));
           if(progress){state.attempts=0;state.shoppingCohort=null;state.lastSignature=null;}
           else state.lastSignature=assignedSignal.signature;
         }else{
           const leftItems=new Set(left.items),beforeItems=new Set(work.items);
-          if(work.items.some(item=>!leftItems.has(item))||left.items.some(item=>!beforeItems.has(item)))state.attempts=0;
-          state.lastSignature=left.signature;
+          if(work.items.some(item=>!leftItems.has(item))||left.items.some(item=>!beforeItems.has(item)))budget.attempts=0;
+          budget.lastSignature=left.signature;
         }
-        state.retryAt=left.count && state.attempts<3?clock()+[0,30,120][state.attempts]*60000:null;
-        const wait=resourceWait(left);if(wait)state.retryAt=Math.max(state.retryAt??0,wait);
+        budget.retryAt=left.count && budget.attempts<3?clock()+[0,30,120][budget.attempts]*60000:null;
+        const wait=shoppingOnly?null:resourceWait(left);if(wait)budget.retryAt=Math.max(budget.retryAt??0,wait);
       }
       state.worker=null;release(token);running=false;save();
     };
     try{const child=launch({root,prompt:scopedPrompt+'\n'+researchPrompts+'\n'+originalReuse,onExit:finish});if(!finished&&child?.pid){state.worker={pid:child.pid,token,scope,startedAt:clock(),...(shoppingBatch?{shoppingBatch}:{} )};save();}}catch(error){finish(-1,error.message);}
   }
   function renew(){if(running&&state.worker&&store.snapshot().runLease?.token===state.worker.token)store.renewRun(state.worker.token);}
-  const status=()=>{clearRecoveredLoginError();return {enabled:config().enabled===true,running,workerScope:state.worker?.scope??null,shoppingBatch:state.worker?.shoppingBatch??null,attempts:state.attempts??0,dailyFullFallback:config().dailyFullFallback===true,dailyFull:state.daily??null,lastStartedAt:state.lastStartedAt??null,lastFinishedAt:state.lastFinishedAt??null,retryAt:state.retryAt??null,lastError:state.lastError??null};};
+  const status=()=>{clearRecoveredLoginError();return {enabled:config().enabled===true,running,workerScope:state.worker?.scope??null,shoppingBatch:state.worker?.shoppingBatch??null,sourceChanges:{...state.sourceBudget},attempts:(state.lastWorkScope==='kildeendringer'?state.sourceBudget.attempts:state.attempts)??0,dailyFullFallback:config().dailyFullFallback===true,dailyFull:state.daily??null,lastStartedAt:state.lastStartedAt??null,lastFinishedAt:state.lastFinishedAt??null,retryAt:(state.lastWorkScope==='handel'?state.retryAt:state.sourceBudget.retryAt??state.retryAt)??null,lastError:state.lastError??null};};
   function resumeAfterLogin(){
     if(!/innlogging/.test(state.lastError??''))throw Error('Ingen registrert ChatGPT-innloggingsfeil å gjenoppta.');
     if(running)return status();
-    state.retryAt=null;state.attempts=0;
+    state.retryAt=null;state.attempts=0;state.sourceBudget={attempts:0,lastSignature:null,retryAt:null};
     if(state.daily?.day===osloDayAndHour(clock()).day){state.daily.retryAt=null;state.daily.attempts=0;}
     save();retryAfterLogin=true;tick();return status();
   }

@@ -9,6 +9,22 @@ function shoppingDispatchFixture(initialRows,config={},resources=undefined) {
   return {dispatcher,clock,queue,launches,store,close(){assert.ok(dir.startsWith(join(tmpdir(),'familien-dispatch-batch-')));rmSync(dir,{recursive:true,force:true});}};
 }
 
+test('unchanged blocked source work cannot be restarted by shopping arrivals or starve independent shopping',()=>{
+ const f=shoppingDispatchFixture([{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1',sourceFingerprint:'one'}]);
+ const sources=[{source:'spond',externalId:'blocked-original',listingHash:'same',reason:'Actual source is blocked'}];f.store.reviewQueue=()=>({items:sources});
+ try{
+  f.dispatcher.tick();assert.equal(f.dispatcher.status().workerScope,'kildeendringer');f.launches[0].onExit(0);
+  f.queue.rows.push({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:2',sourceFingerprint:'two'});f.clock.at+=16*60000;f.dispatcher.tick();assert.equal(f.dispatcher.status().workerScope,'handel');assert.equal(f.dispatcher.status().sourceChanges.attempts,1);f.launches[1].onExit(0);
+  sources.push({source:'vigilo',externalId:'genuine-new-item',listingHash:'new',reason:'Actual new source content'});f.clock.at+=16*60000;f.dispatcher.tick();assert.equal(f.dispatcher.status().workerScope,'kildeendringer','genuinely new source work still preempts shopping');f.launches[2].onExit(0);
+ }finally{f.close();}
+});
+test('a single shopping task does not inherit an unrelated original-resource retry pause',()=>{
+ const retry='2026-11-10T04:00:00Z',resources={list:({status}={})=>status==='ready'?[]:[{status:'error',authRequired:true,attempts:3,fileName:'Original.pdf',retryAt:retry}]};
+ const f=shoppingDispatchFixture([{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1',sourceFingerprint:'one'}],{},resources),snapshot=f.store.snapshot;
+ f.store.snapshot=()=>({...snapshot(),rawItems:{raw:{source:'spond',externalId:'original',revision:1}}});f.store.completionReport=()=>({profileReviews:[],missingDrive:[{rawId:'raw',kind:'source-original',fileName:'Original.pdf'}],unsyncedCalendar:[]});
+ try{f.dispatcher.tick();assert.equal(f.dispatcher.status().workerScope,'handel');assert.equal(f.dispatcher.status().sourceChanges.retryAt,Date.parse(retry));f.launches[0].onExit(0);}finally{f.close();}
+});
+
 test('a failed source phase cannot bless a new ready-original signal with its older checkpoint',()=>{
   let ready=false;const resources={list:()=>ready?[{id:'original',source:'spond',refs:['source-original'],status:'ready',sha256:'new-original-bytes'}]:[]};
   const f=shoppingDispatchFixture([{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1',sourceFingerprint:'one'}],{dailyFullFallback:true},resources);
