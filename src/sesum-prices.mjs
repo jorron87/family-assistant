@@ -263,10 +263,12 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
   if(staged.size){for(const [key,row] of staged)state.products[key]=row;state.revision++;save();}
   return {observed:staged.size,reviewed:[...staged.values()].filter(row=>validBridge(row,state.bridges[row.sourceKey],rawReader())).length,pending:[...staged.values()].filter(row=>!validBridge(row,state.bridges[row.sourceKey],rawReader())).length};
  }
- function candidates(familyId=null){
+ function candidates(familyId=null,sourceKey=null){
   if(familyId!==null&&!stable(familyId))throw Error('Invalid Sesum family ID.');
+  if(sourceKey!==null&&(typeof sourceKey!=='string'||!/^sesum:[A-Z0-9_]+:[1-9]\d*$/.test(sourceKey)))return [];
   const base=rawReader(),products=base?.index().products??{};
-  return Object.values(state.products).filter(row=>familyId===null||row.familyIds.includes(familyId)).map(row=>{
+  const selected=sourceKey===null?Object.values(state.products):Object.hasOwn(state.products,sourceKey)?[state.products[sourceKey]]:[];
+  return selected.filter(row=>familyId===null||row.familyIds.includes(familyId)).map(row=>{
    const source=row.source,sourcePack=packOf(source),donors=[];
    for(const productKey of findDonors(base,source)){
     const p=products[productKey];

@@ -7,7 +7,7 @@ export function reconcileSourceReviews(status,runs,at=Date.now()){
  let changed=0;
  for(const run of [...runs].sort((a,b)=>Date.parse(a.finishedAt)-Date.parse(b.finishedAt))){
   const finished=Date.parse(run.finishedAt);
-  if(run.scope!=='alle'||!health.has(run.outcome)||!run.id||!Number.isFinite(finished)||finished>at||!Array.isArray(run.sources))continue;
+  if(run.scope!=='alle'||run.sourcePhase!=null||!health.has(run.outcome)||!run.id||!Number.isFinite(finished)||finished>at||!Array.isArray(run.sources))continue;
   for(const entry of run.sources){
    if(!entry||typeof entry!=='object'||!sources.has(entry.source)||!health.has(entry.health)||text(entry.details,3000).length<12)continue;
    if(run.sources.filter(row=>row?.source===entry.source).length!==1)continue;

@@ -1,19 +1,60 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execFile } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readdirSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { createServer } from 'node:http';
 
 const run = promisify(execFile);
+function syntheticConfig(dir){
+  const target=join(dir,'config');mkdirSync(target);
+  for(const name of readdirSync('config').filter(name=>name.endsWith('.example.json')))copyFileSync(join('config',name),join(target,name.replace('.example.json','.json')));
+  return target;
+}
+
+test('shopping-queue and next expose a bounded cohort while full exports every backend row',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'familien-cli-batch-')),config=syntheticConfig(dir);
+  const shopping=Array.from({length:8000},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+i,sourceFingerprint:'current-'+i}));
+  const data={'/api/shopping/queue':shopping,'/api/phone/inbox':[],'/api/calendar-actions':[],'/api/completion':{complete:false,counts:{shoppingPending:8000}},'/api/review-queue':{items:[]},'/api/activities':{sources:[]},'/api/collector/status':{},'/api/activity-feed':{changedPages:[]}};
+  const server=createServer((req,res)=>{res.setHeader('content-type','application/json');res.end(JSON.stringify(data[req.url]??{}));});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const cli=async(...args)=>JSON.parse((await run(process.execPath,['src/cli.mjs',...args],{env:{...process.env,FAMILIEN_CONFIG_DIR:config,FAMILIEN_API:'http://127.0.0.1:'+server.address().port},maxBuffer:5*1024*1024})).stdout);
+  try{
+    const view=await cli('shopping-queue');assert.equal(view.shopping.length,20);assert.equal(view.shoppingSummary.total,8000);assert.equal(view.shoppingSummary.shown,20);assert.equal(view.shoppingSummary.remaining,7980);assert.match(view.shoppingSummary.resumeHint,/next/);
+    const full=await cli('shopping-queue','--full');assert.equal(full.length,8000);assert.deepEqual(full.at(-1),shopping.at(-1));
+    const exact=await cli('shopping-queue','--type','shopping-sesum-placement-review','--id','sesum-product:7999');assert.equal(exact.shopping.length,1);assert.equal(exact.shopping[0].sourceKey,'sesum-product:7999');
+    const batch=await cli('batch',JSON.stringify([{cmd:'shopping-queue',args:['--type','shopping-sesum-placement-review','--id','sesum-product:7999']},{cmd:'shopping-queue',args:['--id','sesum-product:7998'],flags:['--full']}]));
+    assert.equal(batch.ok,true);assert.equal(batch.results[0].result.shopping.length,1);assert.equal(batch.results[0].result.shopping[0].sourceKey,'sesum-product:7999');assert.deepEqual(batch.results[1].result,[shopping[7998]]);
+    const next=await cli('next');assert.equal(next.shopping.length,20);assert.equal(next.work.length,20);assert.equal(next.remaining,8000);assert.equal(next.moreWork,7980);assert.equal(next.counts.shoppingPending,8000);
+    assert.equal((await cli('next','--full')).shopping.length,8000);assert.equal(shopping.length,8000);
+  }finally{await new Promise(resolve=>server.close(resolve));assert.ok(dir.startsWith(join(tmpdir(),'familien-cli-batch-')));rmSync(dir,{recursive:true,force:true});}
+});
+
+test('Sesum candidate summaries are bounded and exact source reads preserve the raw identity evidence',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'familien-cli-candidates-')),config=syntheticConfig(dir),seen=[];
+  const rows=Array.from({length:30},(_,i)=>({sourceKey:'sesum:KIWI:'+i,sourceFingerprint:'source-'+i,status:'pending',source:{name:'Synthetic food '+i},familyIds:['family-a'],donors:[{productKey:'kassal:KIWI:'+i,product:{ingredients:'Actual synthetic full ingredient label'}}]}));
+  const server=createServer((req,res)=>{const query=new URL(req.url,'http://local.test').searchParams;seen.push(query);res.setHeader('content-type','application/json');res.end(JSON.stringify(query.has('sourceKey')?rows.filter(row=>row.sourceKey===query.get('sourceKey')):rows));});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const cli=async(...args)=>JSON.parse((await run(process.execPath,['src/cli.mjs',...args],{env:{...process.env,FAMILIEN_CONFIG_DIR:config,FAMILIEN_API:'http://127.0.0.1:'+server.address().port}})).stdout);
+  try{
+    const view=await cli('shopping-sesum-candidates');assert.equal(view.items.length,20);assert.equal(view.total,30);assert.equal(view.remaining,10);assert.equal(view.items[0].donorCount,1);assert.equal(view.items[0].donors,undefined);
+    const exact=await cli('shopping-sesum-candidates','family-a','--source','sesum:KIWI:25');assert.deepEqual(exact,[rows[25]]);assert.ok(seen.some(q=>q.get('familyId')==='family-a'&&q.get('sourceKey')==='sesum:KIWI:25'));
+    assert.deepEqual(await cli('shopping-sesum-candidate','sesum:KIWI:25'),[rows[25]]);assert.deepEqual(await cli('shopping-sesum-candidates','--source','sesum:KIWI:'),[]);
+    const batch=await cli('batch',JSON.stringify([{cmd:'shopping-sesum-candidates',args:['family-a','--source','sesum:KIWI:26']},{cmd:'shopping-sesum-candidates',args:['--source','sesum:KIWI:27'],flags:['--full']} ]));
+    assert.equal(batch.ok,true);assert.deepEqual(batch.results[0].result,[rows[26]]);assert.deepEqual(batch.results[1].result,[rows[27]]);assert.ok(seen.some(q=>q.get('familyId')==='family-a'&&q.get('sourceKey')==='sesum:KIWI:26'));assert.ok(!seen.some(q=>q.get('familyId')==='--source'));
+    assert.deepEqual(await cli('shopping-sesum-candidates','--full'),rows);
+  }finally{await new Promise(resolve=>server.close(resolve));assert.ok(dir.startsWith(join(tmpdir(),'familien-cli-candidates-')));rmSync(dir,{recursive:true,force:true});}
+});
 
 test('cli: intake med markReviewed/profileReview og observe-list med surfaceStatus i ett kall hver', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'familien-cli-'));
   const port = 14340;
   const api = `http://127.0.0.1:${port}`;
-  const child = spawn(process.execPath, ['src/server.mjs'], { env: { ...process.env, FAMILIEN_PORT: String(port), FAMILIEN_DATA_DIR: dir, CODEX_HOME: dir }, stdio: 'ignore' });
-  const cli = async (...args) => JSON.parse((await run(process.execPath, ['src/cli.mjs', ...args], { env: { ...process.env, FAMILIEN_API: api } })).stdout);
+  const config=syntheticConfig(dir);
+  const child = spawn(process.execPath, ['src/server.mjs'], { env: { ...process.env, FAMILIEN_CONFIG_DIR:config,FAMILIEN_NO_DISPATCH:'1', FAMILIEN_PORT: String(port), FAMILIEN_DATA_DIR: dir, CODEX_HOME: dir }, stdio: 'ignore' });
+  const cli = async (...args) => JSON.parse((await run(process.execPath, ['src/cli.mjs', ...args], { env: { ...process.env, FAMILIEN_CONFIG_DIR:config,FAMILIEN_API: api } })).stdout);
   try {
     for (let i = 0; i < 100; i++) {
       try { if ((await fetch(`${api}/health`)).ok) break; } catch {}
@@ -86,8 +127,8 @@ test('cli: intake med markReviewed/profileReview og observe-list med surfaceStat
       assert.equal((await cli('runs')).filter(item=>item.summary==='Kjøringen fant et kildehull.').length,1);
     } finally { await cli('end-run',lease.token); }
   } finally {
-    const done = new Promise((r) => child.once('exit', r));
-    child.kill();
+    const done = child.exitCode!==null?Promise.resolve():new Promise((r) => child.once('exit', r));
+    if(child.exitCode===null)child.kill();
     await done;
     assert.ok(dir.startsWith(join(tmpdir(), 'familien-cli-')));
     rmSync(dir, { recursive: true, force: true });

@@ -68,10 +68,13 @@ test('run reports reject shopping success while collection remains, preserve pho
   store.shopping.settings({monitoringEnabled:true,stores:[]});
   let report=store.completionReport();
   assert.equal(report.shopping.work.length,0);assert.equal(report.shopping.complete,false);assert.equal(report.counts.shoppingPending,0);
-  assert.equal(report.counts.shoppingCollectionPending,1);assert.equal(store.changeCompletion().counts.shoppingCollectionPending,1);assert.equal(store.changeCompletion().complete,false);
-  assert.throws(()=>store.recordRun({scope:'handel',outcome:'ok',summary:'Synthetic completion attempt',sources:[]}),/restanser/);
+  assert.equal(report.counts.shoppingCollectionPending,1);assert.equal(store.changeCompletion().counts.shoppingCollectionPending,undefined);assert.equal(store.changeCompletion().complete,true);
+  assert.doesNotThrow(()=>store.recordRun({scope:'kildeendringer',outcome:'ok',summary:'Independent source changes complete',sources:[]}));
+  for(const scope of ['handel','alle'])assert.throws(()=>store.recordRun({scope,outcome:'ok',summary:'Synthetic completion attempt',sources:[]}),/restanser/);
   assert.doesNotThrow(()=>store.recordRun({scope:'familiehandlinger',outcome:'ok',summary:'Independent phone actions complete',sources:[]}));
   fail=true;report=store.completionReport();assert.equal(report.shopping.complete,false);assert.equal(report.counts.shoppingCollectionBlocked,1);assert.equal(report.counts.shoppingBlocked,1);
+  assert.doesNotThrow(()=>store.recordRun({scope:'kildeendringer',outcome:'ok',summary:'Source changes remain independent of collection failure',sources:[]}));
+  for(const scope of ['handel','alle'])assert.throws(()=>store.recordRun({scope,outcome:'ok',summary:'Collection failure still prevents completion',sources:[]}),/restanser/);
   fail=false;current={enabled:false,status:'disabled'};
   assert.equal(store.shopping.completion().complete,true);assert.equal('shoppingCollectionPending' in store.completionReport().counts,false);
   current={enabled:true,status:'not_started'};store.shopping.settings({monitoringEnabled:false});

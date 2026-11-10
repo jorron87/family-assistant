@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { collectorIsFresh } from './collector.mjs';
+import { shoppingWorkBatch, shoppingWorkCount, filterShoppingWork } from './shopping-work-batch.mjs';
 
 // FILE-argumenter kan være en fil, `-` (stdin) eller inline JSON. Det sparer agenten for midlertidige filer.
 export function readJsonArg(arg, stdin = () => readFileSync(0, "utf8")) {
@@ -16,15 +17,9 @@ const cap = (list) => Array.isArray(list) && list.length > LIST_LIMIT ? [...list
 
 // Keep queue counts authoritative without sending thousands of review
 // fingerprints into every agent turn. This is a view, never a queue mutation.
-export function shoppingOverview(queue = [], { full = false } = {}) {
-  const shopping = full ? queue : queue.slice(0, LIST_LIMIT);
-  const byType = {};
-  for (const item of queue) byType[item.do] = (byType[item.do] ?? 0) + 1;
-  return {
-    shopping,
-    shoppingSummary: { total: queue.length, shown: shopping.length, remaining: queue.length - shopping.length, byType,
-      ...(shopping.length < queue.length ? { hint: 'Read next again after each batch; next --full retains every row for an explicit export.' } : {}) }
-  };
+export function shoppingOverview(queue = [], { full = false, type = null, id = null } = {}) {
+  const { items: shopping, summary: shoppingSummary } = shoppingWorkBatch(filterShoppingWork(queue,{type,id}), { full });
+  return { shopping, shoppingSummary };
 }
 
 // completion uten historikk (blokkerer aldri) og med kappede lister; counts er alltid fullstendig.
@@ -80,9 +75,12 @@ export function buildNext({ phone, calendarActions, completion, queue, activitie
   for(const id of new Set((feed?.facebookActivities??[]).map(item=>item.sourceId)))work.push({do:'activity-facebook',id,hint:'node src/cli.mjs activity-facebook '+id});
   for (const id of feed?.changedPages ?? []) work.push({ do: 'activity-page', id, hint: 'node src/cli.mjs activity-page ' + id });
   for (const source of activities?.pending ?? []) work.push({ do: "activity-source", id: source.sourceId, name: source.name, reason: source.reason });
-  work.push(...shopping);
+  const remaining = work.length + shoppingWorkCount(shopping);
+  const visible = work.slice(0, 40);
+  const batch = shoppingWorkBatch(shopping, { limit: Math.min(LIST_LIMIT, Math.max(0, 40 - visible.length)) });
+  visible.push(...batch.items);
   const collectorGaps=Object.entries(collector?.supplemental??{}).filter(([,status])=>status.health!=='ok').map(([surface,status])=>({surface,...status}));
-  return { complete: completion?.complete === true && !work.length, collector: collectorSummary(collector, now),collectorGaps,counts: completion?.counts, remaining: work.length, work: work.slice(0, 40), moreWork: Math.max(0, work.length - 40), horizon: new Date(soon).toISOString().slice(0, 10) };
+  return { complete: completion?.complete === true && !remaining, collector: collectorSummary(collector, now),collectorGaps,counts: completion?.counts, remaining, work: visible, moreWork: Math.max(0, remaining - shoppingWorkCount(visible)), horizon: new Date(soon).toISOString().slice(0, 10) };
 }
 
 // ---- Kompakte svar. Skrivekommandoene trenger en kvittering, ikke hele objektet tilbake i konteksten. `--full` gir alt. ----

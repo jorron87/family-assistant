@@ -40,7 +40,9 @@ test('shopping wakes the shared dispatcher in its own scope and unfinished work 
  try{
   const store=createStore(dir);store.shopping.settings({monitoringEnabled:true,stores:[{id:'shop',name:'Butikk',url:'https://example.com/flyer'}]});
   assert.equal(changeSignal(store).shoppingOnly,true);
-  for(const scope of ['handel','kildeendringer','alle'])assert.throws(()=>store.recordRun({scope,outcome:'ok',summary:'Kontrollert'}),/restanser/);
+  for(const scope of ['handel','alle'])assert.throws(()=>store.recordRun({scope,outcome:'ok',summary:'Kontrollert'}),/restanser/);
+  assert.doesNotThrow(()=>store.recordRun({scope:'kildeendringer',outcome:'ok',summary:'Independent source changes are complete'}));
+  assert.equal(store.changeCompletion().complete,true,'source-change scope does not certify or drain unfinished shopping');
   const d=createIngestionDispatcher({store,root:dir,dataDir:dir,clock:()=>at,readConfig:()=>({enabled:true,minGapMinutes:0}),launch:input=>{calls.push(input);return {pid:process.pid};}});
   d.tick();assert.equal(calls.length,1);assert.equal(d.status().workerScope,'handel');assert.match(calls[0].prompt,/shopping-product-review/);assert.match(calls[0].prompt,/completion.shopping/);
   store.shopping.review({storeId:'shop',status:'ok',evidence:'Gjennomgått alle sider i syntetisk avis',sourceUrl:'https://example.com/flyer',nextCheck:'2099-01-01'});
@@ -79,13 +81,15 @@ test('short-dated quantities cannot outlast the remaining days or resurrect expi
  assert.equal(shelfWithDate(12,'2026-11-07',at),0);assert.ok(shelfWithDate(12,'2026-11-09',at)<.1);assert.equal(shelfWithDate(1,'2027-11-08',at),1);
 });
 
-test('new work arriving during the last attempt gets its own retry budget',()=>{
+test('tail arrivals preserve a failed cohort budget until its assigned work actually progresses',()=>{
  const dir=mkdtempSync(join(tmpdir(),'family-shopping-new-work-'));let at=Date.now(),calls=[];
  try{
   const store=createStore(dir),one={id:'one',name:'Butikk en',url:'https://example.com/one'},two={id:'two',name:'Butikk to',url:'https://example.com/two'};
   store.shopping.settings({monitoringEnabled:true,stores:[one]});
   const d=createIngestionDispatcher({store,root:dir,dataDir:dir,clock:()=>at,readConfig:()=>({enabled:true,minGapMinutes:0}),launch:input=>{calls.push(input);return {pid:process.pid};}});
   for(let i=0;i<3;i++){d.tick();assert.equal(calls.length,i+1);if(i===2)store.shopping.settings({stores:[one,two]});calls[i].onExit(0);at+=121*60000;}
-  d.tick();assert.equal(calls.length,4);calls[3].onExit(0);
+  d.tick();assert.equal(calls.length,3,'a new tail store cannot restart the unchanged failed store forever');
+  store.shopping.review({storeId:'one',status:'ok',evidence:'All pages of this actually assigned synthetic flyer were read.',sourceUrl:one.url,nextCheck:'2099-01-01'});
+  d.tick();assert.equal(calls.length,4,'actual assigned progress opens the next store cohort');assert.equal(d.status().shoppingBatch.items[0].storeId,'two');calls[3].onExit(0);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });

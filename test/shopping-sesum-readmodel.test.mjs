@@ -31,20 +31,24 @@ function fixture(){
   }
   const candidates=()=>shop.sesumCandidates(),candidate=id=>candidates().find(row=>row.sourceKey==='sesum:KIWI:'+id),family=(id,familyId)=>candidate(id).families.find(row=>row.familyId===familyId);
   const scoped=(id,status,extra={},familyId='organic')=>{const current=candidate(id),context=current.families.find(f=>f.familyId===familyId);return shop.sesumPriceReview({sourceKey:current.sourceKey,sourceFingerprint:current.sourceFingerprint,registrationFingerprint:context.registrationFingerprint,status,familyIds:[familyId],familyFingerprints:{[familyId]:context.requirementsFingerprint},equivalenceEvidence:'The exact current source is considered only for this specific household family.',...extra});};
-  return {index,state,shop,clock,candidates,candidate,family,scoped,ingest};
+  // A previously persisted explicit family review remains independent debt
+  // when a newer queue contract introduces whole-set placement first.
+  const priorBlocked=id=>{const current=candidate(id),context=current.families.find(f=>f.familyId==='organic');state.shopping.sesumFamilyReviews[current.sourceKey]={organic:{status:'blocked',sourceFingerprint:current.sourceFingerprint,familyFingerprint:context.requirementsFingerprint,registrationFingerprint:context.registrationFingerprint,evidence:'A separately recorded earlier review requires the actual organic declaration.',reason:'The actual original organic declaration remains unknown.',retryAt:'2026-11-11T12:00:00Z',reviewedAt:NOW}};};
+  return {index,state,shop,clock,candidates,candidate,family,scoped,ingest,priorBlocked};
 }
 
 test('family-review reads observe scoped exclusions, blocks and reopening immediately without crossing families or sources',()=>{
   const f=fixture();
-  for(const id of ['71','72']){assert.equal(f.family(id,'plain').familyReview,null);assert.equal(f.family(id,'organic').familyReview.status,'pending');}
+  for(const id of ['71','72']){assert.equal(f.family(id,'plain').familyReview,null);assert.equal(f.family(id,'organic').familyReview,null,'a raw organic hint never opens new family research before placement');}
   f.scoped('71','excluded');
   assert.equal(f.family('71','organic').sourceDecision.status,'excluded');assert.equal(f.family('71','organic').familyReview,null);
-  assert.equal(f.family('72','organic').familyReview.status,'pending','another source in the same family is still unresolved');
+  assert.equal(f.family('72','organic').familyReview,null,'another source still awaits its own whole-set placement');
   assert.equal(f.family('71','plain').sourceDecision,null,'a scoped organic exclusion cannot spread to the plain family');
   assert.equal(f.shop.familyView().items.find(row=>row.id==='plain').prices.current,40,'the actually approved plain family remains usable');
-  f.scoped('72','blocked',{reason:'The actual organic declaration is missing from the current original label.',retryAt:'2026-11-11T12:00:00Z'});
+  f.priorBlocked('72');f.scoped('72','blocked',{reason:'The actual organic declaration is missing from the current original label.',retryAt:'2026-11-11T12:00:00Z'});
   assert.equal(f.family('72','organic').familyReview.status,'blocked');assert.equal(f.family('72','organic').familyReview.retryAt,'2026-11-11T12:00:00Z');
-  f.scoped('71','reopen');assert.equal(f.family('71','organic').sourceDecision,null);assert.equal(f.family('71','organic').familyReview.status,'pending');
+  f.scoped('71','reopen');assert.equal(f.family('71','organic').sourceDecision,null);assert.equal(f.family('71','organic').familyReview,null,'an explicit reopened negative returns to current placement before new family research');
+  assert.ok(f.shop.queue().some(row=>row.sourceKey==='sesum:KIWI:71'&&row.do==='shopping-sesum-placement-review'));
   assert.equal(f.family('72','organic').familyReview.status,'blocked','reopening one source cannot erase another source block');
 });
 
@@ -61,17 +65,19 @@ test('source, household criteria and current group changes invalidate the next f
 
 test('repeated reads recheck actual price freshness and parked family work when the clock changes',()=>{
   const f=fixture();f.scoped('71','excluded');
+  f.priorBlocked('72');
+  f.scoped('72','blocked',{reason:'The actual organic declaration remains unknown after a separately recorded scoped review.',retryAt:'2026-11-11T12:00:00Z'});
   const plain=()=>f.shop.familyView().items.find(row=>row.id==='plain');
-  assert.equal(plain().prices.current,40);assert.equal(f.family('72','organic').familyReview.status,'pending');
+  assert.equal(plain().prices.current,40);assert.equal(f.family('72','organic').familyReview.status,'blocked');
   f.clock.at=new Date(Date.parse(NOW)+49*3600000).toISOString();
   assert.equal(plain().prices.current,null,'an earlier API read cannot keep an expired source or native quote fresh');
-  assert.equal(f.family('72','organic').familyReview.status,'pending','stale prices within the source horizon do not fabricate family approval');
+  assert.equal(f.family('72','organic').familyReview.status,'blocked','stale prices within the source horizon do not erase explicit scoped research debt');
   f.ingest('72',{},f.clock.at);assert.equal(plain().prices.current,40,'a genuinely newer actual receipt restores the current shared quote');
-  assert.equal(f.family('72','organic').familyReview.status,'pending');
+  assert.equal(f.family('72','organic').familyReview.status,'blocked');
   f.clock.at=new Date(Date.parse(NOW)+186*86400000).toISOString();
   assert.equal(f.family('72','organic').familyReview,null,'a product older than the actual-price horizon creates no family review work');
   assert.equal(plain().prices.current,null);
-  f.ingest('72',{},f.clock.at);assert.equal(f.family('72','organic').familyReview.status,'pending');assert.equal(plain().prices.current,40);
+  f.ingest('72',{},f.clock.at);assert.equal(f.family('72','organic').familyReview.status,'blocked');assert.equal(plain().prices.current,40);
   assert.equal(f.family('71','organic').sourceDecision.status,'excluded','expiry and unrelated receipt updates cannot erase a durable source-specific negative');
 });
 

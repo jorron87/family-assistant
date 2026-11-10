@@ -30,7 +30,7 @@ test('all followed families enter the manifest and price observations require an
   for(let i=0;i<100;i++)f.shop.watch({name:`Family ${i}`,unit:'kg',storage:'pantry'});
   const rows=f.shop.sesumFamilies();assert.equal(rows.length,101);assert.ok(rows.every(r=>r.familyId&&r.queries.length&&r.requirementsFingerprint));
   assert.equal(f.shop.familyView().items.find(i=>i.id===f.w.id).prices.current,60);
-  f.ingest();assert.ok(f.shop.queue().some(q=>q.do==='shopping-sesum-review'));
+  f.ingest();assert.ok(f.shop.queue().some(q=>q.do==='shopping-sesum-placement-review'));assert.ok(!f.shop.queue().some(q=>q.do==='shopping-sesum-review'),'the full family placement is the first source research stage');
   assert.equal(f.shop.familyView().items.find(i=>i.id===f.w.id).prices.current,60,'observation never approves a source mapping');
   f.approve();assert.equal(f.shop.familyView().items.find(i=>i.id===f.w.id).prices.current,40,'500g pack price is recomputed, rawUnitPrice is ignored');
   assert.equal(f.shop.familyView().items.find(i=>i.id===f.w.id).prices.currentSourceUrl,'https://www.sesum.no/produkt/71-test-whole-beans-500g','the displayed price links to its actual source receipt while native metadata URLs remain unchanged');
@@ -194,7 +194,7 @@ for(const actualPrice of [true,false])test(`an entirely new Sesum SKU with ${act
   const quote={storeCode:'KIWI',price:15,observedAt:actualPrice?NOW:null,source:actualPrice?'receipt_realtime':null,isPromo:false};
   const f=setup(t),newProduct={id:'72',name:'New brand whole beans 500g',brand:'New brand',ean:null,weight:500,weightUnit:'g',soldByWeight:false,sourceUrl:'https://www.sesum.no/produkt/72-new-brand-whole-beans-500g',prices:actualPrice?[quote]:[],priceCandidates:actualPrice?[]:[{...quote,reason:'missing_price_provenance'}]};
   f.shop.sesumReceivePrices({familyIds:[f.w.id],fetchedAt:NOW,products:[newProduct]});
-  assert.ok(f.shop.queue().some(q=>q.do==='shopping-sesum-discovery'&&q.sourceKey==='sesum:KIWI:72'),'missing barcode and donor is research work');
+  assert.ok(f.shop.queue().some(q=>q.do==='shopping-sesum-placement-review'&&q.sourceKey==='sesum:KIWI:72'),'missing barcode and donor begin with complete family-placement research');
   assert.equal(f.shop.familyView().items[0].prices.current,60);
   const candidate=f.shop.sesumCandidates(f.w.id).find(p=>p.sourceKey==='sesum:KIWI:72');
   assert.deepEqual(candidate.donors,[]);
@@ -211,7 +211,7 @@ for(const actualPrice of [true,false])test(`an entirely new Sesum SKU with ${act
   f.clock.at='2026-11-09T12:01:00Z';
   f.shop.sesumReceivePrices({familyIds:[f.w.id],fetchedAt:f.clock.at,products:[{...newProduct,name:'New brand ground coffee 500g'}]});
   assert.equal(f.shop.familyView().items[0].prices.current,60,'changed source metadata withdraws the researched native membership and price');
-  assert.ok(f.shop.queue().some(q=>q.do==='shopping-sesum-discovery'&&q.sourceKey==='sesum:KIWI:72'));
+  assert.ok(f.shop.queue().some(q=>q.do==='shopping-sesum-placement-review'&&q.sourceKey==='sesum:KIWI:72'));
 });
 
 test('a false-positive search match excludes only the reviewed family and reopens on changed requirements',t=>{
@@ -223,15 +223,15 @@ test('a false-positive search match excludes only the reviewed family and reopen
   const candidate=f.shop.sesumCandidates()[0];
   const reject=familyIds=>f.shop.sesumPriceReview({sourceKey:candidate.sourceKey,sourceFingerprint:candidate.sourceFingerprint,status:'excluded',familyIds,familyFingerprints:Object.fromEntries(candidate.families.map(x=>[x.familyId,x.requirementsFingerprint])),equivalenceEvidence:'Read the source product: its contents are outside the requirements of these specific search families.'});
   assert.throws(()=>f.shop.sesumPriceReview({sourceKey:candidate.sourceKey,sourceFingerprint:candidate.sourceFingerprint,status:'excluded',equivalenceEvidence:'Wrong search match.'}),/familyIds/);
-  reject([f.w.id]);assert.deepEqual(work().familyIds,[other.id]);
+  reject([f.w.id]);assert.equal(work(),undefined,'raw OR hints do not start identity before complete placement');assert.equal(f.shop.sesumCandidates()[0].families.find(x=>x.familyId===f.w.id).sourceDecision.status,'excluded');
   const third=f.shop.watch({name:'A newly followed family',unit:'kg',storage:'pantry'});observe([third.id]);
-  assert.deepEqual(new Set(work().familyIds),new Set([other.id,third.id]),'a later relevant family is never globally suppressed by an earlier false search hit');
+  assert.equal(work(),undefined);assert.ok(f.shop.queue().some(q=>q.sourceKey==='sesum:KIWI:72'&&q.do==='shopping-sesum-placement-review'),'a newly followed family keeps complete placement active, never globally suppressed');
   reject([other.id]);
   const thirdCandidate=f.shop.sesumCandidates()[0];
   f.shop.sesumPriceReview({sourceKey:candidate.sourceKey,sourceFingerprint:candidate.sourceFingerprint,status:'excluded',familyIds:[third.id],familyFingerprints:{[third.id]:thirdCandidate.families.find(x=>x.familyId===third.id).requirementsFingerprint},equivalenceEvidence:'The actual product is also outside this third family.'});
   assert.equal(work(),undefined);
   assert.ok(f.shop.queue().some(q=>q.sourceKey==='sesum:KIWI:72'&&q.do==='shopping-sesum-placement-review'),'rejecting every wrong OR hint cannot close global family placement');
   f.shop.watch({...f.w,note:'The household changed this family requirement.'});
-  assert.deepEqual(work().familyIds,[f.w.id]);
+  assert.equal(work(),undefined);assert.ok(f.shop.queue().some(q=>q.sourceKey==='sesum:KIWI:72'&&q.do==='shopping-sesum-placement-review'),'changed requirements reopen the first research stage');
   assert.throws(()=>reject([f.w.id]),/endret/,'stale family requirements cannot suppress new research');
 });

@@ -49,7 +49,7 @@ export function validateActivityRun(coverage, report) {
   if (report.outcome === 'ok' && !coverage.complete) {
     throw new Error(`Aktivitetsgjennomgangen er ikke ferdig: ${coverage.pendingCount} av ${coverage.sourceCount} kilder gjenstår. Kjør activity-queue.`);
   }
-  if (['partial', 'needs_login', 'error'].includes(report.outcome)) {
+  if (['partial', 'needs_login', 'error', 'continued'].includes(report.outcome)) {
     // An untouched or too short successful checkpoint is unfinished work,
     // not evidence that the source is externally blocked. Record the actual
     // failed attempt on that source before reporting a blocked full run.

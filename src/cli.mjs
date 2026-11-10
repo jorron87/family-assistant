@@ -4,11 +4,13 @@ import { dirname } from "node:path";
 import { createHash } from "node:crypto";
 import { activityCoverage, validateActivityRun } from './activity-coverage.mjs';
 import { readJsonArg, slimCompletion, slimReviewQueue, slimResult, slimProfile, slimPhone, buildNext, shoppingOverview } from './cli-lib.mjs';
+import { filterShoppingWork } from './shopping-work-batch.mjs';
 
 const base = process.env.FAMILIEN_API ?? "http://127.0.0.1:4318";
 const rawArgs = process.argv.slice(2);
+const valueOptions=new Set(['--source','--type','--id']);
 const flags = new Set(rawArgs.filter((arg) => /^--[a-z-]+$/.test(arg)));
-const [command, ...args] = rawArgs.filter((arg) => !/^--[a-z-]+$/.test(arg));
+const [command, ...args] = rawArgs.filter((arg) => !/^--[a-z-]+$/.test(arg)||valueOptions.has(arg));
 const json = (arg) => readJsonArg(arg);
 const activityConfig = () => readConfig('activity-sources.json');
 const outputPath = (path) => { mkdirSync(dirname(path), { recursive: true }); return path; };
@@ -43,6 +45,16 @@ async function activityState() {
 
 // Utfører én kommando og returnerer det som skal vises. Brukes både direkte og fra `batch`.
 async function execute(command, args, flags) {
+  const options=new Map(),positionals=[];flags=new Set(flags);
+  for(let index=0;index<args.length;index++){
+    const arg=args[index];
+    if(valueOptions.has(arg)){
+      const value=args[++index];if(!value||value.startsWith('--')||options.has(arg))throw Error(arg+' requires one value in command args.');options.set(arg,value);
+    }else if(/^--[a-z-]+$/.test(arg))flags.add(arg);
+    else positionals.push(arg);
+  }
+  for(const name of valueOptions)if(flags.has(name)&&!options.has(name))throw Error(name+' requires one value in command args.');
+  args=positionals;const option=name=>options.get(name)??null;
   let result;
   switch (command) {
     case 'shopping': result=await request('/api/shopping');break;
@@ -50,14 +62,27 @@ async function execute(command, args, flags) {
     case 'shopping-sesum-refresh': result=await request('/api/shopping/sesum/refresh','POST',{});break;
     case 'shopping-sesum-retry': result=await request('/api/shopping/sesum/retry','POST',json(args[0]));break;
     case 'shopping-sesum-metadata-import': result=await request('/api/shopping/sesum/metadata-import','POST',{});break;
-    case 'shopping-sesum-candidates': result=await request('/api/shopping/sesum/candidates'+(args[0]?'?familyId='+encodeURIComponent(args[0]):''));break;
+    case 'shopping-sesum-candidate':
+    case 'shopping-sesum-candidates': {
+      const sourceKey=option('--source')??(command==='shopping-sesum-candidate'?args[0]:null),familyId=command==='shopping-sesum-candidate'?null:args[0];
+      if(command==='shopping-sesum-candidate'&&!sourceKey)throw Error('shopping-sesum-candidate requires an exact SOURCEKEY.');
+      const query=new URLSearchParams({...familyId?{familyId}:{},...sourceKey?{sourceKey}:{}}),rows=await request('/api/shopping/sesum/candidates'+(query.size?'?'+query:''));
+      if(flags.has('--full')||sourceKey){result=rows;break;}
+      const items=rows.slice(0,20).map(row=>({sourceKey:row.sourceKey,sourceFingerprint:row.sourceFingerprint,name:row.source?.name,status:row.status,receiptAt:row.price?.observedAt??null,familyCount:row.families?.length??row.familyIds?.length??0,donorCount:row.donors?.length??0}));
+      result={items,total:rows.length,shown:items.length,remaining:rows.length-items.length,resumeHint:'Read one source with shopping-sesum-candidates --source SOURCEKEY; --full exports the raw selected research rows.'};break;
+    }
     case 'shopping-sesum-placement': result=await request('/api/shopping/sesum/placement'+(args[0]?'?sourceKey='+encodeURIComponent(args[0]):''));break;
     case 'shopping-sesum-offers': result=await request('/api/shopping/sesum/offers'+(args[0]?'?familyId='+encodeURIComponent(args[0]):''));break;
     case 'shopping-sesum-offer-review': result=await request('/api/shopping/sesum/offer-review','POST',json(args[0]));break;
     case 'shopping-sesum-catalog': result=await request('/api/shopping/sesum/catalog'+(args[0]?'?familyId='+encodeURIComponent(args[0]):''));break;
     case 'shopping-sesum-review': result=await request('/api/shopping/sesum/review','POST',json(args[0]));break;
     case 'shopping-sesum-register': result=await request('/api/shopping/sesum/register','POST',json(args[0]));break;
-    case 'shopping-queue': result=await request('/api/shopping/queue');break;
+    case 'shopping-queue': {
+      const queue = await request('/api/shopping/queue');
+      const type=option('--type'),id=option('--id');
+      result = flags.has('--full') ? filterShoppingWork(queue,{type,id}) : shoppingOverview(queue,{type,id});
+      break;
+    }
     case 'stock-intake': result=await request('/api/shopping/stock-intake'+(args[0]?'/'+encodeURIComponent(args[0]):''));break;
     case 'stock-review': result=await request('/api/shopping/stock-review','POST',json(args[0]));break;
     case 'stock-export': {

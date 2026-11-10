@@ -19,8 +19,31 @@ test('large shopping queues stay bounded without losing counts, priority or expo
   assert.equal(next.complete, false);
   assert.equal(next.work[0].do, 'phone');
   assert.equal(next.remaining, 10001);
-  assert.equal(next.moreWork, 9961);
+  assert.equal(next.moreWork, 9980);
+  assert.equal(next.work.filter(item=>item.do.startsWith('shopping-')).length,20);
   assert.ok(JSON.stringify({ ...next, ...view }).length < 10000);
+});
+
+test('market refresh families share the real shopping work budget and full export stays raw',()=>{
+  const watchIds=Array.from({length:91},(_,i)=>'family-'+i),aggregate={do:'shopping-market-refresh',groups:91,watchIds};
+  const queue=Object.freeze([{do:'shopping-review',storeId:'one'},aggregate,{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1'}]);
+  const view=shoppingOverview(queue);
+  assert.equal(view.shopping.length,2);assert.deepEqual(view.shopping[1].watchIds,watchIds.slice(0,19));assert.equal(view.shopping[1].groups,19);
+  assert.deepEqual(view.shoppingSummary.byType,{'shopping-review':1,'shopping-market-refresh':91,'shopping-sesum-placement-review':1});
+  assert.equal(view.shoppingSummary.total,93);assert.equal(view.shoppingSummary.shown,20);assert.equal(view.shoppingSummary.remaining,73);assert.match(view.shoppingSummary.resumeHint,/next/);
+  assert.equal(aggregate.watchIds.length,91);assert.equal(aggregate.groups,91);
+  const full=shoppingOverview(queue,{full:true});assert.equal(full.shopping,queue);assert.equal(full.shoppingSummary.shown,93);assert.equal(full.shoppingSummary.remaining,0);
+  const next=buildNext({phone:[{id:'priority',status:'queued'}],shopping:queue,completion:{complete:false}});
+  assert.equal(next.work[0].do,'phone');assert.equal(next.remaining,94);assert.equal(next.moreWork,73);assert.deepEqual(next.work.at(-1).watchIds,watchIds.slice(0,19));
+});
+
+test('family stock and list work stays visible and exact type or id filters reach beyond a large source queue',()=>{
+  const queue=[...Array.from({length:8000},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+i})),{do:'shopping-list-route',id:'list-one'},{do:'shopping-stock-review',id:'stock-one'}];
+  const view=shoppingOverview(queue);assert.equal(view.shopping[0].id,'stock-one');assert.equal(view.shopping[1].id,'list-one');assert.equal(view.shoppingSummary.total,8002);
+  assert.deepEqual(shoppingOverview(queue,{type:'shopping-list-route'}).shopping,[queue[8000]]);
+  assert.deepEqual(shoppingOverview(queue,{id:'sesum-product:7999'}).shopping,[queue[7999]]);
+  assert.deepEqual(shoppingOverview(queue,{type:'shopping-stock-review',id:'stock-one',full:true}).shopping,[queue[8001]]);
+  assert.equal(queue[0].sourceKey,'sesum-product:0','presentation priority never mutates the underlying queue');
 });
 
 test('compact completion retains blocked shopping and exact counts past the visible rows', () => {

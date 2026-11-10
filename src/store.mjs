@@ -9,6 +9,8 @@ import { normalizeProfile, validateFact, learnFact, profileView } from "./profil
 import { mergeTask } from "./tasks.mjs";
 import { phoneStore } from './phone.mjs';
 import { shoppingStore } from './shopping.mjs';
+import { shoppingWorkBatch } from './shopping-work-batch.mjs';
+import { currentSourcePhase } from './source-phase-checkpoint.mjs';
 import {sourceIdentity} from './source-identity.mjs';
 import {normalizeWeeklyLetter} from './weekly-letters.mjs';
 import {recoveredSpondDiscovery} from './collector.mjs';
@@ -269,8 +271,13 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
     if (!entry.publishedAt || Date.parse(entry.publishedAt) >= cutoffAt(at) || (entry.updatedAt && Date.parse(entry.updatedAt) >= cutoffAt(at)) || (entry.retainUntil && Date.parse(entry.retainUntil) >= at)) return false;
     return !(entry.rawId && rawIsActive(state.rawItems[entry.rawId], at));
   }
-  function historicalOnly(surface) {
-    return surface.health === "partial" && surface.currentComplete === true && surface.historicalGap && Date.parse(surface.historicalGap.to) < cutoffAt() && surface.scanTo && Date.now()-Date.parse(surface.scanTo) < 12*3600000 && (!state.runLease || surface.scanTo >= state.runLease.startedAt);
+  function sourceLeaseStartedAt(){
+    const phase=currentSourcePhase(state);return phase.current?phase.checkpoint.startedAt:state.runLease?.startedAt;
+  }
+  function historicalOnly(surface,leaseStartedAt) {
+    if(!(surface.health === "partial" && surface.currentComplete === true && surface.historicalGap && Date.parse(surface.historicalGap.to) < cutoffAt() && surface.scanTo && Date.now()-Date.parse(surface.scanTo) < 12*3600000))return false;
+    const thisRun=leaseStartedAt===undefined?sourceLeaseStartedAt():leaseStartedAt;
+    return !thisRun || surface.scanTo >= thisRun;
   }
 
   function recentVigiloListing(surfaceName, info = collectorStatus().sources.vigilo) {
@@ -282,14 +289,14 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
       surface?.listingObservedAt >= sweep.at;
   }
 
-  function vigiloCoverage() {
+  function vigiloCoverage(leaseStartedAt) {
     const collectorInfo = collectorStatus().sources.vigilo;
+    const thisRun = leaseStartedAt===undefined?sourceLeaseStartedAt():leaseStartedAt;
     return vigiloMemberIds().flatMap((child) => VIGILO_SECTIONS.map((section) => {
       const surfaceName = `${child}:${section}`;
       const surface = state.surfaces[`vigilo:${surfaceName}`];
       const entries = Object.values(state.reviewLedger).filter((entry) => entry.source === "vigilo" && entry.surface === surfaceName);
       const pending = entries.filter((entry) => !["unchanged","outside-window"].includes(reviewDecision(entry)));
-      const thisRun = state.runLease?.startedAt;
       const issues = [];
       const recent = recentVigiloListing(surfaceName, collectorInfo);
       if (!surface?.listingObservedAt || (thisRun && surface.listingObservedAt < thisRun && !recent)) issues.push("listen er ikke lest i denne kjøringen");
@@ -488,9 +495,10 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
     if (!SOURCES.has(input.source) || !HEALTH.has(input.health)) throw new Error("Ugyldig kildestatus.");
     if (input.historicalOnly === true) {
       const surfaces = Object.values(state.surfaces).filter(surface => surface.source === input.source && !retiredSurface(surface));
-      if (input.health !== 'partial' || !surfaces.some(historicalOnly) ||
+      const leaseStartedAt=sourceLeaseStartedAt(),isHistorical=surface=>historicalOnly(surface,leaseStartedAt??null);
+      if (input.health !== 'partial' || !surfaces.some(isHistorical) ||
           !surfaces.every(surface => !surface.nextPageHint && !surface.blocker &&
-            (surface.health === 'ok' || historicalOnly(surface)))) {
+            (surface.health === 'ok' || isHistorical(surface)))) {
         throw new Error('Historisk-only kildestatus krever at alle aktive overflater kun har historiske hull.');
       }
     }
@@ -659,16 +667,18 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
   }
 
   function completionReport() {
-    const leaseStartedAt = state.runLease?.startedAt;
-    const pendingItems = reviewQueue().items;
+    const sourcePhase = currentSourcePhase(state);
+    const leaseStartedAt = (sourcePhase.current ? sourcePhase.checkpoint.startedAt : state.runLease?.startedAt)??null;
+    const isHistorical=surface=>historicalOnly(surface,leaseStartedAt);
+    const review=reviewQueue(leaseStartedAt),pendingItems=review.items;
     const incompleteSurfaces = Object.values(state.surfaces)
       .filter((surface) => !retiredSurface(surface))
-      .filter((surface) => (surface.health !== "ok" || surface.nextPageHint) && !historicalOnly(surface))
+      .filter((surface) => (surface.health !== "ok" || surface.nextPageHint) && !isHistorical(surface))
       .map((surface) => ({ source: surface.source, surface: surface.surface, health: surface.health, nextPageHint: surface.nextPageHint }));
     const incompleteSources = [...SOURCES].filter((source) => {
       const status = state.sourceStatus[source];
       const onlyHistorical = status?.health === "partial" && status.historicalOnly === true &&
-        Object.values(state.surfaces).some(s=>s.source===source && historicalOnly(s)) &&
+        Object.values(state.surfaces).some(s=>s.source===source && isHistorical(s)) &&
         !incompleteSurfaces.some(s=>s.source===source);
       return !status || (status.health !== "ok" && !onlyHistorical) || Date.now() - Date.parse(status.checkedAt) > (source === 'renovasjon' ? 36 : 12) * 60 * 60 * 1000 || (source !== 'renovasjon' && leaseStartedAt && status.checkedAt < leaseStartedAt);
     }).map((source) => ({ source, health: state.sourceStatus[source]?.health ?? "missing" }));
@@ -684,7 +694,7 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
     const unsyncedCalendar = currentEvents()
       .filter((event) => event.visibility?.sync?.status==='pending' || (!event.visibility?.hidden && (!event.cancelled || event.calendar) && (!event.calendar || event.calendar.removedAt || event.calendar.fingerprint !== event.fingerprint)))
       .map((event) => ({ eventId: event.id, title: event.title }));
-    const vigiloIssues = vigiloCoverage().filter((entry) => entry.issues.length);
+    const vigiloIssues = review.vigiloCoverage.filter((entry) => entry.issues.length);
     const profileReviews = Object.values(state.rawItems).filter((raw) => !raw.discardedAt && rawIsActive(raw) && raw.profileReviewedRevision !== raw.revision).map((raw) => ({ rawId: raw.id, title: raw.title, revision: raw.revision }));
     const phonePending=Object.values(state.phone?.inbox??{}).filter(item=>['queued','processing','blocked'].includes(item.status)).map(item=>({id:item.id,rawId:item.rawId,title:item.title,status:item.status,note:item.note}));
     const shoppingStatus=shopping.completion();
@@ -692,9 +702,10 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
       complete: !phonePending.length && !pendingItems.length && !incompleteSurfaces.length && !incompleteSources.length && !missingDrive.length && !unsyncedCalendar.length && !vigiloIssues.length && !profileReviews.length && shoppingStatus.complete,
       counts: { phonePending:phonePending.length,pendingItems: pendingItems.length, incompleteSurfaces: incompleteSurfaces.length, incompleteSources: incompleteSources.length, missingDrive: missingDrive.length, unsyncedCalendar: unsyncedCalendar.length, vigiloIssues: vigiloIssues.length, profileReviews: profileReviews.length,shoppingPending:shoppingStatus.work.length,shoppingBlocked:shoppingStatus.blockedStores.length+shoppingStatus.blockedRoutes.length+(shoppingStatus.blockedCampaigns?.length??0)+(shoppingStatus.blockedFamilies?.length??0)+(shoppingStatus.blockedPlacements?.length??0)+(shoppingStatus.blockedCatalogue?.length??0)+(shoppingStatus.blockedOda?.length??0)+(shoppingStatus.collection?.blocked?1:0),...(shoppingStatus.collection?.enabled?{shoppingCollectionPending:shoppingStatus.collection.pending?1:0,shoppingCollectionBlocked:shoppingStatus.collection.blocked?1:0}:{}) },
       shopping:shoppingStatus,
+      sourcePhase,
       phonePending,pendingItems, incompleteSurfaces, incompleteSources, missingDrive, unsyncedCalendar, vigiloIssues, profileReviews,
       cutoffAt:new Date(cutoffAt()).toISOString(), historyDays:state.reviewPolicy.historyDays,
-      historicalMissingDrive, historicalSurfaces:Object.values(state.surfaces).filter(historicalOnly),
+      historicalMissingDrive, historicalSurfaces:Object.values(state.surfaces).filter(isHistorical),
       historicalItems:Object.values(state.reviewLedger).filter(entry=>outsideWindow(entry))
     };
   }
@@ -704,17 +715,31 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
     const pendingActivities=Object.values(state.activities).filter(item=>!item.mergedInto && item.plan?.status==='pending');
     const counts=Object.fromEntries(['pendingItems','missingDrive','unsyncedCalendar','profileReviews'].map(key=>[key,report[key].length]));
     counts.facebookActivities=activityFacebook().length;counts.activityCandidates=feed.hsia?.candidates??0;counts.activityPages=feed.changedPages?.length??0;counts.activityPlans=pendingActivities.length;
-    counts.shoppingPending=report.counts.shoppingPending;counts.shoppingBlocked=report.counts.shoppingBlocked;
-    for(const key of ['shoppingCollectionPending','shoppingCollectionBlocked'])if(Object.hasOwn(report.counts,key))counts[key]=report.counts[key];
     return {scope:'kildeendringer',complete:Object.values(counts).every(n=>n===0),counts,note:'Gjelder endringsarbeid og publisering, ikke full kildekontroll.'};
   }
 
+  function reviewedSourcePhase(input,report){
+    if(!state.runLease||input.sourcePhaseReviewed!==true||input.sourcePhaseFingerprint!==report.sourcePhase.fingerprint||words(input.sourcePhaseEvidence,3000).length<12)throw new Error('Kildekontrollpunkt krever egen aktiv lease, sourcePhaseReviewed, gjeldende sourcePhaseFingerprint og konkret sourcePhaseEvidence.');
+    if(!Array.isArray(input.sources)||[...SOURCES].some(source=>input.sources.filter(s=>s?.source===source&&HEALTH.has(s.health)&&s.health===state.sourceStatus[source]?.health&&words(s.details,3000).length>=12).length!==1))throw new Error('Kildekontrollpunkt krever konkrete faktiske utfall og lagrede kildekvitteringer for alle kilder.');
+    const counts=Object.fromEntries(Object.entries(report.counts).filter(([key])=>!key.startsWith('shopping')));
+    if(Object.values(counts).some(n=>n>0)&&(!Array.isArray(input.blockers)||!input.blockers.length||input.blockers.some(b=>words(b,500).length<12)))throw new Error('Ufullstendig kildefase krever konkrete bevarte blockers.');
+    return {version:1,fingerprint:report.sourcePhase.fingerprint,startedAt:report.sourcePhase.current?report.sourcePhase.checkpoint.startedAt:state.runLease.startedAt,checkedAt:now(),evidence:words(input.sourcePhaseEvidence,3000),sources:structuredClone(input.sources),sourceReceipts:structuredClone(state.sourceStatus),blockers:structuredClone(input.blockers??[]),counts};
+  }
+
   function recordRun(input) {
+    let continuation = null,sourcePhaseCheckpoint=null;
     if (input.outcome === "skipped") {
       const run = { id: randomUUID(), startedAt: input.startedAt ?? now(), finishedAt: now(), outcome: "skipped", summary: words(input.summary, 3000), sources: [], completion: null };
       archiveRun(run); state.runs.unshift(run); state.runs = state.runs.slice(0, 100); save(); return run;
     }
-    if (input.outcome === "ok") {
+    if (input.outcome === 'continued') {
+      if (!['handel','alle'].includes(input.scope)) throw new Error('continued krever scope:handel eller et eksplisitt kildefasekontrollpunkt i scope:alle.');
+      if (words(input.resumeHint, 1000).length<12||words(input.summary??input.details,3000).length<12) throw new Error('En handelsfortsettelse krever konkret summary og resumeHint.');
+      const report = completionReport(), batch = shoppingWorkBatch(report.shopping.work, { limit: 0 });
+      if (!batch.summary.total) throw new Error('continued krever tilgjengelig handelsarbeid; bare blokkert arbeid krever partial med konkrete blockers.');
+      continuation = { remaining: batch.summary.total, queuedItems: report.shopping.work.length, blocked: report.counts.shoppingBlocked, byType: batch.summary.byType };
+      if(input.scope==='alle')continuation.sourcePhase=sourcePhaseCheckpoint=reviewedSourcePhase(input,report);
+    } else if (input.outcome === "ok") {
       const report = completionReport();
       if (input.scope==='lager'?shopping.stockIntake.work().length||shopping.stockIntake.blocked().length:input.scope==='handel' ? !report.shopping.complete : input.scope==='kildeendringer' ? !changeCompletion().complete : ['telefon','familiehandlinger'].includes(input.scope) ? report.phonePending.length || calendarActions().length : !report.complete) throw new Error(`Kjøringen kan ikke rapporteres ok med restanser: ${JSON.stringify(report.counts)}.`);
     } else if (["partial", "needs_login", "error"].includes(input.outcome)) {
@@ -726,16 +751,18 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
       throw new Error("Ugyldig kjøringsutfall.");
     }
     if (input.scope && !['alle','telefon','familiehandlinger','kildeendringer','handel','lager'].includes(input.scope)) throw new Error('Ugyldig kjøringsomfang.');
+    if(input.scope==='alle'&&input.outcome==='partial'&&input.sourcePhaseReviewed===true)sourcePhaseCheckpoint=reviewedSourcePhase(input,completionReport());
     // An agent's report timestamp must not override the observed lease start.
     // After release we have no observed start; do not invent a zero duration or
     // associate the report with another agent's previous lease.
     const startedAt = validDate(state.runLease?.startedAt ?? input.startedAt ?? null, "startedAt", true);
     const finishedAt = now();
-    const run = { id: randomUUID(), startedAt, finishedAt, durationMs: startedAt ? Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt)) : null, scope: input.scope ?? "alle", outcome: input.outcome, summary: words(input.summary ?? input.details, 3000), sources: input.sources ?? [], blockers: input.blockers ?? [], resumeHint: words(input.resumeHint, 1000) || null, completion: completionReport().counts };
+    const run = { id: randomUUID(), startedAt, finishedAt, durationMs: startedAt ? Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt)) : null, scope: input.scope ?? "alle", outcome: input.outcome, summary: words(input.summary ?? input.details, 3000), sources: input.sources ?? [], blockers: input.blockers ?? [], resumeHint: words(input.resumeHint, 1000) || null, completion: completionReport().counts, ...(continuation ? { continuation } : {}),...(sourcePhaseCheckpoint?{sourcePhase:sourcePhaseCheckpoint}:{}) };
+    if(sourcePhaseCheckpoint)state.sourcePhaseCheckpoint={...sourcePhaseCheckpoint,runId:run.id};
     archiveRun(run);
     state.runs.unshift(run);
     state.runs = state.runs.slice(0, 100);
-    reconcileSourceReviews(state.sourceStatus,[run]);
+    if(!sourcePhaseCheckpoint)reconcileSourceReviews(state.sourceStatus,[run]);
     save();
     return run;
   }
@@ -951,10 +978,10 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
     return status;
   }
 
-  function reviewQueue() {
+  function reviewQueue(leaseStartedAt) {
     return {
       surfaces: Object.fromEntries(Object.entries(state.surfaces).filter(([,surface])=>!retiredSurface(surface))),
-      vigiloCoverage: vigiloCoverage(),
+      vigiloCoverage: vigiloCoverage(leaseStartedAt),
       items: Object.values(state.reviewLedger).map((entry) => {
         const reason = reviewDecision(entry);
         return { source: entry.source, surface: entry.surface, externalId: entry.externalId, title: entry.title, listingHash: entry.listingHash, reason, reviewPolicy:effectiveReviewPolicy(entry), needsReview: !["unchanged","outside-window"].includes(reason), rawId: entry.rawId, lastSeenAt: entry.lastSeenAt, reviewedAt: entry.reviewedAt };

@@ -44,9 +44,9 @@ test('all enabled semantic definitions can research an unhinted target without a
   assert.deepEqual(f.candidate().familyIds,[f.wrong.id]);assert.ok(f.candidate().effectiveFamilyIds.includes(f.target.id));assert.ok(f.candidate().families.some(item=>item.familyId===f.target.id));
   assert.ok(f.shop.queue().some(item=>['shopping-sesum-discovery','shopping-sesum-review'].includes(item.do)&&item.sourceKey===SOURCE&&item.familyIds.includes(f.target.id)));
   assert.equal(f.shop.familyView().items.find(item=>item.id===f.target.id).prices.current,60,'routing is not identity approval or a fresh price bridge');
-  f.register();assert.ok(f.familyWork().some(item=>item.familyId===f.target.id));assert.equal(f.row().status,'pending','new researched metadata reopens the finite placement receipt');assert.ok(f.row().researchedFamilyIds.includes(f.target.id),'the valid researched target remains a hint while the full receipt is refreshed');
+  f.register();assert.equal(f.familyWork().length,0,'new product facts require the current placement stage before new family research');assert.equal(f.row().status,'pending','new researched metadata reopens the finite placement receipt');assert.ok(f.row().researchedFamilyIds.includes(f.target.id),'the valid researched target remains a hint while the full receipt is refreshed');
   assert.equal(f.shop.familyView().items.find(item=>item.id===f.target.id).prices.current,60,'a new registered group cannot approve an already built household family');
-  f.review();f.link([f.A,f.B]);assert.ok(!f.familyWork().some(item=>item.familyId===f.target.id));assert.equal(f.shop.familyView().items.find(item=>item.id===f.target.id).prices.current,40);
+  f.review();assert.ok(f.familyWork().some(item=>item.familyId===f.target.id));f.link([f.A,f.B]);assert.ok(!f.familyWork().some(item=>item.familyId===f.target.id));assert.equal(f.shop.familyView().items.find(item=>item.id===f.target.id).prices.current,40);
   assert.equal(f.row().status,'pending','the materially changed current family set needs one explicit placement rereview');f.review();assert.equal(f.row().status,'reviewed');assert.equal(f.work().length,0);f.reload();assert.equal(f.work().length,0);
   assert.deepEqual(f.candidate().familyIds,[f.wrong.id],'raw source hints are never rewritten to manufacture family approval');
 });
@@ -90,7 +90,7 @@ test('shared completion reads preserve future blocked retries and notice due tim
 test('a changed actual library group reopens placement between reads without reusing the preceding semantic snapshot',t=>{
   const f=setup(t,{sourceName:'Dishwashing brush 500g'});f.ingest();noFamily(f);const before=f.shop.completion();assert.ok(!before.work.some(row=>row.do==='shopping-sesum-placement-review'&&row.sourceKey===SOURCE));
   const fingerprint=f.placement().familySetFingerprint;f.data.groups[0].inclusionCriteria+=' Changed explicit household-relevant ingredient and form criteria.';f.write();
-  const after=f.shop.completion();assert.notEqual(f.placement().familySetFingerprint,fingerprint);assert.ok(after.work.some(row=>row.do==='shopping-sesum-placement-review'&&row.sourceKey===SOURCE));assert.equal(identityWork(f).length,1);assert.ok(after.work.some(row=>row.do==='shopping-family-build'&&row.reason==='group-changed'));
+  const after=f.shop.completion();assert.notEqual(f.placement().familySetFingerprint,fingerprint);assert.ok(after.work.some(row=>row.do==='shopping-sesum-placement-review'&&row.sourceKey===SOURCE));assert.equal(identityWork(f).length,0,'new semantics first reopen placement');assert.ok(after.work.some(row=>row.do==='shopping-family-build'&&row.reason==='group-changed'));
 });
 
 test('a failed queue read always discards its invocation context before a later read or metadata change',t=>{
@@ -100,7 +100,7 @@ test('a failed queue read always discards its invocation context before a later 
 });
 
 test('a current whole-set no-family review removes redundant discovery from the actual queue without approving identity',t=>{
-  const f=setup(t,{sourceName:'Dishwashing brush 500g'});f.ingest();assert.equal(identityWork(f).length,1);
+  const f=setup(t,{sourceName:'Dishwashing brush 500g'});f.ingest();assert.equal(identityWork(f).length,0,'placement precedes identity even before an explicit no-family result');assert.equal(f.work().length,1);
   const before=f.shop.familyView().items.find(row=>row.id===f.target.id).prices.current;noFamily(f);
   assert.equal(f.work().length,0);assert.equal(identityWork(f).length,0,'raw OR-search hints cannot recreate identity research after every active need was explicitly ruled out');
   assert.equal(f.candidate().status,'pending');assert.deepEqual(f.candidate().familyIds,[f.wrong.id]);assert.equal(f.shop.catalogEntries().length,0);
@@ -119,14 +119,14 @@ test('source, enabled-family, semantic and explicit reopen changes restore ident
     else if(change==='new-enabled-family')f.shop.watch({...f.disabled,enabled:true});
     else if(change==='family-note')f.shop.watch({...f.target,note:'Current household needs now include a different explicitly specified actual product form.'});
     else f.review({status:'reopen',targets:[]});
-    assert.equal(f.row().status,'pending',change);assert.equal(f.work().length,1,change);assert.equal(identityWork(f).length,1,change);
-    f.reload();assert.equal(identityWork(f).length,1,change);
+    assert.equal(f.row().status,'pending',change);assert.equal(f.work().length,1,change);assert.equal(identityWork(f).length,0,change);
+    f.reload();assert.equal(f.work().length,1,change);assert.equal(identityWork(f).length,0,change);
   }
 });
 
 test('a suggested reviewed donor does not recreate identity-review work after current whole-set no-family research',t=>{
   const f=setup(t,{sourceName:'Dishwashing brush 500g'});f.ingest({changes:{ean:f.p.ean}});
-  assert.equal(identityWork(f)[0].do,'shopping-sesum-review','a barcode coincidence is only a donor suggestion, never equivalence');
+  assert.ok(f.candidate().donors.length>0,'a barcode coincidence remains only a donor suggestion');assert.equal(identityWork(f).length,0,'a suggested donor cannot bypass placement');
   noFamily(f);assert.equal(identityWork(f).length,0);assert.equal(f.candidate().status,'pending');assert.equal(f.shop.catalogEntries().length,0);
   f.reload();assert.equal(identityWork(f).length,0);
 });
@@ -150,15 +150,15 @@ test('no-family research is bound to the exact source and never drops scoped exc
   const excluded=structuredClone(f.state.shopping.sesumFamilyReviews[SOURCE][f.wrong.id]);noFamily(f);assert.equal(identityWork(f).length,0);
   f.shop.settings({stores:[{id:'kiwi',name:'KIWI',chainCode:'KIWI',url:'https://shop.example.test/kiwi'},{id:'rema',name:'REMA',chainCode:'REMA_1000',url:'https://shop.example.test/rema'}]});
   f.shop.sesumReceivePrices({familyIds:[f.wrong.id],fetchedAt:f.clock.at,products:[{...f.source,prices:[{storeCode:'REMA_1000',price:21,observedAt:f.clock.at,source:'actual_source_receipt',isPromo:false}]}]});
-  assert.equal(identityWork(f).length,0);assert.ok(f.shop.queue().some(row=>row.sourceKey==='sesum:REMA_1000:72'&&row.do==='shopping-sesum-discovery'),'another chain is a distinct source review, not an inferred native alias');
+  assert.equal(identityWork(f).length,0);assert.ok(f.shop.queue().some(row=>row.sourceKey==='sesum:REMA_1000:72'&&row.do==='shopping-sesum-placement-review'),'another chain has its own first research stage, never an inferred native alias');
   assert.deepEqual(f.state.shopping.sesumFamilyReviews[SOURCE][f.wrong.id],excluded);
-  f.review({status:'reopen',targets:[]});assert.equal(identityWork(f).length,1);assert.deepEqual(identityWork(f)[0].familyIds,[f.target.id],'the still-current explicit scoped negative remains in force');
+  f.review({status:'reopen',targets:[]});assert.equal(identityWork(f).length,0);assert.equal(f.work().length,1);assert.equal(f.candidate().families.find(row=>row.familyId===f.wrong.id).sourceDecision.status,'excluded','the still-current explicit scoped negative remains in force while placement is researched');
 });
 
 test('new explicit product registration reopens placement and family work instead of inheriting a prior no-family result',t=>{
   const f=setup(t,{sourceName:'New coffee 500g'});f.ingest();f.review({status:'no-active-family',targets:[],noActiveFamilyVerified:true,reason:'Prior primary research identified ground coffee, which none of the current enabled families accept.',scopeEvidence:'Reviewed all enabled families: the coffee need accepts organic whole beans only, honey accepts actual honey and the exact litter need accepts only its non-food formula.'});assert.equal(identityWork(f).length,0);
-  f.register();assert.equal(f.row().status,'pending');assert.equal(f.work().length,1);assert.ok(f.familyWork().length>0,'new reviewed product facts require their own ordinary household family decision');
-  f.reload();assert.equal(f.row().status,'pending');assert.ok(f.familyWork().length>0);
+  f.register();assert.equal(f.row().status,'pending');assert.equal(f.work().length,1);assert.equal(f.familyWork().length,0,'new reviewed facts first require the current placement');
+  f.reload();assert.equal(f.row().status,'pending');assert.equal(f.familyWork().length,0);f.review();assert.ok(f.familyWork().length>0,'current placement opens the actual ordinary family decision');
 });
 
 test('price, receipt dates, planning quantities and repeated identical family decisions do not churn semantic placement',t=>{
@@ -176,7 +176,7 @@ test('enabled semantic-set and registered fact changes reopen placement without 
     else if(change==='group-rule'){f.A.inclusionCriteria='Plain whole roasted coffee beans with newly clarified actual organic review criteria.';f.write();}
     else f.register({description:'A materially revised actual roast declaration from current product research'});
     assert.equal(f.row().status,'pending');assert.notEqual(f.row().fingerprint,before);
-    if(change==='registration'){assert.equal(f.placement().familySetFingerprint,set);assert.ok(f.row().researchedFamilyIds.includes(f.target.id),'a researched association is not lost merely because its source metadata review advanced');assert.ok(f.familyWork().some(item=>item.familyId===f.target.id));}
+    if(change==='registration'){assert.equal(f.placement().familySetFingerprint,set);assert.ok(f.row().researchedFamilyIds.includes(f.target.id),'a researched association is not lost merely because its source metadata review advanced');assert.equal(f.familyWork().length,0);f.review();assert.ok(f.familyWork().some(item=>item.familyId===f.target.id));}
     else assert.notEqual(f.placement().familySetFingerprint,set);
   }
 });
@@ -186,7 +186,7 @@ test('a scoped wrong-search-family negative never hides all-family placement or 
   f.shop.sesumPriceReview({sourceKey:SOURCE,sourceFingerprint:f.candidate().sourceFingerprint,registrationFingerprint:null,status:'excluded',familyIds:[f.wrong.id],familyFingerprints:{[f.wrong.id]:wrong.requirementsFingerprint},equivalenceEvidence:'The actual source contains organic whole roasted coffee beans, no honey; only the honey hint is excluded.'});
   assert.equal(f.work().length,1);f.review();assert.ok(f.candidate().effectiveFamilyIds.includes(f.target.id));assert.deepEqual(f.candidate().familyIds,[f.wrong.id]);
   assert.ok(f.shop.queue().some(item=>['shopping-sesum-discovery','shopping-sesum-review'].includes(item.do)&&item.sourceKey===SOURCE&&item.familyIds.includes(f.target.id)));
-  f.register();assert.ok(f.familyWork().some(item=>item.familyId===f.target.id));
+  f.register();assert.ok(!f.familyWork().some(item=>item.familyId===f.target.id),'only the earlier explicit negative may remain independent debt before placement');f.review();assert.ok(f.familyWork().some(item=>item.familyId===f.target.id));
   f.clock.at='2026-11-10T12:01:00Z';f.ingest({changes:{name:'New ground coffee 500g'}});assert.equal(f.row().status,'pending');assert.deepEqual(f.row().researchedFamilyIds,[],'actual changed source identity invalidates the old positive research hint');
 });
 

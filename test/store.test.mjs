@@ -14,6 +14,59 @@ function fixture(fn) {
   }
 }
 
+test('continued records only a shopping checkpoint with server counts and preserves all completion blockers',()=>fixture(dir=>{
+  const store=createStore(dir),work=[{do:'shopping-market-refresh',watchIds:Array.from({length:24},(_,i)=>'family-'+i)},{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1'}];
+  const blocked={sourceKey:'sesum-product:2',status:'blocked',retryAt:new Date(Date.now()+3600000).toISOString(),reason:'A readable ingredient label is unavailable.'};
+  store.shopping.completion=()=>({complete:false,work,blockedStores:[],blockedRoutes:[],blockedPlacements:[blocked]});
+  const input={scope:'handel',outcome:'continued',summary:'Reviewed the assigned shopping work; later work remains.',resumeHint:'Read next and continue the next current shopping cohort.',continuation:{remaining:0,blocked:0}};
+  for(const scope of [undefined,'kildeendringer','familiehandlinger','lager'])assert.throws(()=>store.recordRun({...input,scope}),/scope:handel/);
+  assert.throws(()=>store.recordRun({...input,scope:'alle'}),/Kildekontrollpunkt/);
+  assert.throws(()=>store.recordRun({...input,resumeHint:''}),/resumeHint/);
+  assert.throws(()=>store.recordRun({scope:'handel',outcome:'ok'}),/restanser/);
+  const lease=store.beginRun().lease;
+  const recorded=store.recordRun(input);
+  assert.equal(recorded.outcome,'continued');assert.equal(recorded.scope,'handel');assert.equal(recorded.startedAt,lease.startedAt);
+  assert.deepEqual(recorded.continuation,{remaining:25,queuedItems:2,blocked:1,byType:{'shopping-market-refresh':24,'shopping-sesum-placement-review':1}});
+  assert.equal(recorded.completion.shoppingPending,2);assert.equal(recorded.completion.shoppingBlocked,1);assert.equal(store.completionReport().complete,false);assert.equal(work.length,2);
+  store.endRun(lease.token);assert.equal(store.snapshot().runLease,null);
+  work.length=0;
+  assert.throws(()=>store.recordRun(input),/bare blokkert arbeid krever partial/);
+  assert.equal(store.recordRun({scope:'handel',outcome:'partial',summary:'Primary label remains unavailable.',blockers:[blocked.reason],resumeHint:'Continue after a readable primary label becomes available.'}).outcome,'partial');
+}));
+
+test('an explicit full source-phase checkpoint survives a later shopping lease but never releases source blockers',t=>fixture(dir=>{
+  t.mock.timers.enable({apis:['Date'],now:Date.parse('2026-11-10T08:00:00Z')});
+  const store=createStore(dir),work=[{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1'}];
+  store.shopping.completion=()=>({complete:!work.length,work,blockedStores:[],blockedRoutes:[]});
+  const lease=store.beginRun().lease;
+  for(const child of ['child1','child2','child3','child4'])for(const section of ['news','messages']){const surface=child+':'+section;store.observeListing({source:'vigilo',surface,items:[]});store.updateSurface({source:'vigilo',surface,health:'ok',complete:true});}
+  const sources=['vigilo','spond','facebook','renovasjon'].map(source=>({source,health:'ok',details:'Actual complete source lists and relevant originals were reviewed.'}));
+  for(const source of sources)store.updateSource(source);
+  const input={scope:'alle',outcome:'continued',sourcePhaseReviewed:true,sourcePhaseEvidence:'All configured source surfaces were actually reviewed in this lease.',sources,summary:'Source phase finished; shopping work remains.',resumeHint:'Continue the next bounded shopping cohort.',sourcePhaseFingerprint:store.completionReport().sourcePhase.fingerprint};
+  assert.throws(()=>store.recordRun({...input,sourcePhaseFingerprint:'changed'}),/Kildekontrollpunkt/);
+  const checkpoint=store.recordRun(input);assert.equal(checkpoint.outcome,'continued');assert.equal(checkpoint.continuation.sourcePhase.startedAt,lease.startedAt);
+  store.endRun(lease.token);t.mock.timers.tick(1000);const next=store.beginRun().lease;
+  assert.notEqual(next.startedAt,lease.startedAt);assert.equal(store.completionReport().sourcePhase.current,true);assert.deepEqual(store.completionReport().incompleteSources,[],'unchanged current source receipts use the original source lease');
+  work.length=0;assert.equal(store.completionReport().complete,true,'Vigilo detail/list coverage also keeps the actually reviewed source lease');work.push({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1'});
+  store.updateSource({source:'spond',health:'partial',details:'The exact original is unavailable from the authenticated source.'});
+  assert.equal(store.completionReport().sourcePhase.current,false,'a real source change preempts reuse');
+  const blocked=store.recordRun({...input,sources:sources.map(s=>s.source==='spond'?{...s,health:'partial',details:'The exact original is unavailable from the authenticated source.'}:s),blockers:['Spond: The exact original is unavailable from the authenticated source.'],sourcePhaseFingerprint:store.completionReport().sourcePhase.fingerprint});
+  store.endRun(next.token);t.mock.timers.tick(1000);store.beginRun();work.length=0;
+  const report=store.completionReport();assert.equal(report.sourcePhase.current,true);assert.equal(report.sourcePhase.checkpoint.runId,blocked.id);assert.equal(report.complete,false);assert.ok(report.incompleteSources.some(s=>s.source==='spond'));assert.equal(report.sourcePhase.checkpoint.sources.find(s=>s.source==='spond').health,'partial');
+  assert.throws(()=>store.recordRun({scope:'alle',outcome:'ok'}),/restanser/);
+  const beforeReceipts=structuredClone(store.snapshot().sourceStatus);
+  const partial=store.recordRun({...input,outcome:'partial',sources:blocked.sources,blockers:blocked.blockers,sourcePhaseFingerprint:report.sourcePhase.fingerprint});
+  assert.equal(partial.sourcePhase.startedAt,blocked.sourcePhase.startedAt,'a reused checkpoint never adopts a later shopping lease as its source lease');assert.equal(store.completionReport().sourcePhase.current,true);assert.deepEqual(store.snapshot().sourceStatus,beforeReceipts,'checkpointing does not refresh actual source receipts');
+}));
+
+test('source-change completion excludes the independent shopping queue, blocked reviews and collection',()=>fixture(dir=>{
+  const store=createStore(dir);
+  store.shopping.completion=()=>({complete:false,work:[{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1'}],blockedStores:[],blockedRoutes:[],blockedFamilies:[{status:'blocked'}],collection:{enabled:true,pending:true,blocked:true,complete:false}});
+  const source=store.changeCompletion();assert.equal(source.complete,true);assert.ok(!Object.keys(source.counts).some(key=>key.startsWith('shopping')));
+  assert.equal(store.recordRun({scope:'kildeendringer',outcome:'ok',summary:'No source-change work remains.'}).outcome,'ok');
+  assert.equal(store.completionReport().complete,false);assert.equal(store.completionReport().shopping.complete,false);assert.throws(()=>store.recordRun({scope:'handel',outcome:'ok'}),/restanser/);
+}));
+
 test('a campaign waiting for a future retry counts as blocked shopping even with no active shopping work',()=>fixture(dir=>{
   const store=createStore(dir),campaign={do:'shopping-sesum-offer-review',sourceKey:'sesum:KIWI:123',familyId:'synthetic-family',status:'blocked',reason:'Primary campaign customer limit is unresolved.',retryAt:new Date(Date.now()+3600000).toISOString()};
   // The shopping integration tests exercise the real future-retry queue. This
@@ -22,15 +75,15 @@ test('a campaign waiting for a future retry counts as blocked shopping even with
   const report=store.completionReport();
   assert.equal(report.shopping.complete,false);assert.deepEqual(report.shopping.work,[]);assert.deepEqual(report.shopping.blockedCampaigns,[campaign]);
   assert.equal(report.counts.shoppingPending,0);assert.equal(report.counts.shoppingBlocked,1);assert.equal(report.complete,false);
-  assert.equal(store.changeCompletion().counts.shoppingBlocked,1,'change completion reports the same unresolved shopping blocker');
+  assert.equal(store.changeCompletion().counts.shoppingBlocked,undefined,'source-change completion has no shopping scope');
   const family={do:'shopping-sesum-family-review',sourceKey:'sesum:KIWI:456',familyId:'synthetic-family',status:'blocked',reason:'A required product label fact is unresolved.',retryAt:campaign.retryAt};
   store.shopping.completion=()=>({complete:false,work:[],blockedStores:[],blockedRoutes:[],blockedCampaigns:[],blockedFamilies:[family]});
   assert.equal(store.completionReport().shopping.complete,false);assert.equal(store.completionReport().counts.shoppingPending,0);assert.equal(store.completionReport().counts.shoppingBlocked,1);
-  assert.equal(store.changeCompletion().counts.shoppingBlocked,1,'a future family retry is also an unresolved shopping blocker');
+  assert.equal(store.changeCompletion().counts.shoppingBlocked,undefined,'future family retries stay in full shopping completion');
   store.shopping.completion=()=>({complete:false,work:[],blockedStores:[],blockedRoutes:[],blockedPlacements:[{sourceKey:'sesum:KIWI:789',status:'blocked',reason:'Placement needs a readable current label.'}]});
-  assert.equal(store.completionReport().counts.shoppingBlocked,1);assert.equal(store.completionReport().shopping.complete,false);assert.equal(store.changeCompletion().counts.shoppingBlocked,1);
+  assert.equal(store.completionReport().counts.shoppingBlocked,1);assert.equal(store.completionReport().shopping.complete,false);assert.equal(store.changeCompletion().counts.shoppingBlocked,undefined);
   store.shopping.completion=()=>({complete:false,work:[],blockedStores:[],blockedRoutes:[],blockedCatalogue:[{do:'shopping-sesum-catalog-review',sourceKey:'sesum-product:72',status:'blocked',reason:'Missing actual configured chain identity and price.',retryAt:campaign.retryAt}]});
-  assert.equal(store.completionReport().counts.shoppingPending,0);assert.equal(store.completionReport().counts.shoppingBlocked,1);assert.equal(store.completionReport().shopping.complete,false);assert.equal(store.changeCompletion().counts.shoppingBlocked,1);
+  assert.equal(store.completionReport().counts.shoppingPending,0);assert.equal(store.completionReport().counts.shoppingBlocked,1);assert.equal(store.completionReport().shopping.complete,false);assert.equal(store.changeCompletion().counts.shoppingBlocked,undefined);
   store.shopping.completion=()=>({complete:true,work:[],blockedStores:[],blockedRoutes:[]});
   assert.equal(store.completionReport().counts.shoppingBlocked,0,'older shopping providers without campaign blockers remain compatible');
 }));

@@ -51,6 +51,7 @@ test('ordinary run cannot silently leave activity sources unfinished', () => {
   const coverage = activityCoverage(config, {}, new Date('2026-09-28T06:00:00Z'));
   assert.throws(() => validateActivityRun(coverage, { outcome: 'ok' }), /ikke ferdig/);
   assert.throws(() => validateActivityRun(coverage, { outcome: 'partial', blockers: ['Vigilo trenger innlogging'] }), /activity-source|Aktivitetskilder/);
+  assert.throws(() => validateActivityRun(coverage, { scope:'alle',outcome: 'continued', blockers: ['Vigilo trenger innlogging'] }), /activity-source|Aktivitetskilder/,'a source checkpoint cannot bypass unread activity sources');
   assert.throws(() => validateActivityRun(coverage, { outcome: 'partial', blockers: ['a: ekstern feil', 'b: ekstern feil'] }), /Manglende besøk/);
   const attempted = activityCoverage(config, {a:{health:'error'},b:{health:'needs_login'}}, new Date('2026-09-28T06:00:00Z'));
   assert.doesNotThrow(() => validateActivityRun(attempted, { outcome: 'partial', blockers: ['a: nettleserverktøyet feiler ved åpning', 'b: innloggingssiden krever familiehandling'] }));

@@ -2,6 +2,158 @@ import test from 'node:test';import assert from 'node:assert/strict';import {mkd
 import {createIngestionDispatcher,changeSignal} from '../src/ingestion-dispatch.mjs';
 import {createStore} from '../src/store.mjs';
 
+function shoppingDispatchFixture(initialRows,config={},resources=undefined) {
+  const dir=mkdtempSync(join(tmpdir(),'familien-dispatch-batch-')),clock={at:Date.parse('2026-11-10T02:00:00Z')},queue={rows:initialRows},launches=[];let lease=null;
+  const store={snapshot:()=>({runLease:lease,rawItems:{},events:{}}),phone:{list:()=>[]},calendarActions:()=>[],activityFacebook:()=>[],activityFeedStatus:()=>({changedPages:[]}),reviewQueue:()=>({items:[]}),completionReport:()=>({profileReviews:[],missingDrive:[],unsyncedCalendar:[],shopping:{complete:false,blockedPlacements:[{status:'blocked',retryAt:'2026-11-11T02:00:00Z'}]}}),shopping:{queue:()=>queue.rows},beginRun:()=>({acquired:true,lease:lease={token:'owned-test-batch'}}),endRun:token=>{assert.equal(token,lease.token);lease=null;},renewRun(){}};
+  const dispatcher=createIngestionDispatcher({store,resources,root:'.',dataDir:dir,clock:()=>clock.at,readConfig:()=>({enabled:true,minGapMinutes:15,...config}),alive:()=>true,launch:input=>{launches.push(input);return {pid:123};}});
+  return {dispatcher,clock,queue,launches,store,close(){assert.ok(dir.startsWith(join(tmpdir(),'familien-dispatch-batch-')));rmSync(dir,{recursive:true,force:true});}};
+}
+
+test('a failed source phase cannot bless a new ready-original signal with its older checkpoint',()=>{
+  let ready=false;const resources={list:()=>ready?[{id:'original',source:'spond',refs:['source-original'],status:'ready',sha256:'new-original-bytes'}]:[]};
+  const f=shoppingDispatchFixture([{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1',sourceFingerprint:'one'}],{dailyFullFallback:true},resources);
+  let phase={current:false,fingerprint:'source-a'};f.clock.at=Date.parse('2026-11-10T08:00:00Z');f.store.runHistory=()=>({runs:[],nextCursor:null});
+  const originalSnapshot=f.store.snapshot;f.store.snapshot=()=>({...originalSnapshot(),rawItems:{raw:{source:'spond',externalId:'source-original',revision:1}}});
+  f.store.completionReport=()=>({complete:false,sourcePhase:phase,profileReviews:[],missingDrive:[{rawId:'raw',kind:'source-original',fileName:'Original.pdf'}],unsyncedCalendar:[]});
+  try{
+    f.dispatcher.tick();phase={current:true,fingerprint:'source-a',checkpoint:{runId:'old-reviewed-checkpoint',startedAt:new Date(f.clock.at).toISOString(),checkedAt:new Date(f.clock.at).toISOString()}};f.launches[0].onExit(0);
+    ready=true;f.clock.at+=31*60000;f.dispatcher.tick();assert.equal(f.dispatcher.status().workerScope,'alle');f.launches[1].onExit(1);
+    f.clock.at+=121*60000;f.dispatcher.tick();assert.equal(f.dispatcher.status().workerScope,'alle','the old run cannot capture the changed resource signature after a failed reread');f.launches[2].onExit(1);
+  }finally{f.close();}
+});
+
+test('a current source checkpoint resumes independent shopping while real source blockers stay incomplete',()=>{
+  const f=shoppingDispatchFixture(Array.from({length:45},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+i,sourceFingerprint:'current-'+i})),{dailyFullFallback:true});
+  let phase={current:false,fingerprint:'source-a'},phone=[];const sourceItems=[{source:'spond',externalId:'blocked-original',listingHash:'unchanged',reason:'blocked-original'}];
+  f.clock.at=Date.parse('2026-11-10T08:00:00Z');f.store.runHistory=()=>({runs:[],nextCursor:null});f.store.phone.list=()=>phone;f.store.reviewQueue=()=>({items:sourceItems});f.store.completionReport=()=>({complete:false,sourcePhase:phase,profileReviews:[],missingDrive:[],unsyncedCalendar:[]});
+  try{
+    f.dispatcher.tick();assert.equal(f.dispatcher.status().workerScope,'alle');assert.equal(f.dispatcher.status().shoppingBatch.items.length,20);assert.match(f.launches[0].prompt,/sourcePhaseReviewed:true/);
+    phase={current:true,fingerprint:'source-a',checkpoint:{runId:'actual-source-checkpoint',startedAt:new Date(f.clock.at).toISOString(),checkedAt:new Date(f.clock.at).toISOString(),blockers:['The exact Spond original remains unavailable.']}};
+    f.queue.rows=f.queue.rows.slice(20);f.launches[0].onExit(0);f.clock.at+=16*60000;f.dispatcher.tick();assert.equal(f.dispatcher.status().workerScope,'handel','unchanged source blocker must not force another source scan');
+    f.queue.rows=[];f.launches[1].onExit(0);f.clock.at+=60*60000;f.dispatcher.tick();assert.equal(f.launches.length,2,'blocked sources remain incomplete without falsely finalizing or repeating their checkpoint');
+    phone=[{status:'queued'}];phase={...phase,current:false};sourceItems.push({source:'spond',externalId:'actual-new-source',listingHash:'new',reason:'new'});f.dispatcher.tick();assert.equal(f.launches.length,2,'a family submission preempts resume');
+    phone=[];f.dispatcher.tick();assert.equal(f.launches.length,3);assert.equal(f.dispatcher.status().workerScope,'alle','new source semantics require a new source phase');f.launches[2].onExit(1);
+  }finally{f.close();}
+});
+
+test('continued never counts as a completed full run and final ok waits for actual global completion',()=>{
+  const f=shoppingDispatchFixture([{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1',sourceFingerprint:'one'}],{dailyFullFallback:true});
+  let phase={current:false,fingerprint:'source-a'},complete=false;const runs=[];f.clock.at=Date.parse('2026-11-10T08:00:00Z');f.store.runHistory=()=>({runs,nextCursor:null});f.store.completionReport=()=>({complete,sourcePhase:phase,profileReviews:[],missingDrive:[],unsyncedCalendar:[]});
+  try{
+    f.dispatcher.tick();phase={current:true,fingerprint:'source-a',checkpoint:{runId:'checkpoint-one',startedAt:new Date(f.clock.at).toISOString(),checkedAt:new Date(f.clock.at).toISOString(),blockers:[]}};runs.push({scope:'alle',outcome:'continued',startedAt:new Date(f.clock.at).toISOString(),finishedAt:new Date(f.clock.at).toISOString()});f.launches[0].onExit(0);
+    f.clock.at+=16*60000;f.dispatcher.tick();assert.equal(f.dispatcher.status().workerScope,'handel','continued is a checkpoint, not a completed daily run');
+    f.queue.rows=[];complete=true;f.launches[1].onExit(0);f.clock.at+=16*60000;f.dispatcher.tick();assert.equal(f.dispatcher.status().workerScope,'alle');assert.match(f.launches[2].prompt,/Avsluttende fullføringskontroll/);
+    runs.push({scope:'alle',outcome:'ok',startedAt:new Date(f.clock.at).toISOString(),finishedAt:new Date(f.clock.at).toISOString()});f.launches[2].onExit(0);f.clock.at+=60*60000;f.dispatcher.tick();assert.equal(f.launches.length,3);
+  }finally{f.close();}
+});
+
+test('unchanged finalization without a real ok report keeps daily backoff and the three-attempt cap',()=>{
+  for(const exitCode of [0,1]){
+    const f=shoppingDispatchFixture([{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1',sourceFingerprint:'one'}],{dailyFullFallback:true});
+    let phase={current:false,fingerprint:'source-a'},complete=false;const runs=[];f.clock.at=Date.parse('2026-11-10T08:00:00Z');f.store.runHistory=()=>({runs,nextCursor:null});f.store.completionReport=()=>({complete,sourcePhase:phase,profileReviews:[],missingDrive:[],unsyncedCalendar:[]});
+    try{
+      f.dispatcher.tick();phase={current:true,fingerprint:'source-a',checkpoint:{runId:'checkpoint-final-retry',startedAt:new Date(f.clock.at).toISOString(),checkedAt:new Date(f.clock.at).toISOString(),blockers:[]}};f.queue.rows=[];complete=true;f.launches[0].onExit(0);
+      f.dispatcher.tick();f.clock.at+=16*60000;f.dispatcher.tick();assert.equal(f.launches.length,1,'server completion cannot bypass the first daily retry even with an unchanged source phase');
+      f.clock.at+=15*60000;f.dispatcher.tick();assert.equal(f.launches.length,2);assert.match(f.launches[1].prompt,/Avsluttende fullføringskontroll/);f.launches[1].onExit(exitCode);
+      // CLI activity coverage may still reject final ok even when this server
+      // report is complete. Exiting zero without that report is not success.
+      f.dispatcher.tick();f.clock.at+=119*60000;f.dispatcher.tick();assert.equal(f.launches.length,2,'the unchanged finalization must wait its full daily backoff');
+      f.clock.at+=2*60000;f.dispatcher.tick();assert.equal(f.launches.length,3);f.launches[2].onExit(exitCode);
+      for(const minutes of [0,16,120,180]){f.clock.at+=minutes*60000;f.dispatcher.tick();}
+      assert.equal(f.launches.length,3);assert.equal(f.dispatcher.status().dailyFull.attempts,3);assert.equal(f.dispatcher.status().dailyFull.retryAt,null);assert.deepEqual(runs,[],'no failed or missing final report becomes fullRunRecorded');
+    }finally{f.close();}
+  }
+});
+
+test('mixed source changes finish their own scope before a separate bounded shopping launch',()=>{
+  const f=shoppingDispatchFixture(Array.from({length:50},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+i,sourceFingerprint:'current-'+i})));
+  let sourceItems=[{source:'vigilo',externalId:'new-source-item',listingHash:'one',reason:'new'}];f.store.reviewQueue=()=>({items:sourceItems});
+  try{
+    f.dispatcher.tick();assert.equal(f.dispatcher.status().workerScope,'kildeendringer');assert.equal(f.dispatcher.status().shoppingBatch,null);
+    assert.ok(!f.launches[0].prompt.includes('shopping-queue'));assert.ok(!f.launches[0].prompt.includes('shopping-sesum'));assert.ok(!f.launches[0].prompt.includes('shopping-oda-refresh'));
+    sourceItems=[];f.launches[0].onExit(0);f.clock.at+=16*60000;f.dispatcher.tick();assert.equal(f.dispatcher.status().workerScope,'handel');assert.equal(f.dispatcher.status().shoppingBatch.items.length,20);
+    f.queue.rows=[];f.launches[1].onExit(0);
+  }finally{f.close();}
+});
+
+test('a launch freezes at most twenty of eight thousand tasks and shrinking batches keep resuming',()=>{
+  const f=shoppingDispatchFixture(Array.from({length:8000},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+i,sourceFingerprint:'metadata-'+i,familySetFingerprint:'set-a'})));
+  try{
+    f.dispatcher.tick();const frozen=f.dispatcher.status().shoppingBatch;
+    assert.equal(frozen.items.length,20);assert.equal(frozen.summary.total,8000);assert.equal(frozen.summary.remaining,7980);assert.deepEqual(frozen.summary.byType,{'shopping-sesum-placement-review':8000});assert.match(frozen.summary.resumeHint,/next/);
+    assert.match(f.launches[0].prompt,/Frosset handelsbolk/);assert.match(f.launches[0].prompt,/outcome:"continued"/);assert.ok(f.launches[0].prompt.includes('"sourceKey":"sesum-product:19"'));assert.ok(!f.launches[0].prompt.includes('"sourceKey":"sesum-product:20"'));assert.ok(f.launches[0].prompt.length<40000);
+    // A completed placement may open identity research, but never expands the
+    // already running assignment or counts as an approval of that next stage.
+    f.queue.rows=[{...f.queue.rows[0],do:'shopping-sesum-discovery'},...f.queue.rows.slice(20)];
+    assert.equal(frozen.items[0].do,'shopping-sesum-placement-review');f.launches[0].onExit(0);
+    assert.equal(f.dispatcher.status().attempts,0);f.dispatcher.tick();assert.equal(f.launches.length,1,'the configured minimum gap still holds');
+    f.clock.at+=16*60000;f.dispatcher.tick();assert.equal(f.dispatcher.status().shoppingBatch.items[0].do,'shopping-sesum-discovery');
+    for(let i=1;i<=4;i++){
+      f.queue.rows=f.queue.rows.slice(20);f.launches[i].onExit(0);assert.equal(f.dispatcher.status().attempts,0);
+      f.clock.at+=16*60000;f.dispatcher.tick();assert.equal(f.launches.length,i+2,'real removal must continue beyond three launches');
+    }
+    assert.equal(f.launches.length,6);f.queue.rows=[];f.launches.at(-1).onExit(0);assert.equal(f.dispatcher.status().running,false);
+    assert.equal(changeSignal(f.store).count,0,'future blocked completion rows are not active cohort work');
+  }finally{f.close();}
+});
+
+test('an unchanged failed shopping cohort keeps the normal three-attempt backoff',()=>{
+  const f=shoppingDispatchFixture([{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1',sourceFingerprint:'one',familySetFingerprint:'set'}]);
+  try{
+    f.dispatcher.tick();f.launches[0].onExit(1);f.clock.at+=16*60000;f.dispatcher.tick();assert.equal(f.launches.length,1);
+    f.clock.at+=15*60000;f.dispatcher.tick();assert.equal(f.launches.length,2);f.launches[1].onExit(1);
+    f.clock.at+=121*60000;f.dispatcher.tick();assert.equal(f.launches.length,3);f.launches[2].onExit(1);
+    f.clock.at+=86400000;f.dispatcher.tick();assert.equal(f.launches.length,3);assert.equal(f.dispatcher.status().attempts,3);assert.equal(f.dispatcher.status().retryAt,null);
+  }finally{f.close();}
+});
+
+test('new arrivals behind five thousand pending rows cannot reset an unchanged assigned cohort retry budget',()=>{
+  const f=shoppingDispatchFixture(Array.from({length:5020},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+i,sourceFingerprint:'current-'+i})));let next=5020;
+  const append=()=>f.queue.rows.push({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+next,sourceFingerprint:'current-'+next++});
+  try{
+    f.dispatcher.tick();const assigned=f.dispatcher.status().shoppingBatch.items.map(item=>item.sourceKey);append();f.launches[0].onExit(1);assert.equal(f.dispatcher.status().attempts,1);
+    f.clock.at+=16*60000;append();f.dispatcher.tick();assert.equal(f.launches.length,1,'a new tail must not bypass the first retry pause');
+    f.clock.at+=15*60000;append();f.dispatcher.tick();assert.equal(f.launches.length,2);assert.deepEqual(f.dispatcher.status().shoppingBatch.items.map(item=>item.sourceKey),assigned);assert.equal(f.dispatcher.status().shoppingBatch.summary.total,f.queue.rows.length);
+    append();f.launches[1].onExit(1);assert.equal(f.dispatcher.status().attempts,2);f.clock.at+=16*60000;append();f.dispatcher.tick();assert.equal(f.launches.length,2);
+    f.clock.at+=105*60000;append();f.dispatcher.tick();assert.equal(f.launches.length,3);append();f.launches[2].onExit(1);
+    for(let i=0;i<3;i++){f.clock.at+=16*60000;append();f.dispatcher.tick();}assert.equal(f.launches.length,3);assert.equal(f.dispatcher.status().attempts,3);
+    f.queue.rows[0]={...f.queue.rows[0],sourceFingerprint:'materially-changed'};f.dispatcher.tick();assert.equal(f.launches.length,4,'an actual assigned metadata change opens a new cohort');
+    f.queue.rows=f.queue.rows.slice(20);append();f.launches[3].onExit(0);assert.equal(f.dispatcher.status().attempts,0);f.clock.at+=16*60000;f.dispatcher.tick();assert.equal(f.launches.length,5,'actual assigned removal continues through later cohorts');assert.equal(f.dispatcher.status().shoppingBatch.items[0].sourceKey,'sesum-product:20');
+    f.queue.rows=[];f.launches[4].onExit(0);
+  }finally{f.close();}
+});
+
+test('unassigned market-refresh families do not reset the assigned twenty-family retry budget',()=>{
+  const ids=Array.from({length:91},(_,i)=>'family-'+i),f=shoppingDispatchFixture([{do:'shopping-market-refresh',watchIds:ids,groups:91}]);
+  try{
+    f.dispatcher.tick();f.queue.rows[0]={...f.queue.rows[0],watchIds:[...ids,'new-tail-family'],groups:92};f.launches[0].onExit(1);assert.equal(f.dispatcher.status().attempts,1);
+    f.clock.at+=16*60000;f.dispatcher.tick();assert.equal(f.launches.length,1);f.clock.at+=15*60000;f.dispatcher.tick();assert.deepEqual(f.dispatcher.status().shoppingBatch.items[0].watchIds,ids.slice(0,20));assert.equal(f.dispatcher.status().shoppingBatch.summary.total,92);
+    f.queue.rows=[];f.launches[1].onExit(0);
+  }finally{f.close();}
+});
+
+test('material unresolved activity status preempts shopping without healthy or timestamp-only dispatch churn',()=>{
+  const f=shoppingDispatchFixture([{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1',sourceFingerprint:'one'}]);
+  const original=f.store.snapshot,status={activity:{health:'ok',details:'Actual current activity list reviewed.',checkedAt:'2026-11-10T08:00:00Z',unresolvedItems:[]}};f.store.snapshot=()=>({...original(),activitySourceStatus:status});
+  try{
+    const initial=changeSignal(f.store);assert.equal(initial.shoppingOnly,true);status.activity.checkedAt='2026-11-10T09:00:00Z';assert.equal(changeSignal(f.store).signature,initial.signature);
+    status.activity={...status.activity,health:'partial',unresolvedItems:[{externalId:'unread-one',reason:'Primary details unavailable.'}]};const unresolved=changeSignal(f.store);assert.equal(unresolved.shoppingOnly,false);assert.notEqual(unresolved.signature,initial.signature);
+    f.dispatcher.tick();assert.equal(f.dispatcher.status().workerScope,'kildeendringer');f.launches[0].onExit(1);
+    status.activity.unresolvedItems.push({externalId:'unread-two',reason:'New actual detail is unavailable.'});assert.notEqual(changeSignal(f.store).signature,unresolved.signature);
+    status.activity.checkedAt='2026-11-10T10:00:00Z';const before=changeSignal(f.store).signature;status.activity.checkedAt='2026-11-10T11:00:00Z';assert.equal(changeSignal(f.store).signature,before);
+  }finally{f.close();}
+});
+
+test('one aggregate market-refresh row cannot exceed the twenty-family launch budget',()=>{
+  const watchIds=Array.from({length:91},(_,i)=>'family-'+i),f=shoppingDispatchFixture([{do:'shopping-market-refresh',groups:91,watchIds}]);
+  try{
+    f.dispatcher.tick();const batch=f.dispatcher.status().shoppingBatch;
+    assert.equal(batch.items.length,1);assert.equal(batch.items[0].groups,20);assert.deepEqual(batch.items[0].watchIds,watchIds.slice(0,20));assert.equal(batch.summary.total,91);assert.equal(batch.summary.shown,20);assert.equal(batch.summary.remaining,71);assert.equal(f.queue.rows[0].watchIds.length,91);
+    f.queue.rows=[{...f.queue.rows[0],groups:71,watchIds:watchIds.slice(20)}];f.launches[0].onExit(0);f.clock.at+=16*60000;f.dispatcher.tick();assert.deepEqual(f.dispatcher.status().shoppingBatch.items[0].watchIds,watchIds.slice(20,40));
+    f.queue.rows=[];f.launches[1].onExit(0);
+  }finally{f.close();}
+});
+
 test('same-count Sesum review changes wake dispatch by source identity, metadata and followed family',()=>{
   let rows=[{do:'shopping-sesum-review',sourceKey:'sesum:KIWI:123',sourceFingerprint:'metadata-a',familyIds:['family-b','family-a'],receiptAt:'2026-11-09T08:00:00Z'}];
   const store={snapshot:()=>({rawItems:{},events:{}}),reviewQueue:()=>({items:[]}),completionReport:()=>({profileReviews:[],missingDrive:[],unsyncedCalendar:[]}),activityFacebook:()=>[],activityFeedStatus:()=>({changedPages:[]}),shopping:{queue:()=>rows}};
@@ -165,7 +317,7 @@ test('missed 07 full run starts when the lease becomes free and is not duplicate
     lease=null;d.tick();assert.equal(launches.length,1);assert.match(launches[0].prompt,/daglige fulle kildekontrollen/);assert.equal(d.status().workerScope,'alle');
     runs=[{scope:'alle',outcome:'partial',startedAt:new Date(clock).toISOString()}];
     launches[0].onExit(0);d.tick();assert.equal(launches.length,1,'a partial full run still counts as the daily attempt');
-    clock+=3600000;d.tick();assert.equal(launches.length,1);
+    clock+=3600000;d.tick();assert.equal(launches.length,2,'a partial without a valid source checkpoint cannot certify the daily full run');
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -193,7 +345,7 @@ test('a completed morning check spanning 07 prevents a duplicate fallback in sum
   for(const boundary of ['2026-10-24T05:00:00Z','2026-10-27T06:00:00Z']){
     const seven=Date.parse(boundary),iso=minutes=>new Date(seven+minutes*60000).toISOString();
     for(const [label,run,expected] of [
-      ['early scheduled partial',{scope:'alle',outcome:'partial',startedAt:iso(-3),finishedAt:iso(12)},0],
+      ['early scheduled partial',{scope:'alle',outcome:'partial',startedAt:iso(-3),finishedAt:iso(12)},1],
       ['early scheduled ok',{scope:'alle',outcome:'ok',startedAt:iso(-3),finishedAt:iso(12)},0],
       ['earlier full check ends before 07',{scope:'alle',outcome:'partial',startedAt:iso(-30),finishedAt:iso(-10)},1],
       ['change scope crosses 07',{scope:'kildeendringer',outcome:'partial',startedAt:iso(-3),finishedAt:iso(12)},1],
