@@ -137,13 +137,14 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,r
   if(chains.some(c=>!CHAIN_CODES.has(c)))throw Error('Ukjent Sesum-kjedekode.');
   const minSpacingMs=Math.max(1500,Number(config.minSpacingMs)||1500),cycleCalls=Math.max(1,Math.min(8,Number(config.cycleCalls)||4));
   const refreshHours=Math.max(1,Number(config.refreshHours)||24);
-  const snapshot=()=>familySnapshot(families().map(f=>{
+  let followedScopeIds=new Set();
+  const snapshot=()=>{const all=families();followedScopeIds=new Set(all.flatMap(f=>(f.products??[]).filter(p=>p.reviewCurrent===true&&p.productKey?.startsWith('sesum:')).map(p=>p.productKey.split(':').at(-1))));return familySnapshot(all.map(f=>{
     const id=f.familyId??f.id;
     if(!config.queryOverrides||!Object.hasOwn(config.queryOverrides,id))return f;
     const queries=config.queryOverrides[id];
     if(!Array.isArray(queries)||!queries.length||queries.some(q=>!text(q,4000)))throw Error('Ugyldige lokale Sesum-søk.');
     return {...f,queries:config.targetedQueries===true?unique(queries):unique([...(Array.isArray(f.queries)&&f.queries.length?f.queries:[f.name]),...queries])};
-  }));
+  }));};
   const path=join(dataDir,'sesum-collector.json.enc');
   let key=encryptionKey,state={schemaVersion:1,run:null,history:[],pauseUntil:null,observations:{},metadataImports:{}},loaded=false,catalogueCache=null;
   function load(){
@@ -371,9 +372,12 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,r
   function scopeActive(run,job){
     if(!config.targetedQueries)return true;
     if(job.kind==='search')return run.families.some(f=>f.queries.includes(new URL(job.url).searchParams.get('q')));
+    const productId=new URL(job.url).pathname.match(/^\/produkt\/(\d+)/)?.[1];
+    if(followedScopeIds.has(productId))return true;
     const slug=new URL(job.url).pathname.replace(/^\/produkt\/\d+-?/,'').replace(/[-/]/g,' ');
     if(!slug.trim())return true;
-    return researchScope({name:job.productObservation?.name??decodeURIComponent(slug)},run.families,config.researchTerms).candidate;
+    let name=job.productObservation?.name;try{name??=decodeURIComponent(slug);}catch{return true;}
+    return researchScope({name},run.families,config.researchTerms).candidate;
   }
   function work({peek=false}={}){
     if(!enabled)return {enabled:false,jobs:[],limits:{minSpacingMs,cycleCalls}};

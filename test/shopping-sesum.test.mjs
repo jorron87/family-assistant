@@ -35,6 +35,11 @@ test('targeted collection retains off-scope search receipts without scheduling i
  const status=f.client.status();assert.equal(status.status,'complete');assert.equal(status.deferredSearchJobs,1);assert.equal(status.manifest[0].productCount,1);assert.equal(Object.values(saved(f).run.jobs).length,3,'original source observations and pending off-scope jobs are retained');
  const restored=createSesumCollector(f.options);assert.equal(restored.status().deferredSearchJobs,1);assert.deepEqual(restored.work().jobs,[]);
 });
+test('targeted discovery does not stop price collection for an explicitly reviewed native Sesum identity',async t=>{
+ const f=fixture(t,{targetedQueries:true,queryOverrides:{'family-0':['tomatoes']},researchTerms:{'family-0':['tomatoes']}}),url='https://www.sesum.no/produkt/456-opaque-brand';
+ f.setFamilies([{familyId:'family-0',name:'Synthetic followed family',unit:'kg',queries:['tomatoes'],products:[{productKey:'sesum:KIWI:456',reviewCurrent:true}]}]);
+ let work=f.client.work(),job=work.jobs[0];await f.client.receive(response(work,job,search(job,{products:[url]})));f.advance(6000);work=f.client.work();assert.equal(work.jobs[0].url,url);assert.equal(f.client.status().deferredSearchJobs,0);
+});
 
 test('all own receipt ages precede configured-chain filtering and survive replay without changing product metadata fingerprints',async t=>{
   const f=fixture(t,{familyCount:2,chainCodes:['KIWI']});let work=f.client.work(),seed=work.jobs[0];await f.client.receive(response(work,seed,search(seed,{products:[productUrl]})));work=f.client.work();const detail=work.jobs[0];
