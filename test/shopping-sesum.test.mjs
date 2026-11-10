@@ -27,6 +27,15 @@ const variableProduct=(job,{basis=true,price=109,observedAt='2026-11-09T10:00:00
 };
 const repairInput=row=>({repair:row.directUnitBasisRepair.repair,runId:row.directUnitBasisRepair.runId,jobIds:[row.jobId],observationFingerprints:{[row.jobId]:row.directUnitBasisRepair.observationFingerprint},parserBuild:DIRECT_BUILD,evidence:'The saved own variable-weight row predates the tested exact own-row unit-label parser; reread only this selected product.'});
 
+test('targeted collection retains off-scope search receipts without scheduling irrelevant product requests',async t=>{
+ const f=fixture(t,{targetedQueries:true,queryOverrides:{'family-0':['tomatoes']},researchTerms:{'family-0':['tomatoes']}});
+ let work=f.client.work(),job=work.jobs[0];assert.equal(new URL(job.url).searchParams.get('q'),'tomatoes');
+ await f.client.receive(response(work,job,search(job,{products:[productUrl,'https://www.sesum.no/produkt/456-whole-chicken']})));
+ f.advance(6000);work=f.client.work();job=work.jobs[0];assert.equal(job.url,productUrl);await f.client.receive(response(work,job,product(job)));
+ const status=f.client.status();assert.equal(status.status,'complete');assert.equal(status.deferredSearchJobs,1);assert.equal(status.manifest[0].productCount,1);assert.equal(Object.values(saved(f).run.jobs).length,3,'original source observations and pending off-scope jobs are retained');
+ const restored=createSesumCollector(f.options);assert.equal(restored.status().deferredSearchJobs,1);assert.deepEqual(restored.work().jobs,[]);
+});
+
 test('all own receipt ages precede configured-chain filtering and survive replay without changing product metadata fingerprints',async t=>{
   const f=fixture(t,{familyCount:2,chainCodes:['KIWI']});let work=f.client.work(),seed=work.jobs[0];await f.client.receive(response(work,seed,search(seed,{products:[productUrl]})));work=f.client.work();const detail=work.jobs[0];
   const raw=product(detail);raw.prices=[{storeCode:'JOKER',storeId:'3',price:7.9,observedAt:'2023-01-01T12:00:00Z',source:'own_actual_receipt',isPromo:false}];raw.priceCandidates=[{storeCode:'MENY_NO',storeId:'5',price:null,observedAt:'2023-01-02T12:00:00Z',source:'own_actual_receipt'}];raw.candidates=[{id:'456',name:'Unrelated fresh suggestion',observedAt:when,source:'related_receipt',sourceUrl:null}];

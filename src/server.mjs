@@ -32,7 +32,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 let libraryPrices;
 try{const config=readConfig('shopping-library.json');if(config.enabled===true&&typeof config.file==='string'){const file=resolve(dirname(configPath('shopping-library.json')),config.file);libraryPrices=libraryPriceProvider(file,{indexFile:join(dirname(file),'shopping-index.json'),horizonDays:config.priceHorizonDays});}}catch(error){if(error.code!=='ENOENT')throw error;}
 let sesum,oda;
-const store = createStore(DATA_DIR,{libraryPrices,sesumCollectionStatus:()=>sesum?.status(),odaConnected:()=>oda?.status().connected===true});
+const store = createStore(DATA_DIR,{sesumResearchTerms:()=>{try{return readConfig('shopping-sesum.json').researchTerms??null;}catch(error){if(error.code==='ENOENT')return null;throw error;}},libraryPrices,sesumCollectionStatus:()=>sesum?.status(),odaConnected:()=>oda?.status().connected===true});
 const resources = createResources({dataDir:DATA_DIR,store});
 const googlePublisher=createGooglePublisher({store,dataDir:DATA_DIR,config:readConfig('sources.json')});
 const homeAssistant=createHomeAssistant({config:process.env.FAMILIEN_HOME_ASSISTANT_CONFIG?JSON.parse(readFileSync(process.env.FAMILIEN_HOME_ASSISTANT_CONFIG,'utf8')):readConfig('home-assistant.json'),dataDir:DATA_DIR});

@@ -10,6 +10,8 @@ import {createSesumPrices} from './sesum-prices.mjs';
 import {createSesumDiscovery} from './sesum-discovery.mjs';
 import {createSesumCatalogue} from './sesum-catalogue.mjs';
 import {sesumCollectionCompletion} from './sesum-completion.mjs';
+import {researchScope,groupPlacementWork} from './sesum-research-scope.mjs';
+import {sesumCatalogueFingerprint} from './sesum-catalogue.mjs';
 import {campaignFingerprint,offerTermsFingerprint,validateCampaignOffer} from './sesum-campaigns.mjs';
 import {productTextHash} from './product-library.mjs';
 import {odaPriceRefreshPlan,checkedOdaPrice,createOdaPriceOverlay,mergeOdaPriceReceipt} from './oda-price-refresh.mjs';
@@ -156,7 +158,7 @@ export function collapseSameProduct(rows,aliases={}) {
   return out;
 }
 
-export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices,sesumCollectionStatus,odaConnected=()=>false}={}) {
+export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices,sesumCollectionStatus,sesumResearchTerms=()=>null,odaConnected=()=>false}={}) {
   state.shopping??={orders:{},watches:{},offers:{},reviews:{},cartReceipts:{},settings:{monitoringEnabled:false,historyFrom:null,stores:[],storageNote:'',stockUpDays:60}};
   const s=state.shopping;
   s.nutrition??={};
@@ -571,7 +573,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       let status;try{status=sesumCollectionStatus();}catch{status=null;}
       collection=sesumCollectionCompletion(status,status?.enabled?sesumFamilies():[]);
     }
-    return {complete:!work.length&&!blockedStores.length&&!blockedRoutes.length&&!blockedCampaigns.length&&!blockedFamilies.length&&!blockedPlacements.length&&!blockedCatalogue.length&&!blockedOda.length&&collection?.complete!==false,work,blockedStores,blockedRoutes,blockedCampaigns,blockedFamilies,blockedPlacements,blockedCatalogue,blockedOda,...(collection?{collection}:{})};
+    const scopeItems=s.settings.monitoringEnabled?sesumPlacement().items:[],researchScopeSummary={sources:scopeItems.length,deferredSearchNoise:scopeItems.filter(i=>!i.discoveryScope.candidate).length,placementTasks:work.filter(i=>i.do==='shopping-sesum-placement-review').length,coverageNote:'Name terms route discovery only; deferred observations are preserved and unreviewed, never product exclusions or complete assortment coverage.'};
+    return {researchScope:researchScopeSummary,complete:!work.length&&!blockedStores.length&&!blockedRoutes.length&&!blockedCampaigns.length&&!blockedFamilies.length&&!blockedPlacements.length&&!blockedCatalogue.length&&!blockedOda.length&&collection?.complete!==false,work,blockedStores,blockedRoutes,blockedCampaigns,blockedFamilies,blockedPlacements,blockedCatalogue,blockedOda,...(collection?{collection}:{})};
   }
   function listRouteAttempt(ids) {return update(()=>{for(const e of listRouteWork())if(ids.includes(e.id)){e.routeAttempts=(e.routeAttempts??0)+1;e.routeRetryAt=null;}return true;});}
   function listRouteFinish(ids,note) {return update(()=>{for(const e of listRouteWork())if(ids.includes(e.id)){if(e.routeAttempts>=3){e.routing='blocked';e.storeName??=NEAREST;e.reason=note??'Kunne ikke sorteres automatisk. Velg butikk selv eller legg varen inn på nytt.';}else e.routeRetryAt=new Date(now().getTime()+(e.routeAttempts>=2?300000:60000)).toISOString();}return true;});}
@@ -1527,10 +1530,13 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       const current=review?.sourceFingerprint===source.sourceFingerprint&&review.registrationFingerprint===registrationFingerprint&&review.familySetFingerprint===semantic.familySetFingerprint;
       items.push({...source,rawFamilyIds:[...source.familyIds],researchedFamilyIds:sesumResearchedFamilyIds(source,semantic.families),registrationFingerprint,familySetFingerprint:semantic.familySetFingerprint,fingerprint:hash(JSON.stringify([source.sourceKey,source.sourceFingerprint,registrationFingerprint,semantic.familySetFingerprint])),status:current?review.status:'pending',reason:current?review.reason??null:'review-all-active-family-placement',retryAt:current?review.retryAt??null:null,review:review?structuredClone(review):null,...(sourceKey?{source:sesumSubjectRecord(source.sourceKey).source,registration:source.kind==='catalogue'?null:discovery.record(source.sourceKey)}:{})});
     }
+    const terms=sesumResearchTerms();
+    for(const item of items){item.discoveryScope=researchScope(item,semantic.families,terms);if(item.registrationFingerprint||item.researchedFamilyIds.length||item.review?.targets?.length||item.status==='blocked')item.discoveryScope={...item.discoveryScope,candidate:true,retainedKnownResearch:true};}
     return {...semantic,items,total:items.length,hasMore:false,scope:{mode:sourceKey?'exact-source':'all-active-sources',sourceKey:sourceKey??null}};
   }
   function sesumPlacementWork({all=false}={}){
-    return sesumPlacement().items.filter(item=>!['reviewed','no-active-family'].includes(item.status)&&(all||item.status!=='blocked'||!item.retryAt||Date.parse(item.retryAt)<=now().getTime())).map(({sourceKey,sourceFingerprint,registrationFingerprint,familySetFingerprint,fingerprint,status,reason,retryAt})=>({do:'shopping-sesum-placement-review',sourceKey,sourceFingerprint,registrationFingerprint,familySetFingerprint,fingerprint,status,reason,retryAt}));
+    const rows=sesumPlacement().items.filter(item=>item.discoveryScope.candidate&&!['reviewed','no-active-family'].includes(item.status)&&(all||item.status!=='blocked'||!item.retryAt||Date.parse(item.retryAt)<=now().getTime()));
+    return groupPlacementWork(rows,item=>item.registrationFingerprint?item.sourceKey:JSON.stringify([sesumCatalogueFingerprint(sesumSubjectRecord(item.sourceKey).source),item.status,item.retryAt])).map(item=>{const project=({sourceKey,sourceFingerprint,registrationFingerprint,familySetFingerprint,fingerprint,status,reason,retryAt})=>({do:'shopping-sesum-placement-review',sourceKey,sourceFingerprint,registrationFingerprint,familySetFingerprint,fingerprint,status,reason,retryAt});return {...project(item),...(item.relatedSources.length?{relatedSources:item.relatedSources.map(project),sourceCount:item.sourceCount,fingerprint:hash(JSON.stringify([item.fingerprint,item.relatedSources.map(r=>r.fingerprint)]))}:{} )};});
   }
   function sesumPlacementReview(input){
     if(!['reviewed','no-active-family','blocked','reopen'].includes(input.status))throw Error('Ugyldig global familievurdering.');

@@ -1,3 +1,4 @@
+import {researchScope} from './sesum-research-scope.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {existsSync,mkdirSync,readFileSync,renameSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -141,7 +142,7 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,r
     if(!config.queryOverrides||!Object.hasOwn(config.queryOverrides,id))return f;
     const queries=config.queryOverrides[id];
     if(!Array.isArray(queries)||!queries.length||queries.some(q=>!text(q,4000)))throw Error('Ugyldige lokale Sesum-søk.');
-    return {...f,queries:unique([...(Array.isArray(f.queries)&&f.queries.length?f.queries:[f.name]),...queries])};
+    return {...f,queries:config.targetedQueries===true?unique(queries):unique([...(Array.isArray(f.queries)&&f.queries.length?f.queries:[f.name]),...queries])};
   }));
   const path=join(dataDir,'sesum-collector.json.enc');
   let key=encryptionKey,state={schemaVersion:1,run:null,history:[],pauseUntil:null,observations:{},metadataImports:{}},loaded=false,catalogueCache=null;
@@ -367,20 +368,27 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,r
     }
     return {selected,scheduler};
   }
+  function scopeActive(run,job){
+    if(!config.targetedQueries)return true;
+    if(job.kind==='search')return run.families.some(f=>f.queries.includes(new URL(job.url).searchParams.get('q')));
+    const slug=new URL(job.url).pathname.replace(/^\/produkt\/\d+-?/,'').replace(/[-/]/g,' ');
+    if(!slug.trim())return true;
+    return researchScope({name:job.productObservation?.name??decodeURIComponent(slug)},run.families,config.researchTerms).candidate;
+  }
   function work({peek=false}={}){
     if(!enabled)return {enabled:false,jobs:[],limits:{minSpacingMs,cycleCalls}};
     const run=ensure(),at=now().getTime();
     if(state.pauseUntil&&Date.parse(state.pauseUntil)>at)return {enabled:true,runId:run.id,jobs:[],pauseUntil:state.pauseUntil,limits:{minSpacingMs,cycleCalls}};
     const active=config.requireSingleBatch===true?Object.values(run.jobs).filter(j=>j.status==='pending'&&j.deliveredUntil&&Date.parse(j.deliveredUntil)>at):[];
     if(active.length)return {enabled:true,runId:run.id,jobs:[],reason:'active-source-batch',retryAt:active.map(j=>j.deliveredUntil).sort()[0],limits:{minSpacingMs,cycleCalls}};
-    const ready=Object.values(run.jobs).filter(j=>j.status==='pending'&&!j.callbackPending&&(!j.retryAt||Date.parse(j.retryAt)<=at)&&(!j.deliveredUntil||Date.parse(j.deliveredUntil)<=at)).sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
+    const ready=Object.values(run.jobs).filter(j=>scopeActive(run,j)&&j.status==='pending'&&!j.callbackPending&&(!j.retryAt||Date.parse(j.retryAt)<=at)&&(!j.deliveredUntil||Date.parse(j.deliveredUntil)<=at)).sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
     const {selected:jobs,scheduler}=fairSelection(run,ready);
     if(!peek){for(const job of jobs)job.deliveredUntil=new Date(at+5*60000).toISOString();if(jobs.length){run.scheduler=scheduler;save();}}
     return {enabled:true,runId:run.id,jobs:jobs.map(({id,kind,url,familyIds})=>({id,kind,url,familyIds})),limits:{minSpacingMs,cycleCalls}};
   }
   function finish(run){
     if(run.repairPriority)run.repairPriority=run.repairPriority.filter(id=>run.jobs[id]?.status==='pending');
-    const jobs=Object.values(run.jobs);
+    const jobs=Object.values(run.jobs).filter(j=>scopeActive(run,j));
     if(jobs.some(j=>j.callbackPending||j.replayFamilyIds?.length)){run.status='collecting';run.finishedAt=null;return;}
     if(jobs.every(j=>j.status!=='pending')){const proven=run.families.every(f=>!(f.queryPlan??[]).some(p=>p.unsearchableTerms.length)&&f.queries.every(q=>jobs.some(j=>j.kind==='search'&&j.familyIds.includes(f.familyId)&&new URL(j.url).searchParams.get('q')===q&&j.endReached===true)));run.status=jobs.some(j=>j.status!=='complete')||!proven?'partial':'complete';run.finishedAt=now().toISOString();}
   }
@@ -519,7 +527,7 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,r
     load();const run=state.run;
     if(!run){const metadataReplayPendingCount=metadataPending().length;return {enabled:true,status:'not_started',familyCount:0,chainCodes:chains,metadataReplayPendingCount,replayPendingCount:metadataReplayPendingCount};}
     const planCurrent=run.fingerprint===digest(snapshot())&&JSON.stringify(run.chainCodes)===JSON.stringify(chains),nextRefreshAt=run.finishedAt?new Date(Date.parse(run.finishedAt)+refreshHours*3600000).toISOString():null,refreshDue=nextRefreshAt!==null&&now()>=Date.parse(nextRefreshAt);
-    const jobs=Object.values(run.jobs),freshChains=job=>unique((job.priceReceipts??[]).filter(p=>p.price!==null&&p.observedAt&&now()-Date.parse(p.observedAt)<=48*3600000).map(p=>p.storeCode)),manifest=run.families.map(f=>{
+    const allJobs=Object.values(run.jobs),jobs=allJobs.filter(j=>scopeActive(run,j)),freshChains=job=>unique((job.priceReceipts??[]).filter(p=>p.price!==null&&p.observedAt&&now()-Date.parse(p.observedAt)<=48*3600000).map(p=>p.storeCode)),manifest=run.families.map(f=>{
       const own=jobs.filter(j=>j.familyIds.includes(f.familyId)),search=own.filter(j=>j.kind==='search'),products=own.filter(j=>j.kind==='product');
       const unsearchableTerms=(f.queryPlan??[]).flatMap(p=>p.unsearchableTerms),collectionStatus=own.some(j=>j.status==='blocked')?'blocked':own.some(j=>j.status==='pending'||j.callbackPending||j.replayFamilyIds?.includes(f.familyId))?'pending':own.some(j=>j.status==='partial')||unsearchableTerms.length?'partial':'complete';
       const completedZeroMatchQueries=f.queries.filter(q=>{const pages=search.filter(j=>new URL(j.url).searchParams.get('q')===q);return pages.length&&pages.every(j=>j.status==='complete'&&j.discovered===0)&&pages.some(j=>j.endReached);});
@@ -527,7 +535,7 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,r
       return {familyId:f.familyId,name:f.name,unit:f.unit,fingerprint:f.fingerprint,collectionStatus,collectionOutcome,requestedQueries:f.requestedQueries??f.queries,queryPlan:f.queryPlan??null,queries:f.queries,completedZeroMatchQueries,searchPages:search.length,productCount:products.length,productsCollected:products.filter(j=>j.status==='complete'&&!j.replayFamilyIds?.includes(f.familyId)).length,unresolvedItems:[...own.filter(j=>j.status!=='complete').map(j=>({jobId:j.id,kind:j.kind,status:j.status,url:j.url,reason:j.observationError??j.error??j.errors??null})),...own.filter(j=>j.replayFamilyIds?.includes(f.familyId)).map(j=>({jobId:j.id,kind:'replay',status:'pending',url:j.url,reason:j.replayError??'family-observation-replay-pending'})),...unsearchableTerms.map(term=>({kind:'query',status:'partial',term,reason:'single-term-exceeds-source-limit-64'}))],chains:chains.map(code=>({chainCode:code,collectionStatus,collectionOutcome:collectionStatus!=='complete'?collectionStatus:!products.length?'no_matches':products.some(j=>j.priceChains?.includes(code))?'prices_collected':'no_chain_prices',observedProducts:products.filter(j=>j.priceChains?.includes(code)).length,freshProducts:products.filter(j=>!j.replayFamilyIds?.includes(f.familyId)&&freshChains(j).includes(code)).length,reviewStatus:products.length?'see_price_integration':'no_candidates',freshnessStatus:products.some(j=>!j.replayFamilyIds?.includes(f.familyId)&&freshChains(j).includes(code))?'has_fresh_candidates':'missing_fresh_price'}))};
     });
     const metadataReplayPendingCount=metadataPending().length;
-    return {enabled:true,status:run.status,runId:run.id,startedAt:run.startedAt,finishedAt:run.finishedAt,planCurrent,nextRefreshAt,refreshDue,pauseUntil:state.pauseUntil,implementationReceipt:state.implementationReceipt??null,metadataReplayPendingCount,replayPendingCount:jobs.filter(j=>j.callbackPending||j.replayFamilyIds?.length).length+metadataReplayPendingCount,replayPendingFamilyCount:jobs.reduce((n,j)=>n+(j.callbackPending?.familyIds.length??j.replayFamilyIds?.length??0),0),familyCount:manifest.length,familyCounts:Object.fromEntries(['pending','partial','blocked','matches_collected','no_matches'].map(outcome=>[outcome,manifest.filter(f=>f.collectionOutcome===outcome).length])),chainCodes:chains,jobCounts:Object.fromEntries(['pending','complete','partial','blocked'].map(status=>[status,jobs.filter(j=>j.status===status).length])),jobCountsByKind:Object.fromEntries(['search','product'].map(kind=>[kind,Object.fromEntries(['pending','complete','partial','blocked'].map(status=>[status,jobs.filter(j=>j.kind===kind&&j.status===status).length]))])),manifest,coverageNote:'Fullførte søk beskriver innhentingen, ikke komplett kjedesortiment, godkjent ekvivalens eller lokal lagerstatus.'};
+    return {deferredSearchJobs:allJobs.length-jobs.length,discoveryScope:config.targetedQueries?'targeted':'unrestricted',enabled:true,status:run.status,runId:run.id,startedAt:run.startedAt,finishedAt:run.finishedAt,planCurrent,nextRefreshAt,refreshDue,pauseUntil:state.pauseUntil,implementationReceipt:state.implementationReceipt??null,metadataReplayPendingCount,replayPendingCount:jobs.filter(j=>j.callbackPending||j.replayFamilyIds?.length).length+metadataReplayPendingCount,replayPendingFamilyCount:jobs.reduce((n,j)=>n+(j.callbackPending?.familyIds.length??j.replayFamilyIds?.length??0),0),familyCount:manifest.length,familyCounts:Object.fromEntries(['pending','partial','blocked','matches_collected','no_matches'].map(outcome=>[outcome,manifest.filter(f=>f.collectionOutcome===outcome).length])),chainCodes:chains,jobCounts:Object.fromEntries(['pending','complete','partial','blocked'].map(status=>[status,jobs.filter(j=>j.status===status).length])),jobCountsByKind:Object.fromEntries(['search','product'].map(kind=>[kind,Object.fromEntries(['pending','complete','partial','blocked'].map(status=>[status,jobs.filter(j=>j.kind===kind&&j.status===status).length]))])),manifest,coverageNote:'Fullførte søk beskriver innhentingen, ikke komplett kjedesortiment, godkjent ekvivalens eller lokal lagerstatus.'};
   }
   function catalog({familyId=null}={}){
     if(familyId!==null&&!text(familyId,200))throw Error('Ugyldig Sesum-varefamilie.');

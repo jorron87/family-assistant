@@ -9,13 +9,13 @@ import {groupMetadataFingerprint,productMetadataFingerprint} from '../src/produc
 
 const NOW='2026-11-10T12:00:00Z',KEY=id=>'sesum:KIWI:'+id;
 const definition=(id,name)=>({id,name,category:'Coffee',canonicalUnit:'kg',inclusionCriteria:'Plain whole roasted coffee beans with actual complete ingredients and form evidence.',exclusions:['Ground coffee','Added flavourings'],qualityBasis:'Actual complete ingredient and fixed-package declaration',comparisonBasis:'Per kg'});
-function fixture(t,count=512){
+function fixture(t,count=512,terms=null){
  const dir=mkdtempSync(join(tmpdir(),'sesum-stages-'));t.after(()=>{assert.ok(resolve(dir).startsWith(resolve(tmpdir(),'sesum-stages-')));rmSync(dir,{recursive:true,force:true});});
  const a=definition('baseline-beans','Baseline whole beans'),b=definition('new-bean-variant','New reviewed whole-bean variant');
  const p={productKey:'kassal:KIWI:71',source:'kassal',store:'KIWI',id:'71',name:'Baseline whole beans 500g',brand:'Baseline',ean:null,ingredients:'Whole roasted coffee beans',description:'Synthetic reviewed original label',sourceUrl:'https://producer.example.test/baseline-beans',canonicalPackAmount:.5,unit:'kg',packEvidence:'Actual synthetic fixed 500g original bag.',rawPack:{weight:500,weightUnit:'g'},nutrition:null};p.metadataFingerprint=productMetadataFingerprint(p);
  const data={schemaVersion:1,createdAt:NOW,updatedAt:NOW,groups:[a],products:[p],memberships:[{groupId:a.id,productKey:p.productKey,status:'approved',reviewedFingerprint:p.metadataFingerprint,reviewedGroupFingerprint:groupMetadataFingerprint(a),equivalenceEvidence:'Read the actual plain whole-bean original ingredients and form.',qualityEvidence:'The full synthetic primary label was read.',reviewedAt:NOW,sourceReceipts:[{url:p.sourceUrl,observedAt:NOW,evidence:'Actual original whole-bean declaration and fixed bag.'}]}],prices:[{productKey:p.productKey,grossPackPrice:30,receiptAt:NOW,sourceUrl:p.sourceUrl,availabilityScope:'chain'}]};
  const file=join(dir,'library.json');writeFileSync(file,JSON.stringify(data),'utf8');let state={},shop;const clock={at:NOW};
- const open=()=>shop=shoppingStore(state,{save(){},now:()=>new Date(clock.at),libraryPrices:libraryPriceProvider(file,{now:()=>new Date(clock.at)})});open();
+ const open=()=>shop=shoppingStore(state,{save(){},now:()=>new Date(clock.at),sesumResearchTerms:()=>terms,libraryPrices:libraryPriceProvider(file,{now:()=>new Date(clock.at)})});open();
  shop.settings({monitoringEnabled:true,stores:[{id:'kiwi',name:'KIWI synthetic',chainCode:'KIWI',url:'https://shop.example.test/kiwi'}]});
  const target=shop.watch({id:'whole-bean-need',name:'Plain whole coffee beans',unit:'kg',storage:'pantry',purchaseAmount:12});
  const link=(groups=[a])=>shop.libraryLink({familyId:target.id,evidence:'Explicit household choice of actual plain whole-bean variants.',variants:groups.map(g=>({groupId:g.id,groupFingerprint:groupMetadataFingerprint(g),evidence:'Actual plain whole-bean contents and use satisfy this current need.'}))});link();
@@ -57,3 +57,11 @@ test('an exact source detail filter preserves full export and never broadens to 
  for(const key of ['sesum:KIWI:10','sesum:REMA_1000:100','sesum:KIWI:100-extra','',{}])assert.deepEqual(f.shop.sesumCandidates(undefined,key),[]);
  assert.equal(f.shop.sesumCandidates().length,3);assert.equal(f.shop.queue().filter(row=>row.do==='shopping-sesum-placement-review').length,3);
 });
+
+ test('targeted routing preserves observations and groups only identical unregistered chain metadata',t=>{
+ const terms={'whole-bean-need':['beans']};for(let n=0;n<90;n++)terms['unrelated-'+n]=['detergent'];
+ const f=fixture(t,2,terms);f.shop.settings({stores:[{id:'kiwi',name:'KIWI',chainCode:'KIWI',url:'https://shop.example.test/kiwi'},{id:'rema',name:'REMA',chainCode:'REMA_1000',url:'https://shop.example.test/rema'}]});
+ f.shop.sesumReceivePrices({familyIds:f.familyIds,fetchedAt:NOW,products:[{...f.sources[0],prices:[{storeCode:'REMA_1000',price:21,observedAt:NOW,source:'actual_synthetic_receipt',isPromo:false}]}]});
+ const before=JSON.stringify(f.state),tasks=f.shop.queue().filter(x=>x.do==='shopping-sesum-placement-review');assert.equal(tasks.length,1);assert.equal(tasks[0].sourceCount,2);assert.equal(tasks[0].relatedSources.length,1);assert.equal(JSON.stringify(f.state),before);
+ assert.equal(f.shop.sesumPlacement().items.length,3);assert.equal(f.shop.completion().researchScope.deferredSearchNoise,1);
+ });

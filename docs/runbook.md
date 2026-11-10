@@ -542,3 +542,14 @@ Konfigurer egne kilder i activity-sources.json og activity-feeds.json. activity-
 `next` viser høyst 20 handleoppgaver i `shopping`, med fullstendige totaltall og typefordeling i `shoppingSummary`. `remaining` og `moreWork` gjelder fortsatt hele arbeidskøen, og `completion` beholder alle fullføringskrav selv om `shopping.work` forkortes til 20 rader (`workCount`/`moreWork` viser resten). Behandle en avgrenset batch og les på nytt; en kort visningsliste betyr aldri at resten er ferdig. Bruk `next --full` eller `completion --full` ved eksplisitt eksport til fil, ikke som vanlig agent-preflight. API-køen er uendret.
 
 Se docs/operations.md. Run-rapporter skal beskrive faktisk arbeid og scope. partial krever konkrete blockers/resumeHint. Historiske hull beholdes, men kontroller ikke uendrede avslåtte dokumenter på nytt uten ny informasjon. Ikke kall full dekning ok fra en frisk probe eller en tom endringskø.
+
+
+## Målrettet Sesum-discovery
+
+Valgfri lokal `shopping-sesum.json` kan bruke `targetedQueries:true`, `queryOverrides` og `researchTerms:{familyId:[kategoriord,...]}`. Alle aktive familier må ha kategoriord; ufullstendig researchTerms-konfigurasjon faller tilbake til uavgrenset forskning. Kategoriord er brede og merkeuavhengige og skal inkludere aktuelle synonymer og sammensetninger. De ruter bare discovery; de godkjenner aldri identitet, ingredienser, fast pakning, ekvivalens eller pris. Et fraværende ord er ikke et semantisk produktavslag.
+
+Med målrettede søk bruker samleren eksplisitte queryOverrides fremfor å utvide med alle biblioteknavn og merkenavn. Gamle brede søkejobber og produktlenker utenfor kategoriordene beholdes, men planlegges ikke som aktive kildeforespørsler. Status viser `deferredSearchJobs`, og aktive manifesttall gjelder det konfigurerte søkeomfanget. Historiske kvitteringer slettes eller fornyes ikke. Dette beviser aldri komplett butikksortiment.
+
+`shopping-sesum-placement` viser fortsatt alle kildeobservasjoner med `discoveryScope`; `completion.shopping.researchScope` viser `deferredSearchNoise` og aktive plasseringer. Kjente registreringer, tidligere positive forskningsmål og eksplisitte blokkeringer beholdes som aktiv forskning selv uten ordtreff. Endrede kategoriord eller varenavn kan hente utsatte observasjoner tilbake. Gjennomgå kategoriordene ved nye behov eller manglende synonymer.
+
+Identiske uregistrerte produktmetadata på tvers av kjeder gir én plasseringsoppgave med `relatedSources`. Les hver oppførings gjeldende fingerprints, gjenbruk bare den faktiske metadata-/familieanalysen og lagre separat placement for hver kilde. Identiteten grupperes etter hele kjedenøytrale metadatafingerprintet, ikke navn eller EAN alene. Ulike registrerte produktgrunnlag forblir separate. Pris-, identitets- og familiegodkjenninger overføres aldri mellom kjeder av grupperingen.
