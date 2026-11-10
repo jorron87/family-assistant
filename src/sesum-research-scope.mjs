@@ -3,7 +3,8 @@ const fold=s=>s.normalize('NFKD').replace(/\p{M}/gu,'').toLocaleLowerCase('nb').
 export function researchScope(source,families,terms){
  if(!terms||families.some(f=>!Array.isArray(terms[f.familyId])||!terms[f.familyId].length))return {mode:'unrestricted',candidate:true};
  const name=fold(source.name);
- const matches=families.filter(f=>terms[f.familyId].some(t=>typeof t==='string'&&t.trim().length>=3&&name.includes(fold(t).trim()))).map(f=>f.familyId);
+ const words=new Set(name.match(/[\p{L}\d]+/gu)??[]);
+ const matches=families.filter(f=>terms[f.familyId].some(t=>{if(typeof t!=='string'||t.trim().length<3)return false;const term=fold(t).trim();return term.length<=4?words.has(term):name.includes(term);})).map(f=>f.familyId);
  return {mode:'targeted-discovery',candidate:matches.length>0,familyIds:matches,reason:matches.length?'category-term-candidate':'outside-configured-discovery-terms'};
 }
 export function groupPlacementWork(rows,identity){

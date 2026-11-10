@@ -12,3 +12,9 @@ test('shared metadata groups research without losing chain-specific review input
  const rows=[{sourceKey:'sesum:KIWI:1',fp:'same'},{sourceKey:'sesum:REMA_1000:1',fp:'same'},{sourceKey:'sesum:KIWI:2',fp:'different'}],before=JSON.stringify(rows),groups=groupPlacementWork(rows,x=>x.fp);
  assert.equal(groups.length,2);assert.equal(groups[0].sourceCount,2);assert.equal(groups[0].relatedSources[0].sourceKey,'sesum:REMA_1000:1');assert.equal(JSON.stringify(rows),before);
 });
+test('short category words do not match inside unrelated compounds',()=>{
+ const families=[{familyId:'salt'},{familyId:'cheese'}],terms={salt:['salt'],cheese:['ost','gulost']};
+ assert.equal(researchScope({name:'Frokostkjeks usaltet'},families,terms).candidate,false);
+ assert.equal(researchScope({name:'Salt 1 kg'},families,terms).candidate,true);
+ assert.equal(researchScope({name:'Norvegia Gulost'},families,terms).candidate,true);
+});
