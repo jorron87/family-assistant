@@ -38,6 +38,17 @@ test('an incidental other Oda product ID in price evidence never changes the can
 test('a known canonical product remains identifiable when its actual price expires, without inventing a fresh quote',t=>{
  const f=fixture(t);f.clock.at='2026-11-13T12:00:00Z';const reader=f.provider.reader(),view=f.shop.familyView();
  assert.equal(reader.byOdaId(f.odaId),f.p.productKey);assert.equal(reader.quote(f.p.productKey).price.fresh,false);assert.equal(view.items[0].prices.current,null);assert.equal(view.odaDraft.items.length,0,'a refresh flow may reuse identity, never a fictitious fresh price');
+ assert.deepEqual(view.odaDraft.refresh.map(x=>x.watchId),[f.w.id]);assert.equal(f.shop.odaRefreshPlan()[0].watchId,f.w.id);
+});
+
+test('a legacy variable-weight approval never promises an unsupported automatic Oda price refresh',t=>{
+ const f=fixture(t,{kind:'flour'}),name='Synthetic plain flour, ca. 2 kg';
+ const row=f.shop.catalogObserve({watchId:f.w.id,products:[{id:f.p.id,store:f.p.store,name,currentPrice:30,lastChecked:NATIVE}]}).entries[0];
+ f.shop.catalogReview({watchId:f.w.id,id:f.p.id,store:f.p.store,fingerprint:row.fingerprint,status:'approved',packAmount:2,unit:'kg',equivalenceEvidence:'Legacy product approval with an estimated variable weight; this is no fixed package.'});
+ f.state.shopping.odaChoices[f.w.id]=f.odaId;
+ const before=f.shop.catalogEntries(f.w.id),view=f.shop.familyView();
+ assert.deepEqual(view.odaDraft.refresh,[]);assert.deepEqual(view.odaDraft.missing,[f.w.name]);assert.deepEqual(f.shop.odaRefreshPlan({force:true}),[]);
+ assert.equal(f.state.shopping.odaChoices[f.w.id],f.odaId);assert.deepEqual(f.shop.catalogEntries(f.w.id),before,'classification preserves approvals and actual price receipts');
 });
 
 test('only a canonical HTTPS Oda product URL supplies a safe retailer identity',()=>{

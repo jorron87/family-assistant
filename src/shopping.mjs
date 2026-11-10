@@ -1228,7 +1228,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       const need=needOf(w,a);if(need.amount===null)continue;
       const options=odaItems.get(w.id),chosen=s.odaChoices[w.id];
       if(!options||chosen&&!options.some(p=>p.productId===chosen)){
-        const known=catalog.entries(w.id).filter(e=>e.store==='ODA_NO'&&e.status==='approved'&&!priceTooOld(e)&&odaProductIdFromUrl(e.sourceUrl));
+        const known=catalog.entries(w.id).filter(e=>e.store==='ODA_NO'&&e.status==='approved'&&!variablePack(e.name)&&e.packAmount>0&&e.unit===w.unit&&!priceTooOld(e)&&odaProductIdFromUrl(e.sourceUrl));
         if(known.length&&(!chosen||known.some(e=>odaProductIdFromUrl(e.sourceUrl)===chosen)))refresh.push({watchId:w.id,name:w.name,reason:chosen?'chosen-variant-needs-refresh':'known-products-need-price',retryAt:s.odaRefreshAttempts[w.id]?.retryAt??null});
         else missing.push(w.name);
         continue;
