@@ -73,6 +73,40 @@ const noFamily=f=>f.review({status:'no-active-family',targets:[],noActiveFamilyV
   reason:'The actual primary-labelled dishwashing brush is a cleaning tool, not honey, whole coffee beans or the exact litter formula.',
   scopeEvidence:'Read the complete current enabled family definitions, ingredient/form/organic/brand requirements and exact litter formula against the actual brush materials and use; no current need accepts this product.'});
 
+test('legacy whole-set receipts recover exact criteria and code handles incompatible changed units after reload',t=>{
+ const f=setup(t);f.ingest();f.review();f.register();f.review();
+ const state=f.state.shopping,original=structuredClone(state.sesumPlacementReviews[SOURCE]);
+ (state.sesumPlacementReviewHistory??=[]).push({...structuredClone(original),historyProofVersion:2});
+ delete state.sesumPlacementReviews[SOURCE].familyProofVersion;delete state.sesumPlacementReviews[SOURCE].reviewedFamilies;
+ const legacy=structuredClone(state.sesumPlacementReviews[SOURCE]);
+ f.shop.watch({...f.own,note:f.own.note+' An actual narrower litter attribute is now required.'});
+ assert.equal(f.work().length,0,'a reviewed kg source cannot match this changed litre-only family');
+ assert.equal(f.row().status,'reviewed');assert.equal(f.row().review.reviewedAt,original.reviewedAt);assert.equal(f.row().review.recoveredFamilyBasis,original.familySetFingerprint);
+ assert.deepEqual(f.row().reviewDelta.familiesToReview,[]);assert.deepEqual(f.row().reviewDelta.codeExcludedFamilies.map(f=>f.familyId),[f.own.id]);
+ assert.deepEqual(state.sesumPlacementReviews[SOURCE],legacy,'read-time reuse never rewrites the original source receipt');
+ f.reload();assert.equal(f.work().length,0);assert.equal(f.row().review.reviewedAt,original.reviewedAt);
+ f.shop.watch({...f.target,note:f.target.note+' A materially changed roasting requirement must be read.'});
+ assert.equal(f.work().length,1);assert.deepEqual(f.row().reviewDelta.familiesToReview,[f.target.id]);
+ assert.deepEqual(f.row().reviewDelta.retainedTargets,[],'a genuinely changed positive requirement is not retained');
+ assert.equal(f.shop.completion().complete,false);
+});
+
+test('source holds stay visible across unrelated family edits, become due normally and reopen on new facts',t=>{
+ const f=setup(t);f.ingest();f.review({status:'blocked',targets:[],reason:'The primary original label is not readable; ingredients remain unknown.',retryAt:'2026-11-10T13:00:00Z'});
+ const original=structuredClone(f.state.shopping.sesumPlacementReviews[SOURCE]);
+ f.shop.watch({...f.wrong,note:f.wrong.note+' A new honey production requirement.'});
+ assert.equal(f.work().length,0);assert.equal(f.row().status,'blocked');assert.equal(f.row().retryAt,original.retryAt);assert.deepEqual(f.row().review,original);
+ const report=f.shop.completion();assert.ok(report.blockedPlacements.some(p=>p.sourceKey===SOURCE&&p.retryAt===original.retryAt));assert.equal(report.complete,false);
+ f.reload();assert.equal(f.work().length,0);f.clock.at='2026-11-10T13:00:01Z';assert.equal(f.work().length,1);assert.equal(f.row().status,'blocked');
+ f.ingest({changes:{name:'A materially changed actual product label 500g'}});assert.equal(f.row().status,'pending');assert.equal(f.row().retryAt,null);assert.equal(f.work().length,1);
+});
+
+test('unknown native units cannot acquire code exclusions from an unreviewed pack or source name',t=>{
+ const f=setup(t);f.ingest();const before=f.row();assert.equal(before.reviewDelta.codeExcludedFamilies,undefined);
+ f.review();f.register();const registered=f.row();assert.ok(registered.reviewDelta.codeExcludedFamilies.some(x=>x.familyId===f.own.id));
+ f.ingest({changes:{name:'A changed actual source variant 500g'}});assert.equal(f.row().reviewDelta.codeExcludedFamilies,undefined,'a stale registered pack never lends a unit to changed source facts');
+});
+
 test('queue and completion each reuse one library snapshot without retaining it between invocations',t=>{
   let reads=0;const f=setup(t,{onLibraryRead:()=>reads++});f.ingest();
   reads=0;const queue=f.shop.queue();assert.equal(reads,1,'all derived work within one queue uses one base reader');

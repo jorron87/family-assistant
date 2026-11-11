@@ -1,6 +1,59 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {researchScope,createResearchScope,groupPlacementWork,placementProof,placementDelta} from '../src/sesum-research-scope.mjs';
+import {researchScope,createResearchScope,groupPlacementWork,placementProof,placementDelta,familyBasisIndex} from '../src/sesum-research-scope.mjs';
+import {createHash} from 'node:crypto';
+
+test('exact historical criteria hashes restore only this source own legacy whole-set decisions',()=>{
+ const old=[{familyId:'coffee',familyFingerprint:'coffee1',unit:'kg'},{familyId:'vegetables',familyFingerprint:'vegetables1',unit:'kg'}],fingerprint=createHash('sha256').update(JSON.stringify(old.map(f=>[f.familyId,f.familyFingerprint]))).digest('hex').slice(0,24);
+ const witness={familySetFingerprint:fingerprint,status:'reviewed',reviewedAllFamilies:true,familyProofVersion:1,reviewedFamilies:old};
+ const bases=familyBasisIndex([witness]),source={sourceKey:'source:own',sourceFingerprint:'own-facts'},latest={...source,registrationFingerprint:null,familySetFingerprint:fingerprint,status:'no-active-family',reviewedAllFamilies:true,noActiveFamilyVerified:true,scopeEvidence:'Actually read all the original family criteria against this source.',targets:[],reviewedAt:'2026-11-10T12:00:00Z'};
+ const families=[old[0],{...old[1],familyFingerprint:'vegetables2'}],delta=placementDelta(source,null,latest,families,bases);
+ assert.deepEqual(delta.retainedFamilyIds,['coffee']);assert.deepEqual(delta.familiesToReview,['vegetables']);assert.equal(delta.recoveredFamilyBasis,fingerprint);
+ const proof=placementProof(source,'same-criteria-new-set',null,latest,[],old,bases);assert.equal(proof.status,'no-active-family');assert.equal(proof.reviewedAt,latest.reviewedAt);assert.equal(latest.familySetFingerprint,fingerprint);
+ for(const changed of [{...latest,status:'reopen'},{...latest,status:'blocked'},{...latest,sourceKey:'other'},{...latest,sourceFingerprint:'changed'},{...latest,registrationFingerprint:'changed'},{...latest,reviewedAllFamilies:false},{...latest,noActiveFamilyVerified:false},{...latest,scopeEvidence:''},{...latest,familyProofVersion:2}])assert.equal(placementDelta(source,null,changed,families,bases).familiesToReview.length,2);
+ for(const invalid of [{...witness,familySetFingerprint:'guessed'},{...witness,reviewedFamilies:[old[0],old[0]]},{...witness,status:'reopen'},{...witness,familyProofVersion:undefined},{...witness,reviewedAllFamilies:false}])assert.equal(familyBasisIndex([invalid]).size,0);
+ assert.equal(familyBasisIndex([{...witness,familySetFingerprint:'bad'},witness]).size,1);
+ const positive={...latest,status:'reviewed',targets:[{...old[0],equivalenceEvidence:'Actual reviewed original whole-bean ingredients and form.'}]};
+ assert.equal(placementDelta(source,null,positive,families,bases).retainedTargets.length,1);
+ assert.equal(placementDelta(source,null,{...positive,targets:[{...positive.targets[0],familyFingerprint:'guessed'}]},families,bases).retainedTargets.length,0);
+ assert.equal(placementDelta(source,null,{...latest,targets:[],reviewedAllFamilies:undefined},families,bases).retainedFamilyIds.length,0,'a peer review never approves another source');
+});
+
+test('code rejects only incompatible current canonical units and never invents a positive target',()=>{
+ const source={sourceKey:'source:soap',sourceFingerprint:'facts',placementUnit:'l'},families=[{familyId:'soap',familyFingerprint:'s1',unit:'l'},{familyId:'vegetables',familyFingerprint:'v2',unit:'kg'},{familyId:'unknown',familyFingerprint:'u1'}],latest={...source,registrationFingerprint:'approved',status:'reviewed',reviewedAllFamilies:true,familyProofVersion:1,reviewedFamilies:[families[0],{...families[1],familyFingerprint:'v1'},families[2]],targets:[{...families[0],equivalenceEvidence:'Actual reviewed liquid soap contents and fixed pack.'}],reviewedAt:'2026-11-10T12:00:00Z'};
+ const d=placementDelta(source,'approved',latest,families);assert.deepEqual(d.familiesToReview,[]);assert.deepEqual(d.codeExcludedFamilies,[{familyId:'vegetables',familyFingerprint:'v2',rule:'canonical-unit-mismatch-v1',sourceUnit:'l',familyUnit:'kg'}]);
+ const proof=placementProof(source,'new-set','approved',latest,[],families);assert.equal(proof.targets.length,1);assert.equal(proof.targets[0].familyId,'soap');assert.equal(proof.reviewedAt,latest.reviewedAt);
+ for(const unit of [undefined,null,'guessed',''])assert.deepEqual(placementDelta({...source,placementUnit:unit},'approved',latest,families).familiesToReview,['vegetables']);
+ assert.deepEqual(placementDelta(source,'approved',null,families).familiesToReview,['soap','unknown'],'unknown identity still needs all potentially matching families');
+ assert.equal(placementProof(source,'new-set','changed-registration',latest,[],families),null);
+});
+
+test('unchanged identity holds retain their retry across a changed checklist without reviving any approval',()=>{
+ const source={sourceKey:'source:unknown',sourceFingerprint:'facts'},latest={...source,registrationFingerprint:null,familySetFingerprint:'old',status:'blocked',reason:'The actual original ingredient label is unavailable.',evidence:'The unreadable actual source was checked.',retryAt:'2026-11-11T12:00:00Z',reviewedAt:'2026-11-10T12:00:00Z'};
+ assert.equal(placementProof(source,'changed-checklist',null,latest),latest);
+ for(const changed of [{...latest,status:'reopen'},{...latest,retryAt:null},{...latest,sourceFingerprint:'changed'},{...latest,sourceKey:'other'},{...latest,registrationFingerprint:'new'}])assert.equal(placementProof(source,'changed-checklist',null,changed),null);
+});
+
+test('a 91-family corpus retains historical negatives, routes every genuine change and preserves unmapped newcomers',()=>{
+ const old=Array.from({length:91},(_,i)=>({familyId:'family-'+String(i).padStart(2,'0'),familyFingerprint:'original-'+i,unit:['kg','l','stk'][i%3]}));
+ const fingerprint=createHash('sha256').update(JSON.stringify(old.map(f=>[f.familyId,f.familyFingerprint]))).digest('hex').slice(0,24),witness={familySetFingerprint:fingerprint,status:'reviewed',reviewedAllFamilies:true,familyProofVersion:1,reviewedFamilies:old};
+ const bases=familyBasisIndex([witness]),current=old.map((f,i)=>i===0?{...f,familyFingerprint:'actual-expanded-vegetable-scope'}:f);
+ for(let i=0;i<1000;i++){
+  const source={sourceKey:'source:'+i,sourceFingerprint:'unchanged-'+i,...(i%4?{placementUnit:['kg','l','stk'][i%3]}:{})};
+  const latest={...source,registrationFingerprint:null,familySetFingerprint:fingerprint,status:'no-active-family',reviewedAllFamilies:true,noActiveFamilyVerified:true,scopeEvidence:'Read the complete historical family set against the actual product facts.',targets:[],reviewedAt:'2026-11-10T12:00:00Z'};
+  const before=JSON.stringify(latest),delta=placementDelta(source,null,latest,current,bases),cannotMatch=source.placementUnit&&source.placementUnit!=='kg';
+  assert.deepEqual(delta.familiesToReview,cannotMatch?[]:['family-00']);
+  assert.equal(delta.retainedFamilyIds.length,90);assert.deepEqual(delta.retainedTargets,[]);
+  const proof=placementProof(source,'changed-family-set',null,latest,[],current,bases);
+  assert.equal(!!proof,!!cannotMatch);if(proof){assert.equal(proof.status,'no-active-family');assert.equal(proof.reviewedAt,latest.reviewedAt);}
+  assert.equal(JSON.stringify(latest),before);
+  const newcomer=placementDelta({...source,sourceKey:'new-unmapped-'+i},null,null,current,bases);
+  assert.ok(newcomer.familiesToReview.includes('family-00')===!cannotMatch,'unmapped candidates with compatible or unknown units always remain');
+  assert.equal(newcomer.retainedFamilyIds.length,0);assert.equal(newcomer.retainedTargets.length,0);
+  const changed=placementDelta({...source,sourceFingerprint:'changed-actual-facts'},null,latest,current,bases);
+  assert.equal(changed.retainedFamilyIds.length,0,'changed source facts never reuse historical family verdicts');
+ }
+});
 
 test('current explicit scope equivalence reuses the latest positive without reviving an older negative or changing its read time',()=>{
  const source={sourceKey:'sesum:KIWI:1',sourceFingerprint:'source'},families=[{familyId:'vegetable',familyFingerprint:'parent-scope',equivalentFamilyFingerprints:['parent-with-covered-child']}],latest={sourceKey:source.sourceKey,sourceFingerprint:'source',registrationFingerprint:'registered',familySetFingerprint:'old-expanded-set',status:'reviewed',reviewedAllFamilies:true,familyProofVersion:1,reviewedFamilies:[{familyId:'vegetable',familyFingerprint:'parent-with-covered-child'}],targets:[{familyId:'vegetable',familyFingerprint:'parent-with-covered-child',equivalenceEvidence:'Actual current positive ingredient and form assessment.'}],reviewedAt:'2026-11-10T12:00:00Z'},older={...latest,status:'no-active-family',targets:[],familySetFingerprint:'current-parent-set',historyProofVersion:2};

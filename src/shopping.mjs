@@ -12,7 +12,7 @@ import {createSesumPrices,sesumDonorFingerprint} from './sesum-prices.mjs';
 import {createSesumDiscovery} from './sesum-discovery.mjs';
 import {createSesumCatalogue} from './sesum-catalogue.mjs';
 import {sesumCollectionCompletion} from './sesum-completion.mjs';
-import {createResearchScope,groupPlacementWork,placementProof,placementDelta} from './sesum-research-scope.mjs';
+import {createResearchScope,groupPlacementWork,placementProof,placementDelta,familyBasisIndex} from './sesum-research-scope.mjs';
 import {sesumCatalogueFingerprint} from './sesum-catalogue.mjs';
 import {campaignFingerprint,offerTermsFingerprint,validateCampaignOffer} from './sesum-campaigns.mjs';
 import {productTextHash} from './product-library.mjs';
@@ -1530,8 +1530,10 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   }
   function sesumEffectiveFamilyIds(source,families){const prior=Object.entries(s.sesumFamilyReviews[source.sourceKey]??{}).filter(([id,row])=>s.watches[id]?.enabled!==false&&s.watches[id]&&(row.status==='excluded'||row.holdExcluded===true)).map(([id])=>id);return [...new Set([...source.familyIds,...sesumResearchedFamilyIds(source,families),...prior])];}
   function currentSesumPlacement(source,semantic,registrationFingerprint){
-    return placementProof(source,semantic.familySetFingerprint,registrationFingerprint,s.sesumPlacementReviews[source.sourceKey],s.sesumPlacementReviewHistory,semantic.families);
+    return placementProof(placementUnitSource(source),semantic.familySetFingerprint,registrationFingerprint,s.sesumPlacementReviews[source.sourceKey],s.sesumPlacementReviewHistory,semantic.families,sesumFamilyBasisIndex());
   }
+  function sesumFamilyBasisIndex(){return readValue('sesum-family-proof-bases',()=>familyBasisIndex([...Object.values(s.sesumPlacementReviews),...(s.sesumPlacementReviewHistory??[])]));}
+  function placementUnitSource(source){const approved=sesumResearches().get(source.sourceKey);return approved?.sourceFingerprint===source.sourceFingerprint?{...source,placementUnit:approved.unit}:source;}
   function sesumResearchFamilyIds(source,semantic,registrationFingerprint){
     const review=currentSesumPlacement(source,semantic,registrationFingerprint);
     const targets=review?.status==='reviewed'&&review.reviewedAllFamilies===true&&Array.isArray(review.targets)?review.targets.map(target=>target.familyId):[];
@@ -1552,7 +1554,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   }
   function sesumPlacement(...args){return inReadContext(()=>sesumPlacementInContext(...args));}
   function sesumPlacementInContext(sourceKey){
-    return readValue('sesum-placement',()=>{const result=buildSesumPlacement(sourceKey);for(const item of result.items)item.reviewDelta=placementDelta(item,item.registrationFingerprint,s.sesumPlacementReviews[item.sourceKey],result.families);return result;},[sourceKey]);
+    return readValue('sesum-placement',()=>{const result=buildSesumPlacement(sourceKey);for(const item of result.items)item.reviewDelta=placementDelta(placementUnitSource(item),item.registrationFingerprint,s.sesumPlacementReviews[item.sourceKey],result.families,sesumFamilyBasisIndex());return result;},[sourceKey]);
   }
   function buildSesumPlacement(sourceKey){
     const semantic=sesumPlacementFamilies(),reader=libReader(),research=sesumResearches(reader),chains=linkChains(),items=[];

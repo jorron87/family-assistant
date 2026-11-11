@@ -113,8 +113,9 @@ test('a future blocked retry is durable, absent from active work and still block
   assert.equal(f.candidate().families.find(row=>row.familyId===f.w.id).sourceDecision.status,'blocked');
   f.reload();assert.equal(f.work().length,0);assert.equal(f.shop.completion().blockedFamilies.length,1);
   f.shop.watch({id:'separate-liquid-need',name:'Separate exact non-food liquid formula',unit:'l',storage:'other',note:'Only this exact non-food liquid formula; whole coffee beans are excluded.'});
-  assert.ok(f.shop.queue().some(row=>row.sourceKey===SOURCE&&row.do==='shopping-sesum-placement-review'),'a new family reopens whole-set placement');
-  assert.equal(f.shop.completion().blockedFamilies.length,1,'reopened placement preserves an earlier explicit scoped future retry');
+  assert.ok(!f.shop.queue().some(row=>row.sourceKey===SOURCE&&row.do==='shopping-sesum-placement-review'),'reviewed kg coffee cannot match a new litre-only family');
+  assert.equal(f.shop.sesumPlacement(SOURCE).items[0].reviewDelta.codeExcludedFamilies[0].rule,'canonical-unit-mismatch-v1');
+  assert.equal(f.shop.completion().blockedFamilies.length,1,'the code-resolved placement preserves the actual scoped future retry');
   f.clock.at='2026-11-10T13:00:01Z';assert.equal(f.work().length,1);assert.equal(f.work()[0].registrationFingerprint,before.registrationFingerprint);
 });
 
