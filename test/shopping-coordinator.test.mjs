@@ -17,7 +17,7 @@ function fixture(count=60,{large=false,chains=false}={}){
  if(large)for(const w of Object.values(state.shopping.watches))w.note+=' Large actual requirements. '.repeat(2000);
  const products=corpus.map(c=>({id:String(1000+c.caseNumber),name:c.name,brand:c.brand,ean:[],weight:c.weight,weightUnit:c.weightUnit,soldByWeight:false,sourceUrl:'https://www.sesum.no/produkt/'+(1000+c.caseNumber)+'-synthetic'})),now=new Date(time.at).toISOString();
  if(chains)shop.sesumReceivePrices({familyIds:[],fetchedAt:now,products:products.map(p=>({...p,prices:['KIWI','REMA_1000','COOP_EXTRA'].map(storeCode=>({storeCode,price:25,observedAt:now,source:'receipt_realtime',isPromo:false,promotion:null}))}))});else shop.sesumReceiveMetadata({familyIds:[],fetchedAt:now,products});
- const store={shopping:shop,snapshot:()=>state,profile:()=>({timezone:'Europe/Oslo'})},options={store,root:dir,dataDir:dir,endpoint:'http://127.0.0.1:1/worker',clock:()=>time.at,alive:()=>true,shouldYield:()=>yielding.value,launch:input=>{launches.push(input);return {pid:111};}},coordinator=createShoppingCoordinator(options),plan=planShoppingWorkers(shop.queue().filter(i=>i.do==='shopping-sesum-placement-review'),3);
+ const store={shopping:shop,snapshot:()=>state,profile:()=>({timezone:'Europe/Oslo'})},options={store,root:dir,dataDir:dir,endpoint:'http://127.0.0.1:1/worker',clock:()=>time.at,alive:()=>true,shouldYield:()=>yielding.value,launch:input=>{launches.push(input);return {pid:111};}},coordinator=createShoppingCoordinator(options),plan=planShoppingWorkers(shop.queue().filter(i=>i.do==='shopping-sesum-placement-review'),count<=20?1:3);
  const start=()=>coordinator.start({token:state.runLease.token,batches:plan.batches});
  const packet=index=>shop.agentContext(workerManifest(plan.batches[index]));
  const call=(index,name,input={},target=coordinator)=>target.handle(launches[index].workerId,launches[index].token,name,input);
@@ -35,6 +35,17 @@ test('three workers claim sixty whole products with no overlap; all related chai
 });
 test('unsupported first job keeps its place and is never hidden by parallel routing',()=>{
  assert.equal(planShoppingWorkers([{do:'shopping-review',storeId:'urgent-flyer'},{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1'}],3),null);assert.throws(()=>planShoppingWorkers([],4),/three/);
+});
+
+test('small waves fill all configured workers without splitting identities or passing priority work',()=>{
+ for(let length=2;length<=60;length++){
+  const queue=Array.from({length},(_,i)=>({do:'shopping-product-review',productKey:'native:'+i}));
+  queue.push({do:'shopping-review',storeId:'priority-flyer'},{do:'shopping-product-review',productKey:'later'});
+  const plan=planShoppingWorkers(queue,3),sizes=plan.batches.map(b=>b.jobs.length);
+  assert.equal(sizes.length,Math.min(length,3));assert.ok(Math.max(...sizes)<=20);assert.ok(Math.max(...sizes)-Math.min(...sizes)<=1);
+  assert.deepEqual(plan.batches.flatMap(b=>b.jobs.map(j=>j.id)),queue.slice(0,length).map(i=>'product:'+i.productKey));
+  if(length===27)assert.deepEqual(sizes,[9,9,9]);
+ }
 });
 test('coordinator rejects overlapping assignments and foreign leases before launching',()=>{
  const f=fixture();try{assert.throws(()=>f.coordinator.start({token:'foreign',batches:f.plan.batches}),/lease/);assert.throws(()=>f.coordinator.start({token:f.state.runLease.token,batches:[f.plan.batches[0],f.plan.batches[0]]}),/Overlapping/);assert.equal(f.launches.length,0);}finally{f.close();}

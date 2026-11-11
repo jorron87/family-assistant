@@ -20,7 +20,8 @@ export function planShoppingWorkers(queue,workers=3){
  if(!Number.isInteger(workers)||workers<1||workers>3)throw Error('Use one to three shopping workers.');
  const jobs=[];for(const job of shoppingAgentJobs(queue)){if(!workerEligible(job)||jobs.length===workers*20)break;jobs.push(job);}
  if(jobs.length<2)return null;
- return {batch:workerBatch(jobs,queue),batches:Array.from({length:Math.ceil(jobs.length/20)},(_,i)=>workerBatch(jobs.slice(i*20,i*20+20),queue))};
+ const count=Math.min(workers,jobs.length);
+ return {batch:workerBatch(jobs,queue),batches:Array.from({length:count},(_,i)=>workerBatch(jobs.slice(Math.floor(i*jobs.length/count),Math.floor((i+1)*jobs.length/count)),queue))};
 }
 export function workerManifest(batch){
  const manifest=agentManifest(batch);
