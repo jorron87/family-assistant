@@ -3,6 +3,27 @@ import {createIngestionDispatcher,changeSignal} from '../src/ingestion-dispatch.
 import {createStore} from '../src/store.mjs';
 import {agentFamilyBasis,buildAgentContext} from '../src/shopping-agent-context.mjs';
 
+test('an idle dispatcher recovers only its coordinators exact finished lease, preserving foreign owners and pauses',()=>{
+ for(const gate of ['own','foreign','paused','safety']){
+  let acknowledgements=0;const pool={status:()=>({running:false,...(gate==='safety'?{attention:{reason:'Explicit safety stop'}}:{})}),finishedLeaseForRecovery:()=>({token:'owned-test-batch'}),acknowledgeFinishedLease:()=>acknowledgements++},f=shoppingDispatchFixture([],{enabled:gate!=='paused'},undefined,false,pool),reports=[];
+  try{f.store.beginRun();if(gate==='foreign'){const original=f.store.snapshot;f.store.runLease=()=>({token:'foreign'});f.store.snapshot=()=>({...original(),runLease:{token:'foreign'}});}
+   f.store.recordRun=r=>reports.push(r);f.dispatcher.tick();
+   assert.equal(acknowledgements,gate==='own'?1:0);assert.equal(reports.length,gate==='own'?1:0);
+   if(gate==='own'){assert.equal(f.store.snapshot().runLease,null);assert.equal(reports[0].outcome,'error');assert.equal(reports[0].scope,'handel');}
+   else assert.ok(f.store.snapshot().runLease);
+  }finally{f.close();}
+ }
+});
+
+test('a current foreign lease skips expensive read models but normal expiry permits dispatch',()=>{
+ const f=shoppingDispatchFixture([{do:'shopping-product-review',productKey:'kassal:ODA_NO:1',watchId:'family',fingerprint:'current'}]);
+ try{f.store.beginRun();f.store.snapshot().runLease.expiresAt=new Date(f.clock.at+60000).toISOString();
+  const completion=f.store.completionReport;f.store.completionReport=()=>{throw Error('Foreign owner must not trigger read model construction');};
+  f.dispatcher.tick();assert.equal(f.launches.length,0);assert.equal(f.store.snapshot().runLease.token,'owned-test-batch');
+  f.clock.at+=60001;f.store.completionReport=completion;f.dispatcher.tick();assert.equal(f.launches.length,1);f.launches[0].onExit(0);
+ }finally{f.close();}
+});
+
 test('finished source work hands independent shopping over immediately while family priority and shopping failure backoff remain',()=>{
  const f=shoppingDispatchFixture([{do:'shopping-product-review',productKey:'kassal:ODA_NO:1',watchId:'family',fingerprint:'needs-review'}]);f.store.reviewQueue=()=>({items:[{source:'spond',externalId:'known-blocked',listingHash:'same',reason:'Actual unchanged source gap'}]});
  try{f.dispatcher.tick();assert.equal(f.dispatcher.status().workerScope,'kildeendringer');f.launches[0].onExit(0);f.store.phone.list=()=>[{status:'queued'}];f.dispatcher.tick();assert.equal(f.launches.length,1);f.store.phone.list=()=>[];f.dispatcher.tick();assert.equal(f.launches.length,2,'the source minGap does not delay the first shopping wave');assert.equal(f.dispatcher.status().workerScope,'handel');f.launches[1].onExit(1);f.dispatcher.tick();assert.equal(f.launches.length,2,'same shopping cohort failure retains backoff');}finally{f.close();}

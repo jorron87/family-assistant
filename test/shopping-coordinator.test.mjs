@@ -28,6 +28,20 @@ async function readAll(f,index=0,options={}){const h=await f.call(index,'shoppin
 const startPool=(f,options={})=>f.coordinator.start({token:f.state.runLease.token,batches:f.plan.batches,pool:{capacity:3,batchSize:20,...options}});
 function finish(f,index,outcome='deferred'){writeFileSync(join(f.launches[index].directory,'result.json'),JSON.stringify({outcome,summary:'Scoped current product work checked.',reason:'Downstream source registration requires a separate actual primary label review.'}));f.launches[index].onExit(0);}
 
+test('finished lease ownership survives restart privately and never authorizes releasing a newer lease',()=>{
+ const f=fixture(5);try{
+  f.start();assert.equal(f.coordinator.finishedLeaseForRecovery(),null);finish(f,0);
+  const recovered=createShoppingCoordinator(f.options),receipt=recovered.finishedLeaseForRecovery();
+  assert.equal(receipt.token,'owner-test-lease');assert.equal(receipt.runId,recovered.status().last.id);
+  assert.ok(!JSON.stringify(recovered.status()).includes(receipt.token));
+  receipt.token='mutated-copy';assert.equal(recovered.finishedLeaseForRecovery().token,'owner-test-lease');
+  f.state.runLease={token:'another-agents-lease'};assert.equal(recovered.finishedLeaseForRecovery(),null);
+  recovered.acknowledgeFinishedLease('another-agents-lease');f.state.runLease={token:'owner-test-lease'};
+  assert.equal(recovered.finishedLeaseForRecovery().token,'owner-test-lease');
+  recovered.acknowledgeFinishedLease('owner-test-lease');assert.equal(createShoppingCoordinator(f.options).finishedLeaseForRecovery(),null);
+ }finally{f.close();}
+});
+
 test('one batched dataprep is exactly equivalent to three current packets and is not reused across requests',()=>{
  const f=fixture();try{const manifests=f.plan.batches.map(workerManifest),packets=f.shop.agentContexts(manifests);assert.deepEqual(packets,manifests.map(a=>f.shop.agentContext(a)));f.shop.watch({...f.state.shopping.watches['synthetic-beef-strips'],note:'New exact reviewed family criteria exclude all previous forms.'});const changed=f.shop.agentContexts(manifests);assert.notEqual(changed[0].contextFingerprint,packets[0].contextFingerprint);assert.deepEqual(changed,manifests.map(a=>f.shop.agentContext(a)));}finally{f.close();}
 });

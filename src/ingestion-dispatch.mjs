@@ -90,7 +90,16 @@ export function createIngestionDispatcher({store,resources,root,dataDir,shopping
     const latest=store.runHistory().runs.find(run=>run.scope==='alle'&&run.outcome!=='skipped');
     if(latest&&Date.parse(latest.finishedAt)> (state.lastFinishedAt??0)){state.lastError=null;save();}
   };
-  const release=token=>{if(store.snapshot().runLease?.token===token)store.endRun(token);};
+  const currentLease=()=>typeof store.runLease==='function'?store.runLease():store.snapshot().runLease;
+  const release=token=>{if(currentLease()?.token===token){store.endRun(token);shoppingCoordinator?.acknowledgeFinishedLease?.(token);}};
+  function recoverFinishedLease(){
+    if(running||state.worker)return false;
+    const receipt=shoppingCoordinator?.finishedLeaseForRecovery?.();
+    if(!receipt||currentLease()?.token!==receipt.token)return false;
+    try{store.recordRun({scope:'handel',outcome:'error',summary:'Ryddet egen kjørelås etter avsluttet koordinert handelsøkt. Varekvitteringer og restanser er bevart.',blockers:['Koordinatorens avsluttede økt manglet bekreftet låsfrigjøring. Ingen varejobb eller kildedekning kvitteres ferdig av oppryddingen.'],resumeHint:'Fortsett fra gjeldende varekvitteringer og full handelskø med nye frosne tildelinger.'});}
+    finally{release(receipt.token);}
+    return true;
+  }
   const scheduleContinuation=()=>{const cfg=config();if(clock!==Date.now||!state.shoppingContinuation||cfg.enabled!==true)return;const seconds=cfg.shoppingProgressGapSeconds;if(!Number.isInteger(seconds)||seconds<10||seconds>900)return;clearTimeout(continuationTimer);continuationTimer=setTimeout(()=>tick(),seconds*1000);continuationTimer.unref();};
   function poll(){
     if(state.worker?.mode!=='shopping-coordinator')return;
@@ -101,7 +110,7 @@ export function createIngestionDispatcher({store,resources,root,dataDir,shopping
       pool=shoppingCoordinator.refill({queue:cfg.enabled===true&&!newSource?agentQueue():[],stopReason:cfg.enabled!==true?'owner-pause':newSource?'new-source-work':null});
     }
     if(pool?.running)return;
-    const worker=state.worker,result=pool?.last,owned=store.snapshot().runLease?.token===worker.token;
+    const worker=state.worker,result=pool?.last,owned=currentLease()?.token===worker.token;
     state.lastFinishedAt=clock();state.lastError=pool?.attention?'Handelsarbeideren meldte en eksplisitt sikkerhetsstopp.':!result||result.id!==worker.coordinatorId||result.code!==0?'En handelsarbeider ble avbrutt; alle uavklarte varer er bevart.':null;
     state.shoppingContinuation=owned&&!result?.preempted&&!state.lastError&&result?.positiveProgress===true;
     state.lastMetrics={scope:'handel',assignedJobs:result?.pool?.assignedJobs??worker.shoppingBatch.jobs.length,workers:result?.slots?.map(s=>s.metrics)??[],applied:result?.applied??0,...(result?.pool?{refills:result.pool.refills}:{} )};
@@ -158,6 +167,11 @@ export function createIngestionDispatcher({store,resources,root,dataDir,shopping
       state.worker=null;running=false;state.lastError='Agentprosessen ble avbrutt; arbeidet er bevart.';save();
     }
     const cfg=config();if(running||cfg.enabled!==true)return;
+    recoverFinishedLease();
+    // A foreign/current lease prevents launch. Do not rebuild the complete
+    // source and shopping read models merely to rediscover that at beginRun.
+    // Expired leases still go through beginRun's ordinary interruption report.
+    const held=currentLease();if(held&&Date.parse(held.expiresAt)>clock())return;
     if(cfg.shoppingWorkers!=null&&(!Number.isInteger(cfg.shoppingWorkers)||cfg.shoppingWorkers<1||cfg.shoppingWorkers>3)){state.lastError='dispatch.shoppingWorkers må være et heltall fra 1 til 3.';save();return;}
     if(cfg.shoppingWorkerBatchSize!=null&&(!Number.isInteger(cfg.shoppingWorkerBatchSize)||cfg.shoppingWorkerBatchSize<1||cfg.shoppingWorkerBatchSize>20)){state.lastError='dispatch.shoppingWorkerBatchSize må være et heltall fra 1 til 20.';save();return;}
     // Family-submitted work has priority over automatically discovered work.
@@ -286,7 +300,7 @@ Kontroller faktisk lagrede kvitteringer og completion før avslutning. Påstå a
       }
       const child=launch({root,prompt:(familyBasis?.prompt??'')+scopedPrompt+'\n'+researchPrompts+(scope==='handel'?'':'\n'+originalReuse),onExit:finish});if(!finished&&child?.pid){state.worker={pid:child.pid,token,scope,startedAt:clock(),...(shoppingBatch?{shoppingBatch}:{} ),...(familyBasis?{familyBasisFingerprint:familyBasis.familyBasisFingerprint,providedContextFingerprint:familyBasis.providedContextFingerprint??null}:{})};save();}}catch(error){finish(-1,error.message);}
   }
-  function renew(){if(running&&state.worker&&store.snapshot().runLease?.token===state.worker.token)store.renewRun(state.worker.token);}
+  function renew(){if(running&&state.worker&&currentLease()?.token===state.worker.token)store.renewRun(state.worker.token);}
   const status=()=>{clearRecoveredLoginError();return {enabled:config().enabled===true,running,workerScope:state.worker?.scope??null,shoppingBatch:state.worker?.shoppingBatch??null,familyBasisFingerprint:state.worker?.familyBasisFingerprint??null,providedContextFingerprint:state.worker?.providedContextFingerprint??null,sourceChanges:{...state.sourceBudget},attempts:(state.lastWorkScope==='kildeendringer'?state.sourceBudget.attempts:state.attempts)??0,dailyFullFallback:config().dailyFullFallback===true,dailyFull:state.daily??null,lastStartedAt:state.lastStartedAt??null,lastFinishedAt:state.lastFinishedAt??null,retryAt:(state.lastWorkScope==='handel'?state.retryAt:state.sourceBudget.retryAt??state.retryAt)??null,lastError:state.lastError??null,lastMetrics:state.lastMetrics??null,shoppingContinuation:state.shoppingContinuation===true};};
   function resumeAfterLogin(){
     if(!/innlogging/.test(state.lastError??''))throw Error('Ingen registrert ChatGPT-innloggingsfeil å gjenoppta.');
@@ -303,6 +317,7 @@ Kontroller faktisk lagrede kvitteringer og completion før avslutning. Påstå a
       // The operator repaired an operational failure. Rebuild assignments from
       // current domain receipts; never replay an ambiguous proposal or reset a
       // source budget, capability, external cart operation or safety stop.
+      recoverFinishedLease();
       state.retryAt=null;state.lastSignature=null;state.shoppingCohort=null;state.attempts=0;state.lastError=null;state.lastShoppingLane='serial';
     }
     state.shoppingRequested=true;save();tick();return status();

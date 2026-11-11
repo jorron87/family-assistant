@@ -131,7 +131,10 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
   // The dispatcher refills an empty lane on its next poll. A bounded rolling
   // session keeps its own lease while that code-only scheduling takes place.
   if(canRefill())return;
-  const run=state.active;state.last={id:run.id,finishedAt:clock(),startedAt:run.startedAt,code:run.slots.some(s=>['error','safety-stop','stale','abandoned'].includes(s.status))?1:0,positiveProgress:run.positiveProgress,applied:run.applied,preempted:run.preempted===true,...(run.pool?{pool:run.pool}:{}),slots:run.slots.map(({tokenHash,assignment,proposals,...s})=>s)};state.active=null;frames.clear();save();
+  const run=state.active;state.last={id:run.id,finishedAt:clock(),startedAt:run.startedAt,code:run.slots.some(s=>['error','safety-stop','stale','abandoned'].includes(s.status))?1:0,positiveProgress:run.positiveProgress,applied:run.applied,preempted:run.preempted===true,...(run.pool?{pool:run.pool}:{}),slots:run.slots.map(({tokenHash,assignment,proposals,...s})=>s)};
+  // Keep the exact caller-owned lease in the private encrypted journal until
+  // the dispatcher acknowledges release. Public status never includes it.
+  state.finishedLease={token:run.leaseToken,runId:run.id,finishedAt:state.last.finishedAt};state.active=null;frames.clear();save();
  }
  function tick(){
   const at=clock();if(at-lastTickAt>30000)hostResumeGraceUntil=at+10000;lastTickAt=at;
@@ -213,5 +216,7 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
   const run=state.active,pool=run?.pool,latest=pool?[...new Map(run.slots.map(s=>[s.lane,s])).values()]:run?.slots??[],active=run?.slots.filter(s=>!terminal(s)).length??0;
   return {running:!!run,runId:run?.id??null,workers:latest.map(s=>({id:s.id,lane:s.lane,generation:s.generation,status:s.status,pid:s.pid??null,jobs:s.assignment.jobs.length,jobIds:s.assignment.jobs.map(j=>j.id),sourceCount:allKeys(s).size,startedAt:s.startedAt,lastHeartbeat:s.lastHeartbeat??null,appliedProposals:Object.values(s.proposals).filter(p=>p.status==='applied').length})),...(pool?{pool:{...pool,activeWorkers:active,finishedWorkers:run.slots.length-active,needsRefill:canRefill()&&active<pool.capacity&&(!active||clock()>=(pool.nextRefillAt??0))}}:{}),applied:run?.applied??0,last:state.last??null,attention:state.safetyStop??null};
  }
- return {start,tick,handle,status,refill,drain,preferSerial,researchFor,currentRunId:()=>state.active?.id??null};
+ function finishedLeaseForRecovery(){return !state.active&&!state.safetyStop&&state.finishedLease?.token===currentLease()?.token?{...state.finishedLease}:null;}
+ function acknowledgeFinishedLease(token){if(state.finishedLease?.token===token){delete state.finishedLease;save();}}
+ return {start,tick,handle,status,refill,drain,preferSerial,researchFor,finishedLeaseForRecovery,acknowledgeFinishedLease,currentRunId:()=>state.active?.id??null};
 }
