@@ -20,6 +20,11 @@ test('explicit repaired-runtime resume rebuilds shopping work but cannot resume 
  try{g.dispatcher.tick();g.launches[0].onExit(1);stopped=true;assert.throws(()=>g.dispatcher.requestShopping({retryFailed:true}),/safety stops/);assert.equal(g.launches.length,1);}finally{g.close();}
 });
 
+test('an explicit repaired-shopping resume survives intervening successful source work clearing the display error',()=>{
+ const pool={status:()=>({running:false,last:{id:'failed-shopping-pool',code:1}}),preferSerial:()=>[]},f=shoppingDispatchFixture([{do:'shopping-product-review',productKey:'kassal:ODA_NO:1',watchId:'family',fingerprint:'same'}],{},undefined,false,pool);
+ try{f.dispatcher.tick();f.launches[0].onExit(1);f.store.reviewQueue=()=>({items:[{source:'spond',externalId:'new-source',listingHash:'new',reason:'Actual new source'}]});f.dispatcher.tick();assert.equal(f.dispatcher.status().workerScope,'kildeendringer');f.launches[1].onExit(0);assert.equal(f.dispatcher.status().lastError,null);const before=f.dispatcher.status().sourceChanges;f.dispatcher.requestShopping({retryFailed:true});assert.equal(f.launches.length,3);assert.equal(f.dispatcher.status().workerScope,'handel');assert.deepEqual(f.dispatcher.status().sourceChanges,before);f.launches[2].onExit(0);}finally{f.close();}
+});
+
 test('parallel dispatcher owns one lease, recovers its coordinator and reports only actual scoped work',()=>{
  let active=false,last=null,launches=0,polls=0;const rows=Array.from({length:65},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+(1000+i),sourceFingerprint:'current-'+i}));
  const pool={status:()=>({running:active,runId:active?'coordinated-run':null,last}),preferSerial:()=>[],tick(){polls++;},start(input){launches++;active=true;assert.equal(input.batches.length,3);assert.equal(input.batches.flatMap(b=>b.jobs).length,60);return this.status();}};

@@ -298,7 +298,8 @@ Kontroller faktisk lagrede kvitteringer og completion før avslutning. Påstå a
   function requestShopping({retryFailed=false}={}){
     if(typeof retryFailed!=='boolean')throw Error('retryFailed must be an explicit boolean.');
     if(retryFailed){
-      if(running||state.worker||config().enabled!==true||shoppingCoordinator?.status().attention||!state.lastError||state.lastWorkScope!=='handel')throw Error('Only an idle, enabled shopping runtime failure can be explicitly resumed; safety stops require review.');
+      const poolStatus=shoppingCoordinator?.status(),knownFailure=!!state.lastError&&state.lastWorkScope==='handel'||poolStatus?.last?.code===1;
+      if(running||state.worker||config().enabled!==true||poolStatus?.attention||!knownFailure)throw Error('Only an idle, enabled shopping runtime failure can be explicitly resumed; safety stops require review.');
       // The operator repaired an operational failure. Rebuild assignments from
       // current domain receipts; never replay an ambiguous proposal or reset a
       // source budget, capability, external cart operation or safety stop.
