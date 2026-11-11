@@ -208,7 +208,7 @@ export function createIngestionDispatcher({store,resources,root,dataDir,shopping
     // monopolize the worker pool. Alternate an independent wave and that serial
     // follow-up; neither lane removes anything from the actual domain queue.
     const excludedKeys=new Set(serial.flatMap(i=>[i.sourceKey,i.productKey,...(i.relatedSources??[]).map(r=>r.sourceKey)].filter(Boolean)));
-    const independentPlan=shoppingOnly&&shoppingCoordinator&&serial.length&&cfg.shoppingWorkers>1&&(state.lastShoppingLane!=='independent'||shoppingCoordinator.status().last?.code===1)?planShoppingWorkers(shoppingQueue,cfg.shoppingWorkers,{independent:true,excludedKeys,limit:cfg.shoppingWorkerBatchSize??20}):null;
+    const independentPlan=shoppingOnly&&shoppingCoordinator&&serial.length&&cfg.shoppingWorkers>1&&(state.shoppingRequested&&state.shoppingParallelRequested||state.lastShoppingLane!=='independent'||shoppingCoordinator.status().last?.code===1)?planShoppingWorkers(shoppingQueue,cfg.shoppingWorkers,{independent:true,excludedKeys,limit:cfg.shoppingWorkerBatchSize??20}):null;
     if(serial.length&&!independentPlan){const selected=new Set(serial);shoppingQueue=[...serial,...shoppingQueue.filter(i=>!selected.has(i))];}
     const currentShopping=shoppingOnly?new Set(shoppingCohortSignal(store,shoppingQueue).items):null;
     const heldCohort=shoppingOnly&&state.shoppingCohort?.signals?.length&&state.shoppingCohort.signals.every(item=>currentShopping.has(item))?state.shoppingCohort:null;
@@ -234,7 +234,7 @@ export function createIngestionDispatcher({store,resources,root,dataDir,shopping
     const lease=store.beginRun();if(!lease.acquired)return;
     retryAfterLogin=false;
     const token=lease.lease.token;running=true;
-    if(shoppingOnly){state.shoppingRequested=false;state.lastShoppingLane=independentPlan?'independent':poolPlan?'parallel':'serial';}
+    if(shoppingOnly){state.shoppingRequested=false;state.shoppingParallelRequested=false;state.lastShoppingLane=independentPlan?'independent':poolPlan?'parallel':'serial';}
     const scope=fullDue?'alle':work.shoppingOnly?'handel':'kildeendringer';
     const shoppingBatch=scope!=='kildeendringer'?structuredClone(retryBatch??shoppingAgentBatch(agentQueue())):null;
     if(fullDue){state.daily.attempts++;state.daily.retryAt=null;state.daily.lastStartedAt=clock();}
@@ -310,8 +310,9 @@ Kontroller faktisk lagrede kvitteringer og completion før avslutning. Påstå a
     if(state.daily?.day===osloDayAndHour(clock()).day){state.daily.retryAt=null;state.daily.attempts=0;}
     save();retryAfterLogin=true;tick();return status();
   }
-  function requestShopping({retryFailed=false}={}){
+  function requestShopping({retryFailed=false,preferParallel=false}={}){
     if(typeof retryFailed!=='boolean')throw Error('retryFailed must be an explicit boolean.');
+    if(typeof preferParallel!=='boolean')throw Error('preferParallel must be an explicit boolean.');
     if(retryFailed){
       const poolStatus=shoppingCoordinator?.status(),knownFailure=!!state.lastError&&state.lastWorkScope==='handel'||poolStatus?.last?.code===1||poolStatus?.last?.preempted===true;
       if(running||state.worker||config().enabled!==true||poolStatus?.attention||!knownFailure)throw Error('Only an idle, enabled shopping runtime failure can be explicitly resumed; safety stops require review.');
@@ -321,7 +322,7 @@ Kontroller faktisk lagrede kvitteringer og completion før avslutning. Påstå a
       recoverFinishedLease();
       state.retryAt=null;state.lastSignature=null;state.shoppingCohort=null;state.attempts=0;state.lastError=null;state.lastShoppingLane='serial';
     }
-    state.shoppingRequested=true;save();tick();return status();
+    state.shoppingRequested=true;state.shoppingParallelRequested=preferParallel;save();tick();return status();
   }
   return {tick,poll,renew,resumeAfterLogin,requestShopping,status};
 }

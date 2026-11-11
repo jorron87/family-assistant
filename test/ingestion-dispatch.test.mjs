@@ -61,6 +61,12 @@ test('explicit repair resume can restart an owner-preempted shopping session wit
  try{const before=f.dispatcher.status().sourceChanges;f.dispatcher.requestShopping({retryFailed:true});assert.equal(f.launches.length,1);assert.deepEqual(f.dispatcher.status().sourceChanges,before);f.launches[0].onExit(0);}finally{f.close();}
 });
 
+test('an explicit one-session parallel preference preserves deferred work and source budgets after maintenance',()=>{
+ const native=[{do:'shopping-product-review',productKey:'kassal:ODA_NO:1',watchId:'family',fingerprint:'native'}],fresh=Array.from({length:100},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+(1000+i),sourceFingerprint:'source-'+i}));let active=false,last=null,starts=0;
+ const pool={status:()=>({running:active,runId:'parallel-preference',last}),tick(){},preferSerial:()=>native,start(){active=true;starts++;return this.status();}},f=shoppingDispatchFixture([...native,...fresh],{shoppingWorkers:3},undefined,false,pool);
+ try{f.dispatcher.tick();assert.equal(starts,1);active=false;last={id:'parallel-preference',code:0,positiveProgress:true,applied:1,slots:[]};f.queue.rows=[...native,...fresh.slice(60)];f.dispatcher.poll();const before=f.dispatcher.status().sourceChanges;f.dispatcher.requestShopping({preferParallel:true});assert.equal(starts,2);assert.equal(f.launches.length,0);assert.deepEqual(f.queue.rows,[...native,...fresh.slice(60)]);assert.deepEqual(f.dispatcher.status().sourceChanges,before);}finally{f.close();}
+});
+
 test('parallel dispatcher owns one lease, recovers its coordinator and reports only actual scoped work',()=>{
  let active=false,last=null,launches=0,polls=0;const rows=Array.from({length:65},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+(1000+i),sourceFingerprint:'current-'+i}));
  const pool={status:()=>({running:active,runId:active?'coordinated-run':null,last}),preferSerial:()=>[],tick(){polls++;},start(input){launches++;active=true;assert.equal(input.batches.length,3);assert.equal(input.batches.flatMap(b=>b.jobs).length,60);return this.status();}};
