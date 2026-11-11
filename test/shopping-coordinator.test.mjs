@@ -28,6 +28,17 @@ async function readAll(f,index=0,options={}){const h=await f.call(index,'shoppin
 const startPool=(f,options={})=>f.coordinator.start({token:f.state.runLease.token,batches:f.plan.batches,pool:{capacity:3,batchSize:20,...options}});
 function finish(f,index,outcome='deferred'){writeFileSync(join(f.launches[index].directory,'result.json'),JSON.stringify({outcome,summary:'Scoped current product work checked.',reason:'Downstream source registration requires a separate actual primary label review.'}));f.launches[index].onExit(0);}
 
+test('idle recovery requires a real lease receipt before startup and after acknowledged release',()=>{
+ const f=fixture(5);try{
+  f.state.runLease=null;assert.equal(f.coordinator.finishedLeaseForRecovery(),null);
+  for(const token of [undefined,null,'',' ',0])assert.throws(()=>f.coordinator.start({token,batches:f.plan.batches}),/current lease/);
+  f.state.runLease={token:'owner-test-lease'};f.start();finish(f,0);assert.equal(f.coordinator.finishedLeaseForRecovery().token,'owner-test-lease');
+  f.state.runLease=null;assert.equal(f.coordinator.finishedLeaseForRecovery(),null);
+  f.coordinator.acknowledgeFinishedLease('owner-test-lease');
+  for(const target of [f.coordinator,createShoppingCoordinator(f.options)])for(let i=0;i<3;i++){target.tick();assert.equal(target.finishedLeaseForRecovery(),null);}
+ }finally{f.close();}
+});
+
 test('finished lease ownership survives restart privately and never authorizes releasing a newer lease',()=>{
  const f=fixture(5);try{
   f.start();assert.equal(f.coordinator.finishedLeaseForRecovery(),null);finish(f,0);
@@ -116,7 +127,20 @@ test('a stalled host gets one brief recovery turn without inventing worker heart
  const f=fixture(80);try{startPool(f);f.time.at+=46000;f.coordinator.tick();assert.equal(f.coordinator.status().pool.activeWorkers,3);await Promise.all([0,1,2].map(i=>f.call(i,'heartbeat')));f.time.at+=10001;f.coordinator.tick();assert.equal(f.coordinator.status().pool.activeWorkers,3);
  }finally{f.close();}
  const silent=fixture(80);try{startPool(silent);silent.time.at+=46000;silent.coordinator.tick();silent.time.at+=10001;silent.coordinator.tick();assert.equal(silent.coordinator.status().running,false);assert.ok(silent.coordinator.status().last.slots.every(s=>s.status==='abandoned'));}finally{silent.close();}
- const expired=fixture(80);try{startPool(expired);expired.time.at+=15*60000+1;expired.coordinator.tick();assert.equal(expired.coordinator.status().running,false);assert.ok(expired.coordinator.status().last.slots.every(s=>s.status==='abandoned'));}finally{expired.close();}
+ const expired=fixture(80);try{startPool(expired);expired.time.at+=15*60000+1;expired.coordinator.tick();assert.equal(expired.coordinator.status().running,false);assert.ok(expired.coordinator.status().last.slots.every(s=>s.status==='deferred'&&s.deadlineReached));assert.equal(expired.coordinator.status().last.code,0);assert.equal(expired.coordinator.status().last.pool.stopReason,'session-time-limit');assert.equal(expired.shop.queue().length,80);assert.equal(expired.coordinator.preferSerial(expired.shop.queue()).length,60);}finally{expired.close();}
+});
+
+test('one bounded worker deadline retains unfinished identities and permits independent refills while peers continue',async()=>{
+ const f=fixture(80);try{startPool(f);const first=f.coordinator.status().workers[0];
+  writeFileSync(join(f.launches[0].directory,'exit.json'),JSON.stringify({code:1,error:'Worker deadline reached.',metrics:{elapsedMs:900000}}));f.launches[0].onExit(1);
+  assert.equal(f.coordinator.status().workers[0].status,'deferred');assert.equal(f.coordinator.status().pool.draining,false);assert.equal(f.coordinator.preferSerial(f.shop.queue()).length,20);assert.equal(f.shop.queue().length,80);
+  await assert.rejects(f.call(0,'heartbeat'),/revoked/);assert.equal((await f.call(1,'heartbeat')).active,true);
+  f.coordinator.refill({queue:f.shop.queue()});const after=f.coordinator.status();assert.equal(after.pool.activeWorkers,3);assert.equal(after.pool.refills,1);assert.ok(after.workers[0].generation>first.generation);assert.ok(!after.workers[0].jobIds.some(id=>first.jobIds.includes(id)));
+ }finally{f.close();}
+});
+
+test('an explicit safety stop remains authoritative when the supervisor also reports a deadline',()=>{
+ const f=fixture();try{f.start();writeFileSync(join(f.launches[0].directory,'exit.json'),JSON.stringify({code:1,error:'Worker deadline reached.'}));finish(f,0,'safety-stop');assert.ok(f.coordinator.status().attention);assert.equal(f.coordinator.status().last.slots[0].status,'safety-stop');assert.equal(f.coordinator.status().last.code,1);assert.throws(f.start,/attention/);}finally{f.close();}
 });
 
 test('a runtime failure drains the pool instead of repeatedly launching new failing workers',()=>{
@@ -224,8 +248,8 @@ test('scoped runtime is configured for one MCP broker, no shell/apps/browser or 
 });
 
 test('family extension is additive and preserves household brand, shared attribute, native and explicit exclusion holds',()=>{
- const sourceKey='sesum:KIWI:1',assignment={jobs:[{sourceKeys:[sourceKey]}]},base={groupId:'existing',brands:['Exact Brand'],requires:['plain'],excludeProductKeys:['unrelated-product']},watch={variants:[base]},identity={productKey:sourceKey,groups:[{groupId:'new-group',groupFingerprint:'current-group'}],nativeFamilyReviews:[]},packet={assignmentChanges:[],jobs:[{items:[{do:'shopping-sesum-family-review',sourceKey,familyId:'family'}]}],sources:[{sourceKey,reviewedIdentity:identity}],families:[{familyId:'family',decision:{kind:'library'}}]};let saved=null;
- const store={snapshot:()=>({shopping:{watches:{family:watch}}}),shopping:{libraryLink:input=>(saved=input)}};
+ const sourceKey='sesum:KIWI:1',assignment={jobs:[{sourceKeys:[sourceKey]}]},base={groupId:'existing',brands:['Exact Brand'],requires:['plain'],excludeProductKeys:['unrelated-product']},watch={variants:[base]},identity={productKey:sourceKey,groups:[{groupId:'new-group',groupFingerprint:'current-group'}],nativeFamilyReviews:[]},packet={assignmentChanges:[],jobs:[{items:[{do:'shopping-sesum-family-review',sourceKey,familyId:'family'}]}],sources:[{sourceKey,reviewedIdentity:identity,candidate:[{sourceKey,families:[{familyId:'family',variants:watch.variants}]}]}],families:[{familyId:'family',decision:{kind:'library'}}]};let saved=null;
+ const store={snapshot:()=>{throw Error('Global snapshots intentionally omit shopping; use current scoped candidates.');},shopping:{libraryLink:input=>(saved=input)}};
  const input={sourceKey,familyId:'family',evidence:'Actual complete label and current family requirements were reviewed.',variant:{groupId:'new-group',brands:['Exact Brand'],requires:['plain'],excludeProductKeys:[]}},apply=data=>applyWorkerProposal({store,assignment,packet,operation:'family-add-variant',input:data,groupReads:new Map([['new-group','current-group']])});
  apply(input);assert.deepEqual(saved.variants[0],base);assert.equal(saved.variants[1].groupFingerprint,'current-group');
  for(const variant of [{...input.variant,brands:[]},{...input.variant,brands:['Other Brand']},{...input.variant,requires:[]}])assert.throws(()=>apply({...input,variant}),/Preserve|broaden/);

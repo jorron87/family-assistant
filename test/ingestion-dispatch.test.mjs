@@ -3,6 +3,16 @@ import {createIngestionDispatcher,changeSignal} from '../src/ingestion-dispatch.
 import {createStore} from '../src/store.mjs';
 import {agentFamilyBasis,buildAgentContext} from '../src/shopping-agent-context.mjs';
 
+test('empty or malformed recovery receipts cannot record a run or release an absent lease on repeated idle ticks',()=>{
+ for(const receipt of [undefined,null,{}, {token:undefined},{token:null},{token:''},{token:' '},{token:0}]){
+  const pool={status:()=>({running:false}),finishedLeaseForRecovery:()=>receipt},f=shoppingDispatchFixture([],{},undefined,false,pool);
+  try{let reports=0,releases=0;f.store.recordRun=()=>reports++;f.store.endRun=()=>{releases++;throw Error('There is no owned lease to release');};
+   for(let i=0;i<3;i++){f.dispatcher.tick();f.clock.at+=60000;}
+   assert.equal(reports,0);assert.equal(releases,0);assert.equal(f.dispatcher.status().running,false);
+  }finally{f.close();}
+ }
+});
+
 test('an idle dispatcher recovers only its coordinators exact finished lease, preserving foreign owners and pauses',()=>{
  for(const gate of ['own','foreign','paused','safety']){
   let acknowledgements=0;const pool={status:()=>({running:false,...(gate==='safety'?{attention:{reason:'Explicit safety stop'}}:{})}),finishedLeaseForRecovery:()=>({token:'owned-test-batch'}),acknowledgeFinishedLease:()=>acknowledgements++},f=shoppingDispatchFixture([],{enabled:gate!=='paused'},undefined,false,pool),reports=[];

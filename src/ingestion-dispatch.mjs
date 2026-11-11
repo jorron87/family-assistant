@@ -91,11 +91,12 @@ export function createIngestionDispatcher({store,resources,root,dataDir,shopping
     if(latest&&Date.parse(latest.finishedAt)> (state.lastFinishedAt??0)){state.lastError=null;save();}
   };
   const currentLease=()=>typeof store.runLease==='function'?store.runLease():store.snapshot().runLease;
-  const release=token=>{if(currentLease()?.token===token){store.endRun(token);shoppingCoordinator?.acknowledgeFinishedLease?.(token);}};
+  const validLeaseToken=token=>typeof token==='string'&&token.trim().length>0;
+  const release=token=>{if(validLeaseToken(token)&&currentLease()?.token===token){store.endRun(token);shoppingCoordinator?.acknowledgeFinishedLease?.(token);}};
   function recoverFinishedLease(){
     if(running||state.worker)return false;
     const receipt=shoppingCoordinator?.finishedLeaseForRecovery?.();
-    if(!receipt||currentLease()?.token!==receipt.token)return false;
+    if(!validLeaseToken(receipt?.token)||currentLease()?.token!==receipt.token)return false;
     try{store.recordRun({scope:'handel',outcome:'error',summary:'Ryddet egen kjørelås etter avsluttet koordinert handelsøkt. Varekvitteringer og restanser er bevart.',blockers:['Koordinatorens avsluttede økt manglet bekreftet låsfrigjøring. Ingen varejobb eller kildedekning kvitteres ferdig av oppryddingen.'],resumeHint:'Fortsett fra gjeldende varekvitteringer og full handelskø med nye frosne tildelinger.'});}
     finally{release(receipt.token);}
     return true;

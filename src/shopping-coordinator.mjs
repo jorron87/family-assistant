@@ -15,6 +15,7 @@ const terminal=s=>!['starting','running'].includes(s.status);
 const text=(s,min=10,max=60000)=>{if(typeof s!=='string'||s.trim().length<min||s.length>max)throw Error('Concrete bounded evidence is required.');return s.trim();};
 const clockISO=clock=>new Date(clock()).toISOString();
 const jobClaims=job=>[...new Set(['job:'+job.id,...job.sourceKeys.map(k=>'source:'+k),...(job.productKey?['product:'+job.productKey]:[]),...(job.items??[]).map(i=>i.researchProductKey?'metadata:'+i.researchProductKey:null).filter(Boolean)])];
+const proposalSummary=slot=>{const rows=Object.values(slot.proposals??{}),last=rows.filter(p=>p.status==='rejected').at(-1);return {...Object.fromEntries(['applied','rejected','uncertain','pending'].map(status=>[status,rows.filter(p=>p.status===status).length])),...(last?{lastRejection:{operation:last.operation??null,error:String(last.receipt?.error??'Rejected proposal').slice(0,600)}}:{})};};
 export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=launchShoppingWorker,clock=Date.now,alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}},shouldYield=()=>false,workerDeadlineMs=15*60000,inlineResearch=false,workerActivityPath=null}){
  const key=loadKey(dataDir),file=join(dataDir,'shopping-coordinator.enc'),framesDir=join(dataDir,'shopping-worker-frames'),researchDir=join(dataDir,'shopping-worker-research');
  mkdirSync(framesDir,{recursive:true});mkdirSync(researchDir,{recursive:true});
@@ -22,7 +23,8 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
  const write=(file,value)=>{writeFileSync(file+'.tmp',encrypt(Buffer.from(JSON.stringify(value),'utf8'),key));renameSync(file+'.tmp',file);};
  let state=existsSync(file)?read(file):{version:1,deferred:[]},frames=new Map(),lastTickAt=clock(),hostResumeGraceUntil=0;
  state.deferred??=[];const currentLease=()=>typeof store.runLease==='function'?store.runLease():store.snapshot().runLease;
- const save=()=>write(file,state),ownsLease=()=>state.active&&currentLease()?.token===state.active.leaseToken;
+ const validLeaseToken=token=>typeof token==='string'&&token.trim().length>0;
+ const save=()=>write(file,state),ownsLease=()=>validLeaseToken(state.active?.leaseToken)&&currentLease()?.token===state.active.leaseToken;
  // Only the original supervisor owns its child handle, including on recovery.
  if(state.active)for(const slot of state.active.slots)if(!terminal(slot))slot.lastHeartbeat=clock();
  const frameFile=id=>join(framesDir,id+'.enc');
@@ -86,24 +88,26 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
   if(input.contextFingerprint!==frame.packet.contextFingerprint)throw Error('Read the complete current worker frame before proposing. This proposal uses another contextFingerprint; refresh shopping_context and read its actual changes. No proposal was saved.');
   if(Object.keys(missing).length)throw Error('Read the complete current worker frame before proposing. Missing requiredPages='+JSON.stringify(missing)+'. Call shopping_context for EACH listed section and page index. Product/group/source-candidates reads do not deliver these context pages. Do not repeat the proposal until these exact pages are read. No proposal was saved.');
   const current=store.shopping.agentContext(frame.assignment);if(current.contextFingerprint!==frame.packet.contextFingerprint||current.assignmentChanges.length)throw Error('Context changed; refresh and read the actual changes before another proposal.');
-  slot.proposals[input.proposalId]={digest,status:'pending',startedAt:clockISO(clock)};save();
+  slot.proposals[input.proposalId]={digest,operation:input.operation,status:'pending',startedAt:clockISO(clock)};save();
   const placementGuard=()=>{if(terminal(slot)||!ownsLease()||state.safetyStop||shouldYield())throw Error('Worker capability is unavailable or revoked.');};
   let result;try{const data=input.operation==='placement'?guardNegativePlacement(current,input.input,placementRecallHints(current,researchFor(current))):input.input;result=await applyWorkerProposal({store,assignment:frame.assignment,packet:current,operation:input.operation,input:data,groupReads:groupReads(frame),placementGuard});}catch(error){
    // A compound domain operation can save its first receipt before throwing.
    // Such an ambiguous operation must never be silently repeated.
    let unchanged=false;try{unchanged=store.shopping.agentContext(frame.assignment).contextFingerprint===current.contextFingerprint;}catch{}
-   slot.proposals[input.proposalId]={digest,status:unchanged?'rejected':'uncertain',...(unchanged?{receipt:{saved:false,error:error.message}}:{})};save();throw error;
+   slot.proposals[input.proposalId]={digest,operation:input.operation,status:unchanged?'rejected':'uncertain',...(unchanged?{receipt:{saved:false,error:error.message}}:{})};save();throw error;
   }
   const receipt={saved:true,operation:input.operation,result,at:clockISO(clock)};slot.proposals[input.proposalId]={digest,status:'applied',receipt};
   const statuses=[input.input?.status,...(result?.receipts??[]).map(r=>r.status)].filter(Boolean);
   if(input.operation==='source-register'||input.operation==='family-add-variant'||statuses.some(s=>['reviewed','no-active-family','approved','excluded','registered','not-actionable'].includes(s)))state.active.positiveProgress=true;
   state.active.applied++;save();return receipt;
  }
- function completeSlot(slot,code){
+ function completeSlot(slot,code,{deadlineReached=false}={}){
   if(terminal(slot))return;
   let final=null,exit=null;try{final=JSON.parse(readFileSync(join(slot.directory,'result.json'),'utf8'));}catch{}
   try{exit=JSON.parse(readFileSync(join(slot.directory,'exit.json'),'utf8'));}catch{}
   slot.metrics=exit?.metrics??null;slot.error=exit?.error??null;
+  const budgetExpired=deadlineReached||exit?.error==='Worker deadline reached.';
+  if(budgetExpired)slot.deadlineReached=true;
   if(final?.outcome==='safety-stop'){
    // A stop is authoritative even when its free-text reason is short or
    // malformed. Revoke the entire wave before further finalization; validating
@@ -111,19 +115,19 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
    const reason=typeof final.reason==='string'&&final.reason.trim()?final.reason.trim().slice(0,6000):'Worker reported an explicit safety stop without a usable reason. Review the worker result before resuming.';
    state.safetyStop={at:clockISO(clock),reason,workerId:slot.id};for(const other of state.active.slots)if(!terminal(other))other.status='cancelled';slot.status='safety-stop';slot.reason=reason;
   }
-  else if(code!==0||exit?.error){slot.status='error';slot.error=slot.error??'Worker exited without a verified result.';}
+  else if((code!==0||exit?.error)&&!budgetExpired){slot.status='error';slot.error=slot.error??'Worker exited without a verified result.';}
   else{
    let packet;try{packet=store.shopping.agentContext(slot.assignment);}catch{slot.status='error';slot.error='Current domain state could not be verified; assigned work remains unresolved.';}
    if(packet){slot.remaining=packet.jobs.length;
    slot.status=packet.assignmentChanges.length?'stale':packet.activeStagesEmpty?'completed':'deferred';
-   slot.reason=final?.reason??'Current assigned work remains; no completion is inferred.';
+   slot.reason=budgetExpired?'Bounded worker time budget reached; actual remaining work is retained for serial follow-up. No proposal is replayed.':final?.reason??'Current assigned work remains; no completion is inferred.';
    if(slot.status==='deferred'){
     const pending=packet.jobs.flatMap(j=>j.items),ids=new Set(slot.assignment.jobs.map(j=>j.id));state.deferred=state.deferred.filter(d=>!d.assignment.jobs.some(j=>ids.has(j.id)));
     for(const job of slot.assignment.jobs){const keys=new Set([...job.sourceKeys,job.productKey].filter(Boolean));if(!pending.some(i=>[i.sourceKey,i.productKey,...(i.relatedSources??[]).map(r=>r.sourceKey)].some(k=>keys.has(k))))continue;state.deferred.push({assignment:{...slot.assignment,jobs:[job]},signature:workerTaskSignature(pending,keys),reason:slot.reason,at:clockISO(clock)});}
    }}
   }
   if(slot.status==='error'&&state.active.pool){state.active.pool.draining=true;state.active.pool.stopReason='worker-runtime-error';}
-  slot.finishedAt=clockISO(clock);frames.delete(slot.id);save();finishIfIdle();
+  slot.proposalSummary=proposalSummary(slot);slot.finishedAt=clockISO(clock);frames.delete(slot.id);save();finishIfIdle();
  }
  function canRefill(){const pool=state.active?.pool;return !!pool&&!pool.draining&&!state.safetyStop&&ownsLease()&&!shouldYield()&&clock()<pool.deadlineAt&&pool.assignedJobs<pool.maxJobs;}
  function finishIfIdle(){
@@ -141,12 +145,12 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
   if(!state.active)return;
   if(!ownsLease()||shouldYield()){state.active.preempted=true;for(const slot of state.active.slots)if(!terminal(slot))slot.status='cancelled';save();finishIfIdle();return;}
   const pool=state.active.pool;if(pool&&!pool.draining&&(clock()>=pool.deadlineAt||pool.assignedJobs>=pool.maxJobs)){pool.draining=true;pool.stopReason=clock()>=pool.deadlineAt?'session-time-limit':'session-job-limit';save();}
-  for(const slot of [...state.active.slots]){if(terminal(slot))continue;if(slot.pid&&!alive(slot.pid)){let code=1;try{code=JSON.parse(readFileSync(join(slot.directory,'exit.json'),'utf8')).code;}catch{}completeSlot(slot,code);}else if(clock()>slot.deadlineAt||clock()>=hostResumeGraceUntil&&clock()-(slot.lastHeartbeat??slot.startedAt)>45000){slot.status='abandoned';slot.reason='Worker heartbeat or deadline expired; capability revoked and work retained.';frames.delete(slot.id);if(state.active.pool){state.active.pool.draining=true;state.active.pool.stopReason='worker-heartbeat-or-deadline';}save();}}
+  for(const slot of [...state.active.slots]){if(terminal(slot))continue;if(slot.pid&&!alive(slot.pid)){let code=1;try{code=JSON.parse(readFileSync(join(slot.directory,'exit.json'),'utf8')).code;}catch{}completeSlot(slot,code);}else if(clock()>slot.deadlineAt){completeSlot(slot,1,{deadlineReached:true});}else if(clock()>=hostResumeGraceUntil&&clock()-(slot.lastHeartbeat??slot.startedAt)>45000){slot.status='abandoned';slot.reason='Worker heartbeat expired; capability revoked and work retained.';frames.delete(slot.id);if(state.active.pool){state.active.pool.draining=true;state.active.pool.stopReason='worker-heartbeat-or-deadline';}save();}}
   finishIfIdle();
  }
  function start({token,batches,pool=null}){
   if(state.active||state.safetyStop)throw Error('Coordinator is already active or requires attention.');
-  if(currentLease()?.token!==token)throw Error('Coordinator requires its caller’s current lease.');
+  if(!validLeaseToken(token)||currentLease()?.token!==token)throw Error('Coordinator requires its caller’s current lease.');
   if(!Array.isArray(batches)||!batches.length||batches.length>3)throw Error('Use one to three disjoint worker batches.');
   const seen=new Set(),manifests=batches.map(workerManifest);for(const m of manifests)for(const j of m.jobs)for(const identity of [...j.sourceKeys,...(j.productKey?[j.productKey]:[])]){if(seen.has(identity))throw Error('Overlapping worker identities are forbidden.');seen.add(identity);}
   const claims=new Set();for(const batch of batches)for(const job of batch.jobs)for(const claim of jobClaims(job)){if(claims.has(claim))throw Error('Overlapping worker identities or exact metadata are forbidden.');claims.add(claim);}
@@ -214,9 +218,9 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
  }
  function status(){
   const run=state.active,pool=run?.pool,latest=pool?[...new Map(run.slots.map(s=>[s.lane,s])).values()]:run?.slots??[],active=run?.slots.filter(s=>!terminal(s)).length??0;
-  return {running:!!run,runId:run?.id??null,workers:latest.map(s=>({id:s.id,lane:s.lane,generation:s.generation,status:s.status,pid:s.pid??null,jobs:s.assignment.jobs.length,jobIds:s.assignment.jobs.map(j=>j.id),sourceCount:allKeys(s).size,startedAt:s.startedAt,lastHeartbeat:s.lastHeartbeat??null,appliedProposals:Object.values(s.proposals).filter(p=>p.status==='applied').length})),...(pool?{pool:{...pool,activeWorkers:active,finishedWorkers:run.slots.length-active,needsRefill:canRefill()&&active<pool.capacity&&(!active||clock()>=(pool.nextRefillAt??0))}}:{}),applied:run?.applied??0,last:state.last??null,attention:state.safetyStop??null};
+  return {running:!!run,runId:run?.id??null,workers:latest.map(s=>({id:s.id,lane:s.lane,generation:s.generation,status:s.status,pid:s.pid??null,jobs:s.assignment.jobs.length,jobIds:s.assignment.jobs.map(j=>j.id),sourceCount:allKeys(s).size,startedAt:s.startedAt,lastHeartbeat:s.lastHeartbeat??null,appliedProposals:Object.values(s.proposals).filter(p=>p.status==='applied').length,proposalSummary:proposalSummary(s)})),...(pool?{pool:{...pool,activeWorkers:active,finishedWorkers:run.slots.length-active,needsRefill:canRefill()&&active<pool.capacity&&(!active||clock()>=(pool.nextRefillAt??0))}}:{}),applied:run?.applied??0,last:state.last??null,attention:state.safetyStop??null};
  }
- function finishedLeaseForRecovery(){return !state.active&&!state.safetyStop&&state.finishedLease?.token===currentLease()?.token?{...state.finishedLease}:null;}
- function acknowledgeFinishedLease(token){if(state.finishedLease?.token===token){delete state.finishedLease;save();}}
+ function finishedLeaseForRecovery(){const receipt=state.finishedLease;return !state.active&&!state.safetyStop&&validLeaseToken(receipt?.token)&&receipt.token===currentLease()?.token?{...receipt}:null;}
+ function acknowledgeFinishedLease(token){if(validLeaseToken(token)&&state.finishedLease?.token===token){delete state.finishedLease;save();}}
  return {start,tick,handle,status,refill,drain,preferSerial,researchFor,finishedLeaseForRecovery,acknowledgeFinishedLease,currentRunId:()=>state.active?.id??null};
 }
