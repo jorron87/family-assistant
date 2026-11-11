@@ -23,6 +23,8 @@ Godkjent Sesum-identitet er også adskilt fra husholdningens familievalg. Kontro
 
 Ved familieendringer gjenbruker koden bare dokumentert uendrede vurderinger. Eldre hel-sett-kvitteringer kan få kriteriegrunnlaget tilbake gjennom en eksakt kontrollert historisk hash; ukjent grunnlag gjennomgås fortsatt. Enhetsavslag krever en gjeldende godkjent kildepakning og vises som kodebevis i `reviewDelta`, aldri som en produktgodkjenning. Konkrete kildeblokkeringer beholder sine frister og forblir synlige som ufullført arbeid. Se runbookens inkrementelle plasseringskontrakt.
 
+En ustabil MCP-forbindelse gir avgrenset nytt leseforsøk og tydelig transportdiagnostikk. Skriving med mistet svar gjentas aldri automatisk. Bevar proposalId og kontroller domenets faktiske kvitteringer; faktiske sikkerhetsstopp krever fortsatt gjennomgang før gjenopptakelse.
+
 `shopping-sesum-placement-review` lar agenten undersøke hver aktuell kildevare mot alle aktive familiekrav, også uten treff i familiens kildesøk. `shopping-sesum-placement` viser hele det gjeldende settet. En eksplisitt researchkvittering ruter arbeidet videre og endrer ingen familiegodkjenning, pris, råhint eller handlekurv. Ukjent plassering forblir en varig blokkert restanse.
 
 Prisfrie egne observasjoner får kjedenøytral `sesum-product:ID` og samme hele-familiesett-research. Et relevant produkt uten faktisk konfigurert kjedepris forblir en konkret blokkert katalogoppgave, uten oppdiktet butikk, pris eller familiegodkjenning. Tidligere lagrede observasjoner importeres lokalt med opprinnelige tider, uten ny kildehenting. Ukjent prisalder blir aldri fersk, og kjent gamle faktiske kvitteringer parkerer uendret metadata også når en ny prisfri observasjon kommer. Les katalogkontrakten i runbooken.
