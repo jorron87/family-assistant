@@ -1,5 +1,6 @@
 import {statSync,readFileSync,writeFileSync,renameSync,rmSync} from 'node:fs';
 import {spawn} from 'node:child_process';
+import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {dirname,join} from 'node:path';
 import {readProductLibrary,productTextHash} from './product-library.mjs';
@@ -87,6 +88,25 @@ export function createIndexReader(index,{horizonDays=PRICE_HORIZON_DAYS}={}) {
    if(valueCache.size>2000)valueCache.clear();
    valueCache.set(bucket,result);return result;
   }
+  // Agent enumeration is separate from the UI's bounded search. A known old
+  // actual receipt parks research, while missing prices remain unknown rather
+  // than a reason to hide a newly registered product. No quote is approved.
+  function searchPage(query,{offset=0,limit=20,expectedFingerprint=null}={}){
+   if(!Number.isSafeInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>200)throw Error('Library search requires a nonnegative integer offset and limit from 1 to 200.');
+   if(expectedFingerprint!==null&&(typeof expectedFingerprint!=='string'||!/^[a-f0-9]{64}$/.test(expectedFingerprint)))throw Error('Invalid library search fingerprint.');
+   const terms=words(query),found=[];let parked=0;
+   if(terms.length)for(const [key,haystack]of haystacks){
+    if(!match(haystack,terms))continue;
+    const receipt=index.products[key].quote.receiptAt;
+    if(Number.isFinite(Date.parse(receipt??''))&&!withinPriceHorizon(receipt,at,horizonDays)){parked++;continue;}
+    found.push(key);
+   }
+   found.sort((a,b)=>Number(fresh(index.products[b].quote.receiptAt))-Number(fresh(index.products[a].quote.receiptAt))||index.products[a].name.localeCompare(index.products[b].name,'nb')||(a<b?-1:a>b?1:0));
+   const fingerprint=createHash('sha256').update(JSON.stringify([terms,found])).digest('hex');
+   if(expectedFingerprint!==null&&expectedFingerprint!==fingerprint)throw Error('Library search results changed; restart at offset 0 and use the new search fingerprint.');
+   const items=found.slice(offset,offset+limit).map(key=>({key,product:index.products[key],groups:groupsOf(key).map(m=>({groupId:m.groupId,status:m.s,name:index.groups[m.groupId]?.name})),price:priceOf(index.products[key])})),hasMore=offset+items.length<found.length;
+   return {items,total:found.length,parked,matchedTotal:found.length+parked,offset,limit,nextOffset:hasMore?offset+items.length:null,hasMore,fingerprint};
+  }
   return {
    builtAt:index.builtAt,
    horizonDays,active,
@@ -108,6 +128,7 @@ export function createIndexReader(index,{horizonDays=PRICE_HORIZON_DAYS}={}) {
    byOdaId:id=>byOda.get(Number(id))??null,
    quality:(key,groupIds)=>{const rows=groupsOf(key).filter(m=>m.s==='approved'&&m.q&&(!groupIds||groupIds.includes(m.groupId)));return rows[0]?.q??null;},
    search(query,limit=30){const terms=words(query);if(!terms.length)return [];const found=[];for(const [key,haystack] of haystacks){if(!match(haystack,terms))continue;found.push(key);}return found.slice(0,5000).map(key=>({key,product:index.products[key],groups:groupsOf(key).map(m=>({groupId:m.groupId,status:m.s,name:index.groups[m.groupId]?.name})),price:priceOf(index.products[key])})).sort((a,b)=>Number(b.price.fresh)-Number(a.price.fresh)||a.product.name.localeCompare(b.product.name,'nb')).slice(0,limit);},
+   searchPage,
    searchGroups(query,limit=5){
     const terms=words(query);if(!terms.length)return [];
     // A Norwegian compound ends in what it is: tomatketchup is a ketchup, while
