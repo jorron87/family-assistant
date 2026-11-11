@@ -42,7 +42,7 @@ test('a finished or deferred lane gets fresh whole products while the two slower
   const assignments=[],prepare=f.shop.agentContexts;f.shop.agentContexts=values=>{assignments.push(...values);return prepare(values);};
   f.coordinator.refill({queue:f.shop.queue()});const status=f.coordinator.status();
   assert.equal(status.runId,before.runId);assert.equal(status.pool.activeWorkers,3);assert.equal(status.pool.assignedJobs,80);assert.equal(status.pool.refills,1);assert.equal(status.workers[0].generation,2);assert.deepEqual(status.workers.slice(1).map(w=>w.id),slow);
-  assert.ok(assignments.flatMap(a=>a.jobs.flatMap(j=>j.sourceKeys)).every(k=>!originalKeys.has(k)));assert.equal(assignments[0].jobs.length,20);assert.ok(assignments[0].jobs.every(j=>j.sourceKeys.length===3));
+  assert.ok(assignments.flatMap(a=>a.jobs.flatMap(j=>j.sourceKeys)).every(k=>!originalKeys.has(k)));assert.equal(assignments[0].jobs.length,20);assert.ok(assignments[0].jobs.every(j=>j.sourceKeys.length===3));assert.deepEqual(status.workers[0].jobIds,assignments[0].jobs.map(j=>j.id));assert.equal(status.workers[0].appliedProposals,0,'a replacement never inherits its predecessor’s receipts');
   await assert.rejects(f.call(0,'heartbeat'),/revoked/);assert.equal((await f.call(3,'heartbeat')).active,true);assert.equal(f.state.runLease.token,'owner-test-lease');
   f.coordinator.refill({queue:f.shop.queue()});assert.equal(f.launches.length,4,'a poll cannot create a fourth active worker');assert.deepEqual(f.shop.queue(),queueBefore,'deferral never removes actual work');
  }finally{f.close();}

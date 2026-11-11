@@ -210,7 +210,7 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
  }
  function status(){
   const run=state.active,pool=run?.pool,latest=pool?[...new Map(run.slots.map(s=>[s.lane,s])).values()]:run?.slots??[],active=run?.slots.filter(s=>!terminal(s)).length??0;
-  return {running:!!run,runId:run?.id??null,workers:latest.map(s=>({id:s.id,lane:s.lane,generation:s.generation,status:s.status,pid:s.pid??null,jobs:s.assignment.jobs.length,sourceCount:allKeys(s).size,startedAt:s.startedAt})),...(pool?{pool:{...pool,activeWorkers:active,finishedWorkers:run.slots.length-active,needsRefill:canRefill()&&active<pool.capacity&&(!active||clock()>=(pool.nextRefillAt??0))}}:{}),applied:run?.applied??0,last:state.last??null,attention:state.safetyStop??null};
+  return {running:!!run,runId:run?.id??null,workers:latest.map(s=>({id:s.id,lane:s.lane,generation:s.generation,status:s.status,pid:s.pid??null,jobs:s.assignment.jobs.length,jobIds:s.assignment.jobs.map(j=>j.id),sourceCount:allKeys(s).size,startedAt:s.startedAt,lastHeartbeat:s.lastHeartbeat??null,appliedProposals:Object.values(s.proposals).filter(p=>p.status==='applied').length})),...(pool?{pool:{...pool,activeWorkers:active,finishedWorkers:run.slots.length-active,needsRefill:canRefill()&&active<pool.capacity&&(!active||clock()>=(pool.nextRefillAt??0))}}:{}),applied:run?.applied??0,last:state.last??null,attention:state.safetyStop??null};
  }
  return {start,tick,handle,status,refill,drain,preferSerial,researchFor};
 }
