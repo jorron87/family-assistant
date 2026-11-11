@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {countedPackage} from './sesum-counted-package.mjs';
 import {createIndexReader} from './shopping-library.mjs';
 import {productTextHash} from './product-library.mjs';
 import {sanitizeUnitPriceBasis,unitPriceBasisFingerprint} from './sesum-unit-basis.mjs';
@@ -293,6 +294,7 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
    if(boundNativeIdentity(donor,base,row.source.store)===false)throw Error('Native identity metadata changed; review its current fingerprint.');
    if(!currentGroups(base,input.productKey).length)throw Error('A donor needs a current reviewed product family.');
    if(input.priceBasis==='direct-unit'){
+    if(input.countedPack!==undefined)throw Error('A variable unit price cannot use a fixed counted package.');
     if(row.source.soldByWeight!==true||input.packAmount!==null||input.canonicalPackAmount!=null||!['kg','l'].includes(input.unit)||donor.pack!==null||donor.unit!==input.unit||donor.nativeIdentity||input.fixedPackVerified!=null||input.packBasis!=null||input.nativeProductKey!=null)throw Error('Direct unit review requires a genuinely variable source and donor, null package and matching kg/l; fixed/native package overrides are forbidden.');
     const receipts=(value,label)=>{
      if(!Array.isArray(value)||!value.length||value.length>40)throw Error(`${label} actual primary receipts are required.`);
@@ -316,12 +318,14 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
    if(row.source.soldByWeight)throw Error('Variable-weight Sesum products need a separate verified unit-price contract.');
    if(row.source.soldByWeight===null&&input.fixedPackVerified!==true)throw Error('Unknown Sesum weight mode needs explicit fixedPackVerified and package evidence.');
    const sourcePack=packOf({...row.source,soldByWeight:false});
+   const measure=countedPackage(row.source,input.countedPack,{packAmount:input.packAmount,unit:input.unit,packBasis:input.packBasis,fixedPackVerified:input.fixedPackVerified,at:clock().getTime()});
+   if(measure)next.countedPack=measure;
    if(input.packBasis!=null&&!['net','drained'].includes(input.packBasis))throw Error('Unsupported Sesum package basis.');
    if(input.packBasis==='drained'){
     if(sourcePack?.unit!=='kg'||input.unit!=='kg'||input.packAmount>sourcePack.amount&&!near(input.packAmount,sourcePack.amount))throw Error('A drained package needs known gross kg at least as large as the reviewed drained kg.');
     next.packBasis='drained';next.packBasisEvidence=text(input.packBasisEvidence,'drained package evidence',6000,{required:true});
    }else{
-    if(sourcePack&&(sourcePack.unit!==input.unit||!near(sourcePack.amount,input.packAmount)))throw Error('Sesum and donor package amounts disagree.');
+    if(!measure&&sourcePack&&(sourcePack.unit!==input.unit||!near(sourcePack.amount,input.packAmount)))throw Error('Sesum and donor package amounts disagree.'+(sourcePack.unit==='stk'&&['kg','l'].includes(input.unit)?' Use countedPack only after actual primary whole-pack measurement review.':''));
     if(input.packBasis==='net')next.packBasis='net';
    }
    next.packAmount=input.packAmount;next.unit=input.unit;

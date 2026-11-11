@@ -18,6 +18,14 @@ test('binding normalizes only a genuinely missing empty target list for an expli
  assert.deepEqual(bindPlacementDecisions(packet,[{...negative,targets:[]}])[0].targets,[]);
 });
 
+test('own counted-pack evidence is reused only for unchanged source facts and explicit invalid input is preserved for domain rejection',()=>{
+ const sourceKey='sesum-product:1',queue=[{do:'shopping-sesum-placement-review',sourceKey}],countedPack={reviewed:true,wholePack:true,sourceCount:8,packAmount:.32,unit:'kg',evidence:'Original whole-pack measurement already read on this exact unchanged source.'};
+ const packet=buildAgentContext(queue,agentManifest(shoppingAgentBatch(queue)),{...facts,sources:key=>({sourceKey:key,placement:{sourceFingerprint:'current',registrationFingerprint:null,familySetFingerprint:'set',review:{sourceFingerprint:'current',countedPack},reviewDelta:{familiesToReview:['beans'],retainedTargets:[]}}})});
+ const input={sourceIndex:0,status:'reviewed',targets:[{familyIndex:0,equivalenceEvidence:'Actual complete source facts match this current family.'}]};
+ assert.deepEqual(bindPlacementDecisions(packet,[input])[0].countedPack,countedPack);assert.equal(bindPlacementDecisions(packet,[{...input,countedPack:null}])[0].countedPack,null);
+ packet.sources[0].placement.review.sourceFingerprint='stale';assert.equal(bindPlacementDecisions(packet,[input])[0].countedPack,undefined);
+});
+
 test('incremental binding preserves current retained positives and cannot reverse unchanged negatives',()=>{
  const source='sesum-product:1',queue=[{do:'shopping-sesum-placement-review',sourceKey:source}],retained={familyId:'beans',familyFingerprint:'criteria',equivalenceEvidence:'Original actually reviewed source-family proof.'},packet=buildAgentContext(queue,agentManifest(shoppingAgentBatch(queue)),{...facts,families:()=>[...facts.families(),{familyId:'new-family',familyFingerprint:'new-criteria'},{familyId:'held-negative',familyFingerprint:'held'}],sources:key=>({sourceKey:key,placement:{sourceFingerprint:'source',registrationFingerprint:null,familySetFingerprint:'set',reviewDelta:{familiesToReview:['new-family'],retainedTargets:[retained]}}})});
  const input={sourceIndex:0,status:'reviewed',reviewedAllFamilies:true,evidence:'The complete actual source and current family criteria were reviewed.',scopeEvidence:'Actual unchanged and new family requirements were checked.',targets:[{familyIndex:0,equivalenceEvidence:'Redundant restatement of an already reviewed positive.'},{familyIndex:1,equivalenceEvidence:'Actual source facts match the genuinely new family.'}]},before=structuredClone(packet);

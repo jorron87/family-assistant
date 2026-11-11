@@ -27,6 +27,15 @@ test('matching names, EAN and brand only suggest donors; they never approve a so
  assert.equal(f.prices.candidates('family:other').length,0);
 });
 
+test('counted net-package evidence normalizes the full package price without refreshing its receipt or multiplying the amount',()=>{
+ const f=fixture();f.ingest(f.source({weight:3,weightUnit:'stk'}));
+ const countedPack={reviewed:true,wholePack:true,sourceCount:3,packAmount:.39,unit:'kg',evidence:'The original fixed consumer package contains three portions, all together 390 g net, matching the exact currently reviewed donor package.',sourceReceipts:[{url:'https://producer.example.test/three-portions',observedAt:f.clock.at,evidence:'Read actual three-piece consumer package with total net 390 g, not 390 g per portion.'}]};
+ assert.throws(()=>f.approve(),/package amounts disagree/);assert.throws(()=>f.approve({countedPack:{...countedPack,sourceCount:1}}),/count must match/);
+ f.approve({countedPack});const c=f.prices.candidates()[0],price=f.prices.overlay().quote(c.sourceKey).price;
+ assert.equal(price.grossPackPrice,7.9);assert.equal(price.receiptAt,new Date(RECEIPT).toISOString());assert.equal(price.fresh,true);assert.equal(f.prices.approvedSource(c.sourceKey).packAmount,.39);assert.equal(f.state.bridges[c.sourceKey].countedPack.packAmount,.39);
+ f.ingest(f.source({weight:4,weightUnit:'stk'}));assert.equal(f.prices.approvedSource(c.sourceKey),null,'changed counts invalidate the exact source bridge');
+});
+
 test('short source codes are preserved separately and never become barcode donor matches',()=>{
  const f=fixture();f.p.ean='4073';
  f.ingest(f.source({name:'Unmapped produce',brand:null,ean:[],nonEanCodes:['4073']}));

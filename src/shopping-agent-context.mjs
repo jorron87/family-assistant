@@ -156,7 +156,8 @@ export function bindPlacementDecisions(packet,decisions){
   // redundant display reason. Copy it exactly; never repair an explicit null,
   // invalid reason, unknown product fact or another placement status.
   const reason=d.reason===undefined&&d.status==='no-active-family'?d.evidence:d.reason;
-  const input={kind:'placement',sourceKey:source.sourceKey,sourceFingerprint:p.sourceFingerprint,registrationFingerprint:p.registrationFingerprint,familySetFingerprint:p.familySetFingerprint,status:d.status,evidence:d.evidence,scopeEvidence:d.scopeEvidence,reviewedAllFamilies:d.reviewedAllFamilies,noActiveFamilyVerified:d.noActiveFamilyVerified,reason,retryAt:d.retryAt,targets:incrementalTargets};
+  const ownPack=typeof p.sourceFingerprint==='string'&&p.review?.sourceFingerprint===p.sourceFingerprint?p.review:null;
+  const input={kind:'placement',sourceKey:source.sourceKey,sourceFingerprint:p.sourceFingerprint,registrationFingerprint:p.registrationFingerprint,familySetFingerprint:p.familySetFingerprint,status:d.status,evidence:d.evidence,scopeEvidence:d.scopeEvidence,reviewedAllFamilies:d.reviewedAllFamilies,noActiveFamilyVerified:d.noActiveFamilyVerified,reason,retryAt:d.retryAt,targets:incrementalTargets,...(Object.hasOwn(d,'countedPack')||ownPack?.countedPack!==undefined?{countedPack:d.countedPack===undefined?ownPack?.countedPack:d.countedPack,fixedPackVerified:d.fixedPackVerified===undefined?ownPack?.fixedPackVerified:d.fixedPackVerified}:{})};
   if(['reviewed','no-active-family'].includes(d.status))input.reviewedFamilyIds=p.reviewDelta.familiesToReview;
   return input;
  });

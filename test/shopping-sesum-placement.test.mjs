@@ -107,6 +107,24 @@ test('unknown native units cannot acquire code exclusions from an unreviewed pac
  f.ingest({changes:{name:'A changed actual source variant 500g'}});assert.equal(f.row().reviewDelta.codeExcludedFamilies,undefined,'a stale registered pack never lends a unit to changed source facts');
 });
 
+test('a counted package needs primary net-measure evidence before research, registration and price comparison can proceed',t=>{
+ const f=setup(t,{sourceName:'Eight fixed whole-bean portions 500g'});f.ingest({changes:{weight:8,weightUnit:'stk'}});
+ const source=structuredClone(f.row().source),receiptAt=f.row().receiptAt;
+ assert.throws(()=>f.review(),/mengdeenhet/,'the source name and eight pieces cannot invent a canonical mass');
+ const countedPack={reviewed:true,wholePack:true,sourceCount:8,packAmount:.5,unit:'kg',evidence:'Read the actual original eight-portion consumer bag. All eight portions together have a declared total net mass of 500 g, not 500 g per portion.',sourceReceipts:[{url:'https://producer.example.test/eight-whole-bean-portions',observedAt:f.clock.at,evidence:'Actual original full ingredients and whole eight-portion bag with total net 500 g were read.'}]};
+ f.review({countedPack});assert.equal(f.row().status,'reviewed');assert.equal(f.row().review.targets[0].countedPackReviewed,true);assert.deepEqual(f.row().source,source);
+ assert.equal(f.candidate().status,'pending');assert.equal(f.shop.familyView().items.find(x=>x.id===f.target.id).prices.current,60,'a package review and research target approve no identity or price');
+ assert.throws(()=>f.register(),/package amounts disagree/);
+ f.shop.sesumRegister({sourceKey:SOURCE,sourceFingerprint:f.candidate().sourceFingerprint,identityEvidence:'Read this exact original organic whole-bean product, its eight portions and the complete 500 g consumer package.',product:{ingredients:'Organic whole roasted coffee beans',description:'Eight fixed portions of plain whole roasted beans',brand:'New',attributes:{organic:true}},packAmount:.5,unit:'kg',packEvidence:'The eight actual portions together are one fixed consumer bag of 500 g.',countedPack,groups:[f.B],memberships:[{groupId:f.B.id,groupFingerprint:groupMetadataFingerprint(f.B),equivalenceEvidence:'Read actual whole roasted bean ingredients and physical form matching this current organic group.',qualityEvidence:'Read the original ingredient list and organic declaration on the actual full consumer pack.'}],sourceReceipts:countedPack.sourceReceipts});
+ assert.equal(f.row().status,'pending','registered identity is new facts, not automatic old placement approval');
+ f.review({countedPack});f.link([f.A,f.B]);f.review({countedPack});
+ assert.equal(f.shop.familyView().items.find(x=>x.id===f.target.id).prices.current,40,'20 currency units apply to one whole 0.5 kg bag, never eight times that amount');
+ assert.throws(()=>f.review({countedPack:{...countedPack,packAmount:.4}}),/produktgrunnlag/,'a placement cannot change an already registered physical pack');
+ assert.equal(f.row().receiptAt,receiptAt);assert.deepEqual(f.row().source,source);assert.equal(f.candidate().families.find(x=>x.familyId===f.target.id).sourceDecision,null);
+ f.reload();assert.equal(f.row().status,'reviewed');assert.equal(f.row().review.countedPack.packAmount,.5);
+ f.ingest({changes:{weight:9,weightUnit:'stk'}});assert.equal(f.row().status,'pending');assert.throws(()=>f.review({countedPack}),/count must match/);
+});
+
 test('queue and completion each reuse one library snapshot without retaining it between invocations',t=>{
   let reads=0;const f=setup(t,{onLibraryRead:()=>reads++});f.ingest();
   reads=0;const queue=f.shop.queue();assert.equal(reads,1,'all derived work within one queue uses one base reader');

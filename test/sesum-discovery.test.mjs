@@ -46,6 +46,15 @@ test('fixed-package checks reject conflicting units, amounts and variable-weight
  f.record.source.soldByWeight=null;assert.throws(()=>f.discovery.register(f.input()),/Unknown weight mode/);f.discovery.register(f.input({fixedPackVerified:true}));
  f.record.source.weightUnit='unknown';assert.throws(()=>f.discovery.register(f.input({fixedPackVerified:true})),/unit needs review/);
 });
+
+test('a fixed counted bag requires actual whole-pack evidence before its canonical mass is registered',()=>{
+ const f=fixture();Object.assign(f.record.source,{weight:8,weightUnit:'stk'});
+ const countedPack={reviewed:true,wholePack:true,sourceCount:8,packAmount:.5,unit:'kg',evidence:'The actual original package contains eight individually wrapped portions and explicitly declares a combined net mass of 500 g for the complete bag.',sourceReceipts:[{url:'https://producer.example.test/eight-portions',observedAt:NOW,evidence:'Read the actual eight portions and total 500 g whole-bag declaration.'}]};
+ assert.throws(()=>f.discovery.register(f.input()),/package amounts disagree/);assert.equal(f.saves(),0);
+ f.discovery.register(f.input({countedPack}));const record=f.discovery.record(key),p=f.discovery.overlay().product(key);
+ assert.equal(p.pack,.5);assert.equal(p.unit,'kg');assert.deepEqual(p.rawPack,{weight:8,weightUnit:'stk'});assert.equal(record.countedPack.sourceCount,8);assert.equal(f.discovery.overlay().quote(key).price.receiptAt,null);
+ f.record.sourceFingerprint='2'.repeat(64);assert.equal(f.discovery.record(key),null,'a changed native source cannot inherit a physical package measurement');
+});
 test('explicit drained mass preserves gross raw package and requires concrete evidence',()=>{
  const f=fixture();f.record.source.weight=380;f.record.source.name='Cooked beans 380 g';
  assert.throws(()=>f.discovery.register(f.input({packAmount:.23})),/amounts disagree/);

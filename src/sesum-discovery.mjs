@@ -2,6 +2,7 @@ import {createHash} from 'node:crypto';
 import {createProductLibrary,groupMetadataFingerprint,productMetadataFingerprint} from './product-library.mjs';
 import {createIndexReader} from './shopping-library.mjs';
 import {sesumNativeIdentity} from './sesum-prices.mjs';
+import {countedPackage} from './sesum-counted-package.mjs';
 
 const plain=v=>v!==null&&typeof v==='object'&&!Array.isArray(v)&&[Object.prototype,null].includes(Object.getPrototypeOf(v));
 const stable=v=>typeof v==='string'&&/^[A-Za-z0-9:_-]{1,250}$/.test(v)&&!['__proto__','constructor','prototype'].includes(v);
@@ -60,7 +61,8 @@ export function createSesumDiscovery(state,{save=()=>{},now=()=>new Date(),reade
   if(!observed||observed.sourceFingerprint!==input.sourceFingerprint)throw Error('Sesum metadata changed; read the current product.');
   if(input.sourceKey!==`sesum:${s.store}:${s.id}`||!['string','number'].includes(typeof s.id)||!/^[1-9]\d*$/.test(String(s.id))||!Number.isSafeInteger(Number(s.id))||!CHAINS.has(s.store))throw Error('Invalid or unknown native Sesum chain/product identity.');
   const identityEvidence=text(input.identityEvidence,'identity evidence',6000,{required:true}),packEvidence=text(input.packEvidence,'package evidence',6000,{required:true});
-  const direct=input.priceBasis==='direct-unit';let directEvidence=null;
+  const direct=input.priceBasis==='direct-unit';let directEvidence=null,measure=null;
+  if(direct&&input.countedPack!==undefined)throw Error('Variable unit prices cannot use a fixed counted package measurement.');
   if(direct){
    if(s.soldByWeight!==true||input.packAmount!==null||input.canonicalPackAmount!=null||!['kg','l'].includes(input.unit)||input.fixedPackVerified!=null||input.packBasis!=null||input.nativeProductKey!=null||input.nativeProductFingerprint!=null||input.nativeIdentityEvidence!=null)throw Error('Direct unit registration requires an actually variable product, explicit null package and kg/l without fixed/native package overrides.');
    directEvidence=Object.fromEntries(['variableWeightEvidence','unitPriceEvidence','vatEvidence'].map(key=>[key,text(input[key],key,6000,{required:true}).replace(/\s+/gu,' ')]));
@@ -75,7 +77,8 @@ export function createSesumDiscovery(state,{save=()=>{},now=()=>new Date(),reade
   const original=packageOf(s),drained=input.packBasis==='drained',basisEvidence=text(input.packBasisEvidence,'package-basis evidence',6000,{required:drained});
   if(input.packBasis!=null&&!['net','drained'].includes(input.packBasis))throw Error('Unsupported package basis.');
   if(drained&&(!original||original.unit!=='kg'||input.unit!=='kg'||input.packAmount>original.amount))throw Error('Drained mass must be documented and no larger than the source gross package mass.');
-  if(!drained&&original&&(original.unit!==input.unit||!near(original.amount,input.packAmount)))throw Error('Canonical and source package amounts disagree.');
+  measure=countedPackage(s,input.countedPack,{packAmount:input.packAmount,unit:input.unit,packBasis:input.packBasis,fixedPackVerified:input.fixedPackVerified,at:at.getTime()});
+  if(!drained&&!measure&&original&&(original.unit!==input.unit||!near(original.amount,input.packAmount)))throw Error('Canonical and source package amounts disagree.'+(original.unit==='stk'&&['kg','l'].includes(input.unit)?' A fixed count needs countedPack with the whole net measurement and actual primary receipts; never derive it from the name.':''));
   if(!original&&input.fixedPackVerified!==true)throw Error('A missing source package needs explicit fixed-package verification.');
   }
   const drained=!direct&&input.packBasis==='drained',basisEvidence=drained?text(input.packBasisEvidence,'package-basis evidence',6000,{required:true}):null;
@@ -103,7 +106,7 @@ export function createSesumDiscovery(state,{save=()=>{},now=()=>new Date(),reade
   });
   const library={schemaVersion:1,createdAt:at.toISOString(),updatedAt:at.toISOString(),groups:[...used.values()],products:[product],memberships,prices:[]},validated=createProductLibrary(library,{now:at}),audit=validated.audit();
   if(!audit.ok||memberships.some(m=>used.get(m.groupId).canonicalUnit!==product.unit)||validated.productQuote(product.productKey)?.reviewCurrent!==true)throw Error('Reviewed discovery product does not satisfy the product-library contract.');
-  const record={sourceKey:input.sourceKey,sourceFingerprint:input.sourceFingerprint,identityEvidence,product,groups:[...used.values()],memberships,...(direct?{priceBasis:'direct-unit',...directEvidence,priceIncludesVat:true}:{packBasis:drained?'drained':'net',packBasisEvidence:basisEvidence}),...(nativeIdentity?{nativeIdentity,nativeIdentityEvidence}:{}),registeredAt:at.toISOString()};
+  const record={sourceKey:input.sourceKey,sourceFingerprint:input.sourceFingerprint,identityEvidence,product,groups:[...used.values()],memberships,...(measure?{countedPack:measure}:{}),...(direct?{priceBasis:'direct-unit',...directEvidence,priceIncludesVat:true}:{packBasis:drained?'drained':'net',packBasisEvidence:basisEvidence}),...(nativeIdentity?{nativeIdentity,nativeIdentityEvidence}:{}),registeredAt:at.toISOString()};
   state.records[input.sourceKey]=record;for(const [id,g] of Object.entries(proposed))if(!base?.group(id))state.groups[id]=g;state.revision++;save();
   return {sourceKey:input.sourceKey,sourceFingerprint:input.sourceFingerprint,productKey:product.productKey,productFingerprint:product.metadataFingerprint,groups:memberships.map(m=>({groupId:m.groupId,groupFingerprint:m.reviewedGroupFingerprint})),registeredAt:record.registeredAt};
  }

@@ -1,5 +1,6 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {scopeCoverageCurrent,effectiveScopeVariants} from './shopping-family-scope.mjs';
+import {countedPackage} from './sesum-counted-package.mjs';
 import {validateNutrition,purchaseNutrition} from './shopping-nutrition.mjs';
 import {calibrateMarket} from './shopping-market.mjs';
 import {createMarketCatalog} from './shopping-catalog.mjs';
@@ -1583,8 +1584,11 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     if(!source||input.sourceFingerprint!==source.sourceFingerprint||(input.registrationFingerprint??null)!==source.registrationFingerprint||input.familySetFingerprint!==data.familySetFingerprint)throw Error('Kildevare, produktgrunnlag eller aktivt familiesett er endret; les gjeldende plassering.');
     const checkedText=(value,label,min=20,field=label)=>{if(typeof value!=='string'||value.trim().length<min||value.length>6000)throw Error(`${label}${field===label?'':' ('+field+')'} krever konkret belegg på ${min}–6000 tegn; mottatt type=${typeof value}, lengde=${typeof value==='string'?value.trim().length:0}. Rett dette feltet fra faktisk lest belegg; en feltfeil er ikke manglende produktbelegg.`);return value.trim();};
     const approved=source.kind==='catalogue'?null:sesumPrices.approvedSource(source.sourceKey),reader=libReader(),product=approved?reader?.product(source.sourceKey):null,raw=sesumSubjectRecord(source.sourceKey).source;
+    const measure=countedPackage(raw,input.countedPack,{packAmount:input.countedPack?.packAmount,unit:input.countedPack?.unit,fixedPackVerified:input.fixedPackVerified,at:now().getTime()});
+    if(measure&&approved&&(measure.unit!==approved.unit||Math.abs(measure.packAmount-approved.packAmount)>1e-6*Math.max(measure.packAmount,approved.packAmount)))throw Error('Pakningsmålet motsier gjeldende gjennomgått produktgrunnlag; gjennomgå identiteten før ny plassering.');
     const knownUnit=approved?.unit??({g:'kg',kg:'kg',ml:'l',l:'l',liter:'l',stk:'stk',pcs:'stk',m:'m'}[String(raw.weightUnit??'').toLowerCase()]??null);
     const record={sourceKey:source.sourceKey,sourceFingerprint:source.sourceFingerprint,registrationFingerprint:source.registrationFingerprint,familySetFingerprint:data.familySetFingerprint,status:input.status,evidence:checkedText(input.evidence,'Plasseringsvurderingen',10,'input.evidence'),reviewedAt:now().toISOString(),targets:[]};
+    if(measure){record.countedPack=measure;if(input.fixedPackVerified===true)record.fixedPackVerified=true;}
     if(['reviewed','no-active-family'].includes(input.status)){
       if(input.reviewedAllFamilies!==true)throw Error('Hele det gjeldende aktive familiesettet må være faktisk gjennomgått.');
       record.reviewedAllFamilies=true;record.scopeEvidence=checkedText(input.scopeEvidence,'Hele familiesettet',20,'input.scopeEvidence');
@@ -1599,10 +1603,11 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       const seen=new Set(),families=new Map(data.families.map(f=>[f.familyId,f]));
       record.targets=input.targets.map(target=>{
         const family=families.get(target?.familyId);if(!family||seen.has(family.familyId)||target.familyFingerprint!==family.familyFingerprint)throw Error('En valgt families faktiske kriterier er endret eller ukjent.');
-        if(knownUnit&&knownUnit!==family.unit)throw Error('Kildens dokumenterte mengdeenhet stemmer ikke med forskningsfamilien.');
+        const countNeedsMeasure=!approved&&measure?.unit===family.unit;
+        if(knownUnit&&knownUnit!==family.unit&&!countNeedsMeasure)throw Error('Kildens dokumenterte mengdeenhet stemmer ikke med forskningsfamilien.'+(!approved&&knownUnit==='stk'&&['kg','l'].includes(family.unit)?' En fast antallspakke trenger countedPack med faktisk primærbelegg for hele pakkens netto kg/l, aldri vekt gjettet fra navnet.':''));
         if(sesumFamilyDecision(source,family.familyId,sesumRequirements(family.familyId),source.registrationFingerprint)?.status==='excluded')throw Error('Denne kildevaren har et gjeldende konkret familieavslag; vurder og gjenåpne det eksplisitt før ny positiv plassering.');
         if(product&&family.variants.length&&family.variants.every(variant=>(variant.brands.length&&!variant.brands.some(brand=>normalized(product.brand).includes(brand)))||variant.requires.some(key=>product.attributes?.[key]!==true)))throw Error('Gjeldende gjennomgått produkt oppfyller ikke familiens merke-/egenskapskrav; manglende fakta må avklares.');
-        seen.add(family.familyId);return {familyId:family.familyId,familyFingerprint:family.familyFingerprint,equivalenceEvidence:checkedText(target.equivalenceEvidence,'Konkret ekvivalens mot familiens krav',20,'input.targets[].equivalenceEvidence')};
+        seen.add(family.familyId);return {familyId:family.familyId,familyFingerprint:family.familyFingerprint,equivalenceEvidence:checkedText(target.equivalenceEvidence,'Konkret ekvivalens mot familiens krav',20,'input.targets[].equivalenceEvidence'),...(countNeedsMeasure?{countedPackReviewed:true}:{})};
       });
       if(input.status==='reviewed'&&!record.targets.length)throw Error('En positiv plassering krever minst én konkret gjennomgått familie.');
       if(input.status==='no-active-family'){
