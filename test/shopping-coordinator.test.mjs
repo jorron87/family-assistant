@@ -228,6 +228,18 @@ test('out-of-order parallel proposals persist exact receipts once, with all 91 c
  const rows=f.state.shopping.sesumPlacementReviews;assert.equal(Object.keys(rows).length,60);for(const r of Object.values(rows))if(r.status!=='blocked')assert.equal(r.reviewedFamilies.length,91);assert.equal(f.coordinator.status().running,false);assert.equal(f.coordinator.status().last.applied,3);assert.equal(f.state.runLease.token,'owner-test-lease');
  }finally{f.close();}
 });
+
+test('omitted redundant negative target arrays yield identical real domain receipts in a 91-family mixed cohort',async()=>{
+ const explicit=fixture(20),normalized=fixture(20);try{
+  for(const f of [explicit,normalized]){f.start();await readAll(f,0);const packet=f.packet(0),input=f.decisions(packet);let missing=0;
+   if(f===normalized)for(const row of input.decisions)if(row.status==='blocked'||row.status==='no-active-family'){assert.deepEqual(row.targets,[]);delete row.targets;missing++;}
+   if(f===normalized)assert.equal(missing,12);
+   const result=await f.call(0,'shopping_propose',{proposalId:'mixed-negative-field-normalization',contextFingerprint:packet.contextFingerprint,operation:'placement',input});assert.equal(result.saved,true);assert.equal(result.result.saved,20);assert.equal(f.coordinator.status().workers[0].proposalSummary.rejected,0);
+  }
+  assert.deepEqual(normalized.state.shopping.sesumPlacementReviews,explicit.state.shopping.sesumPlacementReviews);
+  assert.deepEqual(normalized.shop.completion(),explicit.shop.completion());
+ }finally{explicit.close();normalized.close();}
+});
 test('changed family context rejects writes until the complete actual changed criteria are delivered',async()=>{
  const f=fixture(20);try{f.start();const p=f.packet(0);f.shop.watch({...f.state.shopping.watches['synthetic-beef-strips'],note:'Changed exact family requirements: frozen only.'});await assert.rejects(f.call(0,'shopping_propose',{proposalId:'stale-family-proposal',contextFingerprint:p.contextFingerprint,operation:'placement',input:f.decisions(p)}),/Context changed/);const h=await f.call(0,'shopping_context',{});assert.ok(h.pages.families>0);await assert.rejects(f.call(0,'shopping_propose',{proposalId:'unread-family-proposal',contextFingerprint:h.contextFingerprint,operation:'placement',input:{}}),/complete current/);assert.equal(Object.keys(f.state.shopping.sesumPlacementReviews).length,0);await readAll(f);assert.equal(f.packet(0).assignmentChanges.length,0,'fresh family criteria can be read for the same source identities');}finally{f.close();}
 });

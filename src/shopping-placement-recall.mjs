@@ -6,7 +6,14 @@ export function placementRecallHints(packet,research=[]){
  const notes=new Map(research.map(r=>[r.sourceKey,r]));
  return packet.sources.map((s,sourceIndex)=>{
   const facts=[s.reviewedIdentity?.product?.ingredients,s.reviewedIdentity?.product?.description,s.registration?.product?.ingredients,s.registration?.product?.description,...(notes.get(s.sourceKey)?.notes??[]).map(n=>n.labelText)].filter(Boolean).join('\n'),label=words(facts),name=words(s.observation?.source?.name);
-  const hints=packet.families.flatMap((f,familyIndex)=>{const tokens=[...words(f.name)].filter(w=>w.length>=5&&!qualifiers.has(w));if(!tokens.length)return [];const labelMatch=tokens.every(t=>label.has(t)),nameMatch=tokens.every(t=>name.has(t));return labelMatch||nameMatch?[{familyId:f.familyId,familyIndex,name:f.name,matchedTokens:tokens,basis:labelMatch?'actual-label-text':'metadata-name-only',authority:'Plausible family to assess explicitly, not an approval. Tokens can be negated or refer to another ingredient. Read actual form, contents and package.'}]:[];});
+  const changed=Array.isArray(s.placement?.reviewDelta?.familiesToReview)?new Set(s.placement.reviewDelta.familiesToReview):null;
+  const discovery=new Set(s.placement?.discoveryScope?.familyIds??[]),groups=new Set((s.reviewedIdentity?.groups??[]).map(g=>g.groupId));
+  const hints=packet.families.flatMap((f,familyIndex)=>{
+   if(changed&&!changed.has(f.familyId))return [];
+   const tokens=[...words(f.name)].filter(w=>w.length>=5&&!qualifiers.has(w)),labelMatch=tokens.length>0&&tokens.every(t=>label.has(t)),nameMatch=tokens.length>0&&tokens.every(t=>name.has(t));
+   const groupMatch=(f.variants??[]).some(v=>groups.has(v.groupId)),discoveryMatch=discovery.has(f.familyId);
+   return labelMatch||nameMatch||groupMatch||discoveryMatch?[{familyId:f.familyId,familyIndex,name:f.name,matchedTokens:labelMatch||nameMatch?tokens:[],basis:labelMatch?'actual-label-text':groupMatch?'reviewed-group-candidate':discoveryMatch?'discovery-term-candidate':'metadata-name-only',authority:'Plausible family to assess explicitly, not an approval. Tokens and discovery terms can be misleading or negated; group candidates still require household brand, attribute and variant checks. Read actual form, contents and package.'}]:[];
+  });
   return {sourceKey:s.sourceKey,sourceIndex,hints};
  });
 }

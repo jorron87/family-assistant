@@ -5,6 +5,19 @@ import {agentManifest,buildAgentContext,agentContextPages,bindPlacementDecisions
 import {shoppingProtocol} from '../src/shopping-agent-protocol.mjs';
 const facts={families:()=>[{familyId:'beans',familyFingerprint:'criteria'}],sources:key=>({sourceKey:key,ingredients:'Coffee beans'}),products:key=>({key})};
 
+test('binding normalizes only a genuinely missing empty target list for an explicit evidenced negative or hold',()=>{
+ const sourceKey='sesum-product:1',queue=[{do:'shopping-sesum-placement-review',sourceKey}],packet=buildAgentContext(queue,agentManifest(shoppingAgentBatch(queue)),{...facts,sources:key=>({sourceKey:key,placement:{sourceFingerprint:'source',registrationFingerprint:null,familySetFingerprint:'set',reviewDelta:{familiesToReview:['beans'],retainedTargets:[]}}})});
+ const negative={sourceIndex:0,status:'no-active-family',reviewedAllFamilies:true,noActiveFamilyVerified:true,scopeEvidence:'Read all actual family criteria against the complete original product facts.',evidence:'The actual whole label is an incompatible household cleaning formula.'};
+ assert.deepEqual(bindPlacementDecisions(packet,[negative])[0].targets,[]);assert.equal(Object.hasOwn(negative,'targets'),false);
+ const hold={sourceIndex:0,status:'blocked',evidence:'The actual ingredient label is unreadable.',reason:'The primary ingredient label must be obtained before placement.',retryAt:'2026-11-12T12:00:00Z'};
+ assert.deepEqual(bindPlacementDecisions(packet,[hold])[0].targets,[]);
+ for(const targets of [null,undefined,'',0,{}])assert.throws(()=>bindPlacementDecisions(packet,[{...negative,targets}]),/explicit array/);
+ for(const change of [{status:'reviewed'},{noActiveFamilyVerified:false},{reviewedAllFamilies:false},{scopeEvidence:''},{evidence:''}])assert.throws(()=>bindPlacementDecisions(packet,[{...negative,...change}]),/explicit array/);
+ assert.throws(()=>bindPlacementDecisions(packet,[{...hold,reason:''}]),/explicit array/);
+ assert.throws(()=>bindPlacementDecisions(packet,{targets:[{familyIndex:0,equivalenceEvidence:'A contradictory shared positive may not be silently discarded.'}],decisions:[negative]}),/top-level targets/);
+ assert.deepEqual(bindPlacementDecisions(packet,[{...negative,targets:[]}])[0].targets,[]);
+});
+
 test('incremental binding preserves current retained positives and cannot reverse unchanged negatives',()=>{
  const source='sesum-product:1',queue=[{do:'shopping-sesum-placement-review',sourceKey:source}],retained={familyId:'beans',familyFingerprint:'criteria',equivalenceEvidence:'Original actually reviewed source-family proof.'},packet=buildAgentContext(queue,agentManifest(shoppingAgentBatch(queue)),{...facts,families:()=>[...facts.families(),{familyId:'new-family',familyFingerprint:'new-criteria'},{familyId:'held-negative',familyFingerprint:'held'}],sources:key=>({sourceKey:key,placement:{sourceFingerprint:'source',registrationFingerprint:null,familySetFingerprint:'set',reviewDelta:{familiesToReview:['new-family'],retainedTargets:[retained]}}})});
  const input={sourceIndex:0,status:'reviewed',reviewedAllFamilies:true,evidence:'The complete actual source and current family criteria were reviewed.',scopeEvidence:'Actual unchanged and new family requirements were checked.',targets:[{familyIndex:0,equivalenceEvidence:'Redundant restatement of an already reviewed positive.'},{familyIndex:1,equivalenceEvidence:'Actual source facts match the genuinely new family.'}]},before=structuredClone(packet);

@@ -120,6 +120,7 @@ export function agentContextPages(packet,maxCharacters=8000){
 // explicit agent input; ordinary domain validators check the complete result.
 export function bindPlacementDecisions(packet,decisions){
  if(packet.assignmentChanges?.length)throw Error('Frozen assignment changed; checkpoint and obtain a new assignment.');
+ const sharedTargets=!Array.isArray(decisions)&&Object.hasOwn(decisions??{},'targets');
  const shared=Array.isArray(decisions)?{}:{scopeEvidence:decisions?.scopeEvidence,reviewedAllFamilies:decisions?.reviewedAllFamilies};
  const rows=Array.isArray(decisions)?decisions:decisions?.decisions;
  if(!Array.isArray(rows)||!rows.length||rows.length>100)throw Error('Supply bounded placement decisions.');
@@ -134,6 +135,12 @@ export function bindPlacementDecisions(packet,decisions){
   const source=packet.sources[d.sourceIndex],p=source.placement;
   if(!['reviewed','no-active-family','blocked'].includes(d.status))throw Error('Invalid agent placement decision.');
   if(!p||!packet.jobs.some(j=>j.items.some(i=>i.do==='shopping-sesum-placement-review'&&(i.sourceKey===source.sourceKey||i.relatedSources?.some(r=>r.sourceKey===source.sourceKey)))))throw Error('Source has no assigned current placement stage.');
+  // An explicitly attested no-family decision or concrete hold cannot have
+  // positive targets. Normalize only this redundant missing empty array; no
+  // product fact, status, attestation or explicit invalid value is repaired.
+  const textAtLeast=(v,n)=>typeof v==='string'&&v.trim().length>=n;
+  const emptyNegative=d.status==='no-active-family'&&d.noActiveFamilyVerified===true&&d.reviewedAllFamilies===true&&textAtLeast(d.scopeEvidence,20)&&textAtLeast(d.evidence,10)||d.status==='blocked'&&textAtLeast(d.reason,20)&&textAtLeast(d.evidence,10);
+  if(d.targets===undefined&&!Object.hasOwn(d,'targets')&&!sharedTargets&&emptyNegative)d={...d,targets:[]};
   if(!Array.isArray(d.targets))throw Error('Placement decisions[].targets must be an explicit array for source '+source.sourceKey+'. Use targets:[] for a genuinely blocked or no-active-family decision, or explicit reviewed family targets for reviewed. A top-level targets field does not supply a decision field. No decision was saved.');
   const targets=d.targets.map(t=>{const f=Number.isInteger(t.familyIndex)?packet.families[t.familyIndex]:null;if(!f)throw Error('Invalid family index.');return {familyId:f.familyId,familyFingerprint:f.familyFingerprint,equivalenceEvidence:t.equivalenceEvidence};});
   const delta=p.reviewDelta,pending=new Set(delta?.familiesToReview??[]);
