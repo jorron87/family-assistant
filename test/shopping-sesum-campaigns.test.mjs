@@ -62,6 +62,14 @@ test('brand, required attributes and explicit donor/source exclusions constrain 
   f.link({excludeProductKeys:[SOURCE]});assert.equal(f.work().length,0);
 });
 
+test('campaign review shares bounded read snapshots across many families while retaining every exclusion hold',t=>{
+ const f=setup(t);f.ingest();f.approve();
+ for(let i=0;i<90;i++){const w=f.shop.watch({id:'synthetic-unrelated-'+i,name:'Synthetic unrelated family '+i,unit:'kg',storage:'pantry'});(f.state.shopping.sesumFamilyReviews[SOURCE]??={})[w.id]={status:'excluded',holdExcluded:true,reason:'Synthetic explicit exclusion of this actual source from this unrelated family.'};}
+ const original=f.provider.reader;let reads=0;f.provider.reader=(...args)=>{reads++;return original(...args);};
+ f.review();const used=reads;assert.ok(used<=2,'campaign lookup and review must each share one current snapshot, actual reads='+used);
+ assert.equal(f.row().status,'registered');assert.equal(f.shop.sesumOfferCandidates().items.length,1);assert.equal(Object.keys(f.state.shopping.sesumFamilyReviews[SOURCE]).length,90);
+});
+
 test('registration is atomic, idempotent and separate from the held source receipt',t=>{
   const f=setup(t);f.ingest();f.approve();const stock=structuredClone(f.state.shopping.watches[f.w.id]),beforePurchases=structuredClone(f.state.shopping.purchases);
   const result=f.review();assert.ok(result.offerId);assert.equal(Object.keys(f.state.shopping.offers).length,1);assert.equal(f.row().status,'registered');assert.equal(f.work().length,0);

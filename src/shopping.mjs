@@ -1714,17 +1714,17 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   }
   function buildSesumCampaignContexts(){
     const claimedSources=new Set(Object.values(s.offers).map(offer=>offer.sesumCampaign?.sourceKey).filter(Boolean));
-    const reader=libReader(),requirements=sesumRequirements(),native=catalog.entries(),sources=[...sesumResearches(reader).values()].filter(source=>source.packAmount>0&&(source.receipt.isPromo===true||source.receipt.promotion!=null||claimedSources.has(source.sourceKey))),result=new Map();
+    const reader=libReader(),requirements=sesumRequirements(),native=catalog.entries(),research=sesumResearches(reader),sources=[...research.values()].filter(source=>source.packAmount>0&&(source.receipt.isPromo===true||source.receipt.promotion!=null||claimedSources.has(source.sourceKey))),result=new Map();
     if(!reader)return result;
     const nativeByKey=new Map(native.map(e=>[e.watchId+'\0'+catalogKey(e),e]));
     for(const w of Object.values(s.watches)){
       if(w.enabled===false)continue;
-      const members=linkedMembers(w,reader);
+      const excluded=sesumScopedExclusions(w,reader,research),members=linkedMembers(w,reader,{excludedSet:excluded});
       for(const source of sources){
         const p=reader.product(source.sourceKey),stores=s.settings.stores.filter(store=>store.chainCode===source.source.store);
         if(!p||!stores.length||p.unit!==w.unit||reader.active?.(source.sourceKey)===false||sesumFamilyDecision(source,w.id,requirements,source.registrationFingerprint)?.status==='excluded')continue;
         const anchor=p.nativeIdentity?.key??p.donorProductKey??source.productKey,entry=nativeByKey.get(w.id+'\0'+anchor);
-        if(nativeHoldsMember(p,source.sourceKey,w.id,entry?[entry]:[])||scopedProductHeld(sesumScopedExclusions(w,reader),p,source.sourceKey))continue;
+        if(nativeHoldsMember(p,source.sourceKey,w.id,entry?[entry]:[])||scopedProductHeld(excluded,p,source.sourceKey))continue;
         const own=entry?.status==='approved'&&entry.store===source.source.store&&entry.unit===w.unit&&Math.abs(entry.packAmount-source.packAmount)<=1e-6*Math.max(entry.packAmount,source.packAmount);
         if(!members.has(source.sourceKey)&&!own)continue;
         const context={...source,familyId:w.id,familyName:w.name,familyFingerprint:requirements.get(w.id),storeIds:stores.map(store=>store.id)};
@@ -1765,7 +1765,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const at=now().getTime();
     return sesumOfferCandidates().items.filter(item=>!['registered','not-actionable'].includes(item.status)&&(all||item.status!=='blocked'||!item.review.retryAt||Date.parse(item.review.retryAt)<=at)).map(item=>({do:'shopping-sesum-offer-review',watchId:item.familyId,familyId:item.familyId,familyName:item.familyName,sourceKey:item.sourceKey,sourceFingerprint:item.sourceFingerprint,familyFingerprint:item.familyFingerprint,campaignFingerprint:item.campaignFingerprint,offerTermsFingerprint:item.offerTermsFingerprint,status:item.status,reason:item.reason,retryAt:item.review?.retryAt??null}));
   }
-  function sesumOfferReview(input){
+  function sesumOfferReview(...args){return inReadContext(()=>sesumOfferReviewInContext(...args));}
+  function sesumOfferReviewInContext(input){
     if(!input||!['registered','not-actionable','blocked'].includes(input.status))throw Error('Ugyldig Sesum-tilbudsvurdering.');
     if(input.inclusiveEndOfDayVerified!==undefined&&(input.inclusiveEndOfDayVerified!==true||input.status!=='registered'))throw Error('Inkludert sluttdag krever uttrykkelig true ved registrering av primærbekreftet tilbud.');
     const context=sesumCampaignContexts().get(campaignKey(input.sourceKey,input.familyId));
