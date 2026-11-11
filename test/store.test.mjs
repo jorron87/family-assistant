@@ -19,6 +19,13 @@ test('the lightweight current lease read is detached and follows renewal and rel
  read.token='foreign-edit';assert.equal(store.runLease().token,lease.token);store.renewRun(lease.token);assert.equal(store.runLease().token,lease.token);store.endRun(lease.token);assert.equal(store.runLease(),null);
 }));
 
+test('source scheduling preserves the full source basis without evaluating shopping completion',()=>fixture(dir=>{
+ const store=createStore(dir),full=store.completionReport(),expected=Object.fromEntries(Object.entries(full).filter(([key])=>!['complete','shopping','counts','cutoffAt'].includes(key))),counts=Object.fromEntries(Object.entries(full.counts).filter(([key])=>!key.startsWith('shopping')));
+ store.shopping.completion=()=>{throw Error('Shopping must remain independent of source scheduling');};
+ const {sourceComplete,cutoffAt,...source}=store.sourceCompletionReport();assert.equal(typeof sourceComplete,'boolean');assert.ok(!('complete'in source));assert.deepEqual(source,{...expected,counts});assert.ok(Date.parse(cutoffAt)>=Date.parse(full.cutoffAt));
+ assert.doesNotThrow(()=>store.changeCompletion());assert.throws(()=>store.completionReport(),/Shopping must remain/);
+}));
+
 test('continued records only a shopping checkpoint with server counts and preserves all completion blockers',()=>fixture(dir=>{
   const store=createStore(dir),work=[{do:'shopping-market-refresh',watchIds:Array.from({length:24},(_,i)=>'family-'+i)},{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1'}];
   const blocked={sourceKey:'sesum-product:2',status:'blocked',retryAt:new Date(Date.now()+3600000).toISOString(),reason:'A readable ingredient label is unavailable.'};

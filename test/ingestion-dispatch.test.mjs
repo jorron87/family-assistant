@@ -88,6 +88,13 @@ test('scoped shopping and source signals avoid constructing the unrelated queue'
  }finally{f.close();}
 });
 
+test('source signal and launch scheduling use source completion, retaining shopping jobs and full final certification',()=>{
+ const f=shoppingDispatchFixture([{do:'shopping-product-review',productKey:'kassal:ODA_NO:1',watchId:'family',fingerprint:'current'}]);
+ try{const complete=f.store.completionReport,source=complete();f.store.sourceCompletionReport=()=>({...source,sourceComplete:false,complete:undefined});f.store.completionReport=()=>{throw Error('Source scheduling should not rebuild shopping completion');};
+  assert.equal(changeSignal(f.store,undefined,{sourceOnly:true}).count,0);f.dispatcher.tick();assert.equal(f.launches.length,1);assert.equal(f.dispatcher.status().workerScope,'handel');assert.equal(f.queue.rows.length,1);f.store.completionReport=complete;f.launches[0].onExit(0);
+ }finally{f.close();}
+});
+
 test('coordinator safety stop also prevents the legacy full-tool fallback',()=>{
  const pool={status:()=>({running:false,attention:{reason:'An explicit runtime safety stop.'}})},f=shoppingDispatchFixture([{do:'shopping-review',storeId:'one'}],{shoppingWorkers:3},undefined,false,pool);try{f.dispatcher.tick();assert.equal(f.launches.length,0);assert.equal(f.store.snapshot().runLease,null);}finally{f.close();}
 });
@@ -197,6 +204,7 @@ test('a current source checkpoint resumes independent shopping while real source
 test('continued never counts as a completed full run and final ok waits for actual global completion',()=>{
   const f=shoppingDispatchFixture([{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1',sourceFingerprint:'one'}],{dailyFullFallback:true});
   let phase={current:false,fingerprint:'source-a'},complete=false;const runs=[];f.clock.at=Date.parse('2026-11-10T08:00:00Z');f.store.runHistory=()=>({runs,nextCursor:null});f.store.completionReport=()=>({complete,sourcePhase:phase,profileReviews:[],missingDrive:[],unsyncedCalendar:[]});
+  f.store.sourceCompletionReport=()=>({sourceComplete:true,sourcePhase:phase,profileReviews:[],missingDrive:[],unsyncedCalendar:[]});
   try{
     f.dispatcher.tick();phase={current:true,fingerprint:'source-a',checkpoint:{runId:'checkpoint-one',startedAt:new Date(f.clock.at).toISOString(),checkedAt:new Date(f.clock.at).toISOString(),blockers:[]}};runs.push({scope:'alle',outcome:'continued',startedAt:new Date(f.clock.at).toISOString(),finishedAt:new Date(f.clock.at).toISOString()});f.launches[0].onExit(0);
     f.clock.at+=16*60000;f.dispatcher.tick();assert.equal(f.dispatcher.status().workerScope,'handel','continued is a checkpoint, not a completed daily run');

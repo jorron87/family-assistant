@@ -25,7 +25,7 @@ export function changeSignal(store,resources,{shoppingOnly=false,sourceOnly=fals
     const rows=shoppingSignalRows(store,store.shopping?.queue()??[]).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
     return {signature:rows.length?createHash('sha256').update(JSON.stringify(rows)).digest('hex'):null,count:rows.length,items:rows.map(row=>JSON.stringify(row)),shoppingOnly:rows.length>0,originalsOnly:false};
   }
-  const report=store.completionReport(), queue=store.reviewQueue(), feed=store.activityFeedStatus(),state=store.snapshot();
+  const report=store.sourceCompletionReport?.()??store.completionReport(), queue=store.reviewQueue(), feed=store.activityFeedStatus(),state=store.snapshot();
   const waiting=[...queue.items,...report.missingDrive.map(item=>state.rawItems[item.rawId]).filter(Boolean)];
   const originals=resources?.list({status:'ready'}).filter(item=>waiting.some(raw=>raw.source===item.source &&
     item.refs?.some(ref=>sourceIdentity(item.source,ref)===sourceIdentity(raw.source,raw.externalId))))??[];
@@ -179,12 +179,12 @@ export function createIngestionDispatcher({store,resources,root,dataDir,shopping
     if(store.shopping?.stockIntake?.work().some(item=>!item.retryAt||Date.parse(item.retryAt)<=clock()))return;
     const local=osloDayAndHour(clock());
     if(state.daily?.day!==local.day){state.daily={day:local.day,attempts:0,retryAt:null};save();}
-    const report=store.completionReport(),sourcePhase=report.sourcePhase;
+    const report=store.sourceCompletionReport?.()??store.completionReport(),sourcePhase=report.sourcePhase;
     const sourceSignal=sourcePhase?.current?changeSignal(store,resources,{sourceOnly:true}):null;
     const resumeSourcePhase=sourcePhase?.current===true&&state.sourcePhaseRunId===sourcePhase.checkpoint.runId&&state.sourcePhaseSignal===sourceSignal.signature;
     const dailyPending=cfg.dailyFullFallback===true && (local.hour>7 || local.hour===7&&local.minute>=15) && !fullRunRecorded(store,local.day);
     const dailyReady=state.daily.attempts<3&&(!state.daily.retryAt||state.daily.retryAt<=clock());
-    const finalizeFull=!!(dailyPending&&dailyReady&&resumeSourcePhase&&report.complete);
+    const finalizeFull=!!(dailyPending&&dailyReady&&resumeSourcePhase&&(report.sourceComplete??report.complete)&&(report.shopping?report.complete:store.completionReport().complete));
     const requestedShopping=state.shoppingRequested===true;
     const fullDue=!requestedShopping&&(finalizeFull||dailyPending&&dailyReady&&!resumeSourcePhase);
     const sourceWork=fullDue||resumeSourcePhase?null:changeSignal(store,resources,{sourceOnly:true}),sourceBudget=state.sourceBudget;
