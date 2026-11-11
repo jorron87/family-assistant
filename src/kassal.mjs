@@ -35,13 +35,14 @@ export function createKassal({dataDir,fetchImpl=fetch,encryptionKey}={}) {
    const data=await r.json();lastError=null;return {...data,quotes:kassalQuotes(data),fetchedAt:new Date().toISOString(),note:'Kjedepriser. Bekrefter ikke lokal lagerstatus, kundeavistilbud, medlemspris eller antallsgrense.'};
   }catch(e){lastError=/^Kassal/.test(e.message)?e.message:'Kassal kunne ikke hentes.';throw Error(lastError);}finally{busy=false;}
  }
- const page=input=>{const p=input.page??1,size=input.size??30;if(!Number.isInteger(p)||p<1||p>1000||!Number.isInteger(size)||size<1||size>100)throw Error('Ugyldig Kassal-side.');return {page:p,size};};
+ const page=input=>{const p=input.page??1,size=input.size??30;if(!Number.isSafeInteger(p)||p<1||!Number.isInteger(size)||size<1||size>100)throw Error('Ugyldig Kassal-side.');return {page:p,size};};
  const query=input=>{const value=String(input.query??'').trim();if(!value||value.length>150)throw Error('Skriv et søk på inntil150 tegn.');return value;};
  return {
   configure,
   status:()=>({configured:existsSync(path),busy,error:lastError}),
   history:input=>{const eans=[...new Set(input.eans??[])],days=input.days??90,aggregation=input.aggregation??'min';if(!Array.isArray(input.eans)||eans.length<1||eans.length>100||eans.some(e=>typeof e!=='string'||!/^\d{8,14}$/.test(e))||!Number.isInteger(days)||days<1||days>90||!['min','max','avg'].includes(aggregation))throw Error('Oppgi1–100 gyldige EAN-koder,1–90 dager og gyldig aggregering.');return get('products/prices-bulk',{}, {eans,days,aggregation});},
   search:input=>get('products',{search:query(input),...page(input),unique:0}),
+  catalogue:(input={})=>get('products',{...page({...input,size:100}),unique:0,sort:'date_asc'}),
   stores:input=>{if(input.group&&!/^[A-Z0-9_]{2,30}$/.test(input.group))throw Error('Ugyldig kjede.');return get('physical-stores',{search:query(input),...page(input),group:input.group});},
   product:input=>{if(!Number.isSafeInteger(input.id)||input.id<1)throw Error('Ugyldig Kassal-ID.');return get('products/id/'+input.id);},
   ean:input=>{if(!/^\d{8,14}$/.test(input.ean??''))throw Error('Ugyldig EAN.');return get('products/ean/'+input.ean);}

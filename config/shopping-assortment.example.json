@@ -1,0 +1,7 @@
+{
+  "enabled": false,
+  "collectionEnabled": false,
+  "priceHorizonDays": 14,
+  "familySource": "sesum",
+  "odaScope": "household"
+}

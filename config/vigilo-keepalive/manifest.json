@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Familien – innhenting og øktkontroll",
-  "version": "1.7.1",
+  "version": "1.9.0",
   "description": "Beskytter Vigilo-økten og henter avgrenset innhold fra Vigilo, Spond, Facebook og Sesum til den lokale Familien-tjenesten.",
   "permissions": [
     "alarms",

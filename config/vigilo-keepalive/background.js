@@ -227,7 +227,7 @@ chrome.runtime.onMessage?.addListener((message, sender, sendResponse) => {
     try {
       const response = await fetch(collectorLocal + message.path, {
         method: message.method,
-        headers: message.method === 'POST' ? {'Content-Type': 'application/json', 'X-Family-Request': '1'} : {},
+        headers: {...(message.method === 'POST' ? {'Content-Type': 'application/json', 'X-Family-Request': '1'} : {}),...(origin==='https://www.sesum.no'?{'X-Family-Collector-Version':chrome.runtime.getManifest().version}:{})},
         body: message.method === 'POST' ? JSON.stringify(message.body ?? {}) : undefined,
         signal: AbortSignal.timeout(message.path==='/api/resources/receive'?90000:15000)
       });
@@ -314,7 +314,7 @@ async function wakeSesumCollector(tabId) {
   let bridge;
   try { bridge = await bounded(chrome.tabs.sendMessage(tabId,{type:'familien-collector-ping'})); } catch { /* repair after an extension update */ }
   if (!bridge?.ok) await chrome.scripting.executeScript({target:{tabId},files:['collector-bridge.js']});
-  const [main] = await bounded(chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:() => globalThis.__familienSesumCollector === 'sesum-collector-1.7.1' && globalThis.__familienSesumCollectorBuild === 'sesum-collector-build-1.7.1-1'}));
+  const [main] = await bounded(chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:() => globalThis.__familienSesumCollector === 'sesum-collector-1.9.0' && globalThis.__familienSesumCollectorBuild === 'sesum-collector-build-1.9.0-1'}));
   if (!main?.result) await chrome.scripting.executeScript({target:{tabId},world:'MAIN',files:['sesum-core.js','collector-sesum.js']});
   await bounded(chrome.tabs.sendMessage(tabId,{type:'familien-collector-wake'}));
 }
@@ -323,7 +323,7 @@ async function sesumTick() {
   sesumRunning = (async () => {
     // The background only decides whether to wake the page. Reserving work is
     // the page collector's job; a preflight must never consume its own queue.
-    const response = await fetch(collectorLocal + '/api/shopping/sesum/work?peek=1',{signal:AbortSignal.timeout(4000)});
+    const response = await fetch(collectorLocal + '/api/shopping/sesum/work?peek=1',{headers:{'X-Family-Collector-Version':chrome.runtime.getManifest().version},signal:AbortSignal.timeout(4000)});
     if (!response.ok) return;
     const work = await response.json();
     if (!work?.enabled || !work.jobs?.length || Date.parse(work.pauseUntil ?? '') > Date.now()) return;

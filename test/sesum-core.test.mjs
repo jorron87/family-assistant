@@ -12,6 +12,13 @@ const price = { storeId: 2, storeCode: 'KIWI', price: 49.4, unitPrice: 49.4,
 const html = (value, content = '') => '<html><body>' + content + '<script>self.__next_f.push(' +
   JSON.stringify([1, '0:' + JSON.stringify(value) + '\n']) + ')</script></body></html>';
 
+test('actual native category nodes retain their complete IDs/names/parents and own breadcrumbs never use sidebar hints',()=>{
+ const tree={id:46,name:'Kylling og fjærkre',children:[{id:283,name:'And',children:[{id:284,name:'And',children:[]},{id:2112,name:'Andefett',children:[]}]}]},links=[46,283,284,2112].map(id=>`<a href="/kategori/${id}-synthetic">Source category</a>`).join('');
+ const parsed=core.parseCatalogue(html(tree,'<h1>Alle kategorier</h1><p>4 kategorier med varer</p>'+links),'https://www.sesum.no/kategori');assert.equal(parsed.ok,true);assert.equal(parsed.categories.length,4);assert.equal(parsed.categories.find(c=>c.id==='284').parentId,'283');assert.equal(parsed.categories.find(c=>c.id==='284').name,'And');
+ const breadcrumbs='<nav aria-label="Brødsmuler"><a href="/?kategori=46">Kylling og fjærkre</a><a href="/?kategori=283">And</a><a href="/?kategori=284">And</a></nav><aside><a href="/?kategori=99">Wrong unrelated sidebar</a></aside>';
+ const own=core.parseProduct(html({product,prices:[price]},breadcrumbs),productUrl);assert.equal(own.ok,true);assert.deepEqual(own.product.categoryPathIds,['46','283','284']);
+});
+
 test('own product prices remain separate from site similarity suggestions and suspect unit prices', () => {
   const result = core.parseProduct(html(['$', 'section', null, { product, prices: [price], tilsvarende: [
     { product: { ...product, id: 202, name: 'Annen variant' }, prices: [{ ...price, price: 9.9 }] }

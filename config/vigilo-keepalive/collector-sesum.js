@@ -10,8 +10,8 @@
   'use strict';
   const ORIGIN = 'https://www.sesum.no';
   const WORK = '/api/shopping/sesum/work', RECEIVE = '/api/shopping/sesum/receive';
-  const VERSION = 'sesum-collector-1.7.1';
-  const BUILD = 'sesum-collector-build-1.7.1-1';
+  const VERSION = 'sesum-collector-1.9.0';
+  const BUILD = 'sesum-collector-build-1.9.0-1';
   // The background alarm repairs the bridge every minute. Page ticks advance
   // the bounded durable queue more often; the server still controls spacing
   // and each batch has at most eight reads. Running/Locks prevent overlaps.
@@ -25,6 +25,11 @@
       const url = new URL(value);
       if (url.origin !== ORIGIN || url.username || url.password || url.hash) return false;
       if (kind === 'product') return /^\/produkt\/[1-9]\d*(?:-[^/?#]+)?\/?$/.test(url.pathname) && !url.search;
+      if (kind === 'catalogue') {
+        if (!/^\/kategori(?:\/[1-9]\d*(?:-[^/?#]+)?)?\/?$/.test(url.pathname)) return false;
+        for (const [key,val] of url.searchParams) if (!['side','page','visning'].includes(key) || (key==='visning'?val!=='alle':!/^[1-9]\d{0,7}$/.test(val)) || url.searchParams.getAll(key).length !== 1) return false;
+        return true;
+      }
       if (kind !== 'search' || url.pathname !== '/sok' || !url.searchParams.get('q')?.trim() || url.searchParams.get('q').length > 250 || url.searchParams.getAll('q').length !== 1) return false;
       for (const [key,item] of url.searchParams) {
         if (!['q','page','side','offset','limit','cursor'].includes(key) || item.length > 2000) return false;
@@ -80,7 +85,7 @@
       state.lastCallAt = now(); calls++;
       let result = null, error = null, status = 'ok', pause = 0;
       try {
-        const response = await fetchPage(job.url, {method:'GET',credentials:'same-origin',redirect:'error',headers:{Accept:'text/html'},signal:AbortSignal.timeout(25000)});
+        const response = await fetchPage(job.url, {method:'GET',credentials:job.publicCatalogue===true?'omit':'same-origin',redirect:'error',headers:{Accept:'text/html'},signal:AbortSignal.timeout(25000)});
         if (!response.ok) {
           const code = response.status === 401 || response.status === 403 ? 'auth_required' : response.status === 429 ? 'rate_limited' : `http_${response.status}`;
           pause = code === 'auth_required' ? 10 * 60000 : code === 'rate_limited' ? Math.max(30 * 60000, retryDelay(response.headers?.get('retry-after'), now())) : response.status >= 500 ? 5 * 60000 : 0;
@@ -88,7 +93,7 @@
         }
         if (response.url && !allowedUrl(response.url, job.kind)) throw Object.assign(new Error('unexpected_response_url'), {code:'unexpected_response_url'});
         const html = await readHtml(response);
-        result = job.kind === 'product' ? core.parseProduct(html, job.url) : core.parseSearch(html, job.url);
+        result = job.kind === 'product' ? core.parseProduct(html, job.url) : job.kind === 'catalogue' ? core.parseCatalogue(html, job.url) : core.parseSearch(html, job.url);
         if (!result?.ok || result.kind !== job.kind) { status = 'partial'; error = {code:'unrecognized_schema',message:'Sesum response could not be completely parsed.'}; }
       } catch (failure) {
         status = 'error';

@@ -40,9 +40,9 @@ const qualityTitle=(key,q)=>{const part=key.split(':');return part[1]==='fruit-s
 /** Pure compilation; the same index and store list always give the same document. */
 export function buildExplorerData(index,{imageRef,chainName,ownStores=[],active=()=>true,horizonDays=null}) {
  const shelves=[],shelfIndex=new Map(),families=[],familyIndex=new Map(),stores=[],storeIndex=new Map(),qualityKeys=[],qualityIndex=new Map(),links=new Map();
- const shelfId=category=>{const shelf=shelfOf(category);if(!shelfIndex.has(shelf.name)){shelfIndex.set(shelf.name,shelves.length);shelves.push(shelf);}return shelfIndex.get(shelf.name);};
+ const shelfId=category=>{const shelf=index.familySource==='sesum'?{name:category,food:!['Hus & hjem','Personlige artikler','Dyr','Blomster og planter'].includes(category)}:shelfOf(category);if(!shelfIndex.has(shelf.name)){shelfIndex.set(shelf.name,shelves.length);shelves.push(shelf);}return shelfIndex.get(shelf.name);};
  const storeId=code=>{if(!storeIndex.has(code)){storeIndex.set(code,stores.length);stores.push({code,name:chainName(code)});}return storeIndex.get(code);};
- for(const [id,group] of Object.entries(index.groups)){familyIndex.set(id,families.length);families.push({id,name:group.name,shelf:shelfId(group.category),unit:group.unit});}
+ for(const [id,group] of Object.entries(index.groups)){familyIndex.set(id,families.length);families.push({id,name:group.name,shelf:shelfId(group.category),unit:group.unit,...(group.sourceCategory?{sourceCategory:true,parentId:group.parentId,path:group.path}: {})});}
  for(const [groupId,rows] of Object.entries(index.members))for(const row of rows){if(!links.has(row.k))links.set(row.k,[]);links.get(row.k).push({...row,family:familyIndex.get(groupId)});}
  const buckets=new Map();
  for(const [key,product] of Object.entries(index.products)){const code=barcode(product.ean),id=code?'e'+code:key;if(!buckets.has(id))buckets.set(id,[]);buckets.get(id).push([key,product]);}
@@ -85,7 +85,7 @@ export function buildExplorerData(index,{imageRef,chainName,ownStores=[],active=
  }
  const own=new Set(ownStores);
  for(const store of stores)store.own=own.has(store.code);
- return {data:{version:EXPLORER_VERSION,built:index.builtAt,nutrients:NUTRIENT_KEYS,freshHours:48,horizonDays,shelves,families,stores,qualityKeys,items},texts};
+ return {data:{version:EXPLORER_VERSION,...(index.familySource?{familySource:index.familySource}:{}),built:index.builtAt,nutrients:NUTRIENT_KEYS,freshHours:48,horizonDays,shelves,families,stores,qualityKeys,items},texts};
 }
 
 export function ingredientMatches(texts,term) {

@@ -35,13 +35,13 @@ export function agentContextSummary(packet,suppliedFamilyBasisFingerprint=null,s
 // Assignments freeze identities, not a stale copy of their next stage. A packet
 // can follow those identities downstream, but cannot absorb a newly related SKU.
 export function agentManifest(batch){
-  return {version:1,jobs:batch.jobs.map(job=>({id:job.id,sourceKeys:job.sourceKeys,productKey:job.productKey,stages:[...new Set(job.items.map(i=>i.do))],sourceFingerprints:job.items.flatMap(i=>[i,...(i.relatedSources??[])]).filter(i=>i.sourceKey&&i.sourceFingerprint).map(i=>[i.sourceKey,i.sourceFingerprint]),familySetFingerprints:[...new Set(job.items.map(i=>i.familySetFingerprint).filter(Boolean))],taskFingerprints:job.items.filter(i=>!i.sourceKey&&!i.productKey).map(fingerprint)}))};
+  return {version:1,jobs:batch.jobs.map(job=>({id:job.id,sourceKeys:job.sourceKeys,productKey:job.productKey,assortmentFingerprints:job.items.filter(i=>i.assortmentFingerprint).map(i=>[i.productKey,i.assortmentFingerprint]),stages:[...new Set(job.items.map(i=>i.do))],sourceFingerprints:job.items.flatMap(i=>[i,...(i.relatedSources??[])]).filter(i=>i.sourceKey&&i.sourceFingerprint).map(i=>[i.sourceKey,i.sourceFingerprint]),familySetFingerprints:[...new Set(job.items.map(i=>i.familySetFingerprint).filter(Boolean))],taskFingerprints:job.items.filter(i=>!i.sourceKey&&!i.productKey).map(fingerprint)}))};
 }
 export function buildAgentContext(queue,assignment,{families,sources,products}){
   if(assignment?.version!==1||!Array.isArray(assignment.jobs)||!assignment.jobs.length||assignment.jobs.length>20)throw Error('Select one to twenty assigned product jobs.');
   const allowedSources=new Set(),allowedProducts=new Set(),ids=new Set(),tasks=new Set();
   for(const job of assignment.jobs){
-    if(typeof job.id!=='string'||ids.has(job.id)||!Array.isArray(job.sourceKeys)||job.sourceKeys.length>100||job.sourceKeys.some(k=>typeof k!=='string'||!/^sesum(?:-product:|:[A-Z0-9_]+:)\d+$/.test(k))||job.productKey!=null&&(typeof job.productKey!=='string'||!/^kassal:[A-Z0-9_]+:\d+$/.test(job.productKey)))throw Error('Invalid frozen job identity.');
+    if(typeof job.id!=='string'||ids.has(job.id)||!Array.isArray(job.sourceKeys)||job.sourceKeys.length>100||job.sourceKeys.some(k=>typeof k!=='string'||!/^sesum(?:-product:|:[A-Z0-9_]+:)\d+$/.test(k))||job.productKey!=null&&(typeof job.productKey!=='string'||! /^(?:(?:kassal|oda):[A-Z0-9_]+|sesum:CATALOGUE):\d+$/.test(job.productKey)))throw Error('Invalid frozen job identity.');
     if(!Array.isArray(job.taskFingerprints)||job.taskFingerprints.some(fp=>typeof fp!=='string'||!/^[a-f0-9]{64}$/.test(fp)))throw Error('Invalid frozen task fingerprints.');
     ids.add(job.id);for(const fp of job.taskFingerprints)tasks.add(fp);for(const key of job.sourceKeys)allowedSources.add(key);if(job.productKey)allowedProducts.add(job.productKey);
   }
@@ -59,6 +59,7 @@ export function buildAgentContext(queue,assignment,{families,sources,products}){
   const assignmentChanges=[];
   for(const job of assignment.jobs){
     for(const [key,fp] of job.sourceFingerprints??[]){const current=data.sources.find(s=>s.sourceKey===key);if(!current||current.observation?.sourceFingerprint!==fp)assignmentChanges.push({sourceKey:key,reason:'source-metadata-changed'});}
+    for(const [key,fp] of job.assortmentFingerprints??[]){const current=data.products.find(p=>p.productKey===key);if(!current||(current.taxonomy?.sourceFingerprint??current.assortment?.sourceFingerprint)!==fp)assignmentChanges.push({productKey:key,reason:'assortment-metadata-changed'});}
     if(job.familySetFingerprints?.length)for(const key of job.sourceKeys){const current=data.sources.find(s=>s.sourceKey===key)?.placement;if(current&&!job.familySetFingerprints.includes(current.familySetFingerprint))assignmentChanges.push({sourceKey:key,reason:'family-requirements-changed'});}
   }
   data.assignmentChanges=assignmentChanges;

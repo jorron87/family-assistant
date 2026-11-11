@@ -123,7 +123,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     root.append(buildHero());
     const shell=el('div',undefined,'lx-shell');
     shell.append(buildRail(),buildMain());
-    root.append(shell,buildTray(),el('p',`Viser kjedepriser og gjennomgåtte varefamilier, ikke lokal lagerstatus eller butikkens tilbud. Varer med samme strekkode er slått sammen for visning, og hver kjedes egne tall vises på varen. Tomme tall betyr at opplysningen mangler, ikke null.${model.horizonDays?` Kjedeposter uten pris fra de siste ${Math.round(model.horizonDays/30.4)} månedene vises ikke, men gjeldende tilbud fra kundeavisene vises i varefamiliene dere følger.`:''}`,'lx-foot'));
+    root.append(shell,buildTray(),el('p',`${model.familySource==='sesum'?'Viser Sesums kategorier med tilgjengelige kjedepriser og plasserte Oda-varer. Kategoriene kan romme ulike varianter; kontroller vare og enhet.':'Viser kjedepriser og gjennomgåtte varefamilier, ikke lokal lagerstatus eller butikkens tilbud.'} Varer med samme strekkode er slått sammen for visning, og hver kjedes egne tall vises på varen. Tomme tall betyr at opplysningen mangler, ikke null.${model.horizonDays?` Kjedeposter uten pris fra de siste ${model.horizonDays} dagene vises ikke, men gjeldende tilbud fra kundeavisene vises i varefamiliene dere følger.`:''}`,'lx-foot'));
     panel.replaceChildren(root);
   }
 
@@ -132,10 +132,10 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     const hero=el('header',undefined,'lx-hero');
     if(onBack)hero.append(button('← Tilbake til Handel',onBack,'lx-back'));
     const title=el('div',undefined,'lx-hero-title');
-    title.append(el('span','Produktbiblioteket','lx-eyebrow'),el('h2','Samme vare. Alle merker. Alle butikker.'));
+    title.append(el('span','Produktbiblioteket','lx-eyebrow'),el('h2',model.familySource==='sesum'?'Sesums kategorier. Priser på tvers av kjeder.':'Samme vare. Alle merker. Alle butikker.'));
     const stats=el('div',undefined,'lx-stats');
     const brandCount=new Set(model.items.map(i=>i.brandLow).filter(Boolean)).size;
-    for(const [value,label] of [[model.families.filter(f=>f.items.length).length,'varefamilier'],[brandCount,'merker'],[model.stores.length,'kjeder'],[model.items.length,'varer']]){
+    for(const [value,label] of [[model.familySource==='sesum'?model.families.length:model.families.filter(f=>f.items.length).length,model.familySource==='sesum'?'kategorier':'varefamilier'],[brandCount,'merker'],[model.stores.length,'kjeder'],[model.items.length,'varer']]){
       const stat=el('div',undefined,'lx-stat');stat.append(el('strong',whole(value)),el('span',label));stats.append(stat);
     }
     title.append(stats);
@@ -322,7 +322,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
   function buildMain() {
     const main=el('div',undefined,'lx-main');
     const bar=el('div',undefined,'lx-toolbar'),views=el('div',undefined,'lx-views');views.setAttribute('role','tablist');
-    refs.views=[['families','Varefamilier'],['items','Enkeltvarer'],['map','Næringskart']].map(([key,label])=>{
+    refs.views=[['families',model.familySource==='sesum'?'Sesum-kategorier':'Varefamilier'],['items','Enkeltvarer'],['map','Næringskart']].map(([key,label])=>{
       const b=button(label,()=>{view=key;remember();shown=0;schedule();},'');b.setAttribute('role','tab');b.dataset.view=key;views.append(b);return b;
     });
     refs.count=el('span','','lx-count');refs.count.setAttribute('role','status');
@@ -373,7 +373,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
       const rows=familySummaries(model,result);
       sorted=sortFamilies(rows,familySort,result.terms);
       if(isPristine(filters))featured=featuredFamilies(rows);
-      refs.count.textContent=whole(sorted.length)+' varefamilier';
+      refs.count.textContent=whole(sorted.length)+(model.familySource==='sesum'?' kategorier':' varefamilier');
     }else{
       sorted=sortItems(result,sort,filters.qualityKey);
       refs.count.textContent=whole(sorted.length)+(sorted.length===1?' vare':' varer');
@@ -500,18 +500,18 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
   }
   function priceTrack(row) {
     const box=el('span',undefined,'lx-track');
-    if(row.min===null){box.append(el('span','Ingen ferske priser å sammenligne','lx-muted'));return box;}
+    if(row.min===null){box.append(el('span',row.family.sourceCategory&&row.family.parentId===null?'Åpne en underkategori for prissammenligning':'Ingen ferske priser å sammenligne','lx-muted'));return box;}
     const line=el('span',undefined,'lx-track-line');
     if(row.max>row.min)for(const p of row.prices){const dot=el('i');dot.style.left=((p-row.min)/(row.max-row.min)*100)+'%';line.append(dot);}
     const labels=el('span',undefined,'lx-track-labels');
-    labels.append(el('span',row.offers.length>1?`${row.offers.length} ferske priser`:'Én fersk pris'),row.spread&&row.spread>=1.05?el('b',`Dyreste koster ${times(row.spread)} billigste`):el('span',''));
+    labels.append(el('span',row.offers.length>1?`${row.offers.length} ferske priser`:'Én fersk pris'),row.spread&&row.spread>=1.05?el('b',model.familySource==='sesum'?`${short(row.min)}–${short(row.max)} kr/${row.family.unit}`:`Dyreste koster ${times(row.spread)} billigste`):el('span',''));
     box.append(line,labels);
     return box;
   }
   function featureBlock(rows) {
     const box=el('section',undefined,'lx-featured');
     const head=el('div',undefined,'lx-featured-head');
-    head.append(el('h3','Størst forskjell på omtrent samme vare'),el('p','Kilopriser på tvers av merker og butikker, fra ferske kjedepriser. Trykk for å se hele familien.','lx-muted'));
+    head.append(el('h3',model.familySource==='sesum'?'Prisforskjeller i Sesum-kategoriene':'Størst forskjell på omtrent samme vare'),el('p',model.familySource==='sesum'?'Varer i samme Sesum-kategori kan ha ulik form og innhold. Sammenlign vare og pakning før du velger.':'Kilopriser på tvers av merker og butikker, fra ferske kjedepriser. Trykk for å se hele familien.','lx-muted'));
     const grid=el('div',undefined,'lx-feature-grid');
     for(const row of rows){
       const card=button('',()=>{stack.length=0;showFamily(row.family.index);},'lx-feature');
@@ -795,6 +795,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     const family=model.families[entry.index],now=Date.now();
     const top=el('header',undefined,'lx-family-top');
     top.append(el('span',model.shelves[family.shelf].name,'lx-eyebrow small'),el('h2',family.name));
+    if(family.sourceCategory&&family.path?.length)top.append(el('p',family.path.join(' › '),'lx-muted'));
     holder.append(top);
     const body=el('div','Henter varefamilien …','lx-muted');holder.append(body);
     let found;
@@ -803,6 +804,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     if(stack[stack.length-1]!==entry||!body.isConnected)return;
     body.replaceChildren();body.className='';
     if(!found)return;
+    if(family.sourceCategory){const children=model.families.filter(f=>f.parentId===family.id);if(children.length){const links=el('div',undefined,'lx-chips');for(const child of children)links.append(button(child.name,()=>showFamily(child.index),'lx-chip'));body.append(links);}}
     entry.tab??='approved';entry.byQuality??=false;entry.mode??='grid';entry.order??='best';
     const groups={approved:found.members.filter(m=>m.status==='approved'&&m.reviewCurrent),unknown:found.members.filter(m=>m.status==='unknown'||m.status==='approved'&&!m.reviewCurrent),excluded:found.members.filter(m=>m.status==='excluded')};
     const campaigns=found.offers??[];
@@ -986,7 +988,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     line('Protein per krone',i=>{const value=proteinPerKrone(i,views.get(i.id));return value===null?null:short(value)+' g';});
     table.append(tbody);scroll.append(table);box.append(scroll);
     const shared=items.reduce((set,item,i)=>i?set.filter(f=>item.families.includes(f)):[...item.families],[]);
-    box.append(el('p',shared.length?'Alle er gjennomgått i samme varefamilie: '+model.families[shared[0]].name+'. Tall per 100 g/ml.':'Disse er ikke vurdert som like varer. Sammenligningen viser bare tallene.','lx-note'));
+    box.append(el('p',model.familySource==='sesum'?'Sesums kategorier kan inneholde ulike varianter. Kontroller variant og enhet før du sammenligner. Tall per 100 g/ml.':shared.length?'Alle er gjennomgått i samme varefamilie: '+model.families[shared[0]].name+'. Tall per 100 g/ml.':'Disse er ikke vurdert som like varer. Sammenligningen viser bare tallene.','lx-note'));
     document.body.append(box);box.showModal();
   }
 

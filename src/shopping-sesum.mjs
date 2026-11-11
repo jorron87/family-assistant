@@ -7,8 +7,8 @@ import {decrypt,encrypt,loadKey} from './crypto.mjs';
 import {sanitizeUnitPriceBasis} from './sesum-unit-basis.mjs';
 
 const ORIGIN='https://www.sesum.no';
-const CHAIN_CODES=new Set(['KIWI','REMA_1000','COOP_EXTRA','MENY_NO','SPAR_NO','ODA_NO','EUROPRIS_NO','COOP_OBS','COOP_PRIX','COOP_MEGA']);
-const chainCode=code=>({EXTRA:'COOP_EXTRA',MENY:'MENY_NO',SPAR:'SPAR_NO',ODA:'ODA_NO',EUROPRIS:'EUROPRIS_NO',OBS:'COOP_OBS',PRIX:'COOP_PRIX',MEGA:'COOP_MEGA'}[code]??code);
+const CHAIN_CODES=new Set(['KIWI','REMA_1000','COOP_EXTRA','MENY_NO','SPAR_NO','ODA_NO','EUROPRIS_NO','COOP_OBS','COOP_PRIX','COOP_MEGA','JOKER_NO','BUNNPRIS','MATKROKEN']);
+const chainCode=code=>({EXTRA:'COOP_EXTRA',MENY:'MENY_NO',SPAR:'SPAR_NO',ODA:'ODA_NO',EUROPRIS:'EUROPRIS_NO',OBS:'COOP_OBS',PRIX:'COOP_PRIX',MEGA:'COOP_MEGA',JOKER:'JOKER_NO',COOP_MARKED:'MATKROKEN'}[code]??code);
 const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const iso=value=>typeof value==='string'&&/^\d{4}-\d\d-\d\dT/.test(value)&&/(?:Z|[+-]\d\d:\d\d)$/.test(value)&&Number.isFinite(Date.parse(value));
 const unique=items=>[...new Set(items)];
@@ -88,12 +88,13 @@ function familySnapshot(input){
   return families.sort((a,b)=>a.familyId.localeCompare(b.familyId));
 }
 
-function productResult(result,job,chains,now){
+export function productResult(result,job,chains,now){
   if(!result||result.kind!=='product'||result.ok!==true||sesumUrl(result.sourceUrl,'product')!==job.url)throw Error('Sesum-varekvitteringen passer ikke jobben.');
   const p=result.product;
   if(!p||!['string','number'].includes(typeof p.id)||!/^[1-9]\d*$/.test(String(p.id))||!Number.isSafeInteger(Number(p.id))||String(p.id)!==new URL(job.url).pathname.match(/^\/produkt\/(\d+)/)?.[1]||!text(p.name,1000)||!Array.isArray(result.prices)||result.prices.length>100)throw Error('Ufullstendig Sesum-varekvittering.');
   const field=(value,label,max)=>{if(value==null)return null;if(typeof value!=='string'||value.length>max)throw Error('Ugyldig Sesum-'+label+'.');return text(value,max);};
   const product={id:String(p.id),name:text(p.name,1000),brand:field(p.brand,'merke',300),vendor:field(p.vendor,'leverandør',300),ean:p.ean??null,nonEanCodes:p.nonEanCodes??[],weight:p.weight??null,weightUnit:field(p.weightUnit,'vektenhet',30),soldByWeight:typeof p.soldByWeight==='boolean'?p.soldByWeight:null,sourceUrl:job.url};
+  if(p.categoryPathIds!==undefined){if(!Array.isArray(p.categoryPathIds)||p.categoryPathIds.length>30||p.categoryPathIds.some(id=>typeof id!=='string'||! /^[1-9]\d*$/.test(id)||!Number.isSafeInteger(Number(id)))||new Set(p.categoryPathIds).size!==p.categoryPathIds.length)throw Error('Invalid own product category path.');product.categoryPathIds=[...p.categoryPathIds];}
   if(product.weight!==null&&(!Number.isFinite(product.weight)||product.weight<=0||product.weight>1e9))throw Error('Ugyldig Sesum-vekt.');
   if(p.soldByWeight!=null&&typeof p.soldByWeight!=='boolean')throw Error('Ugyldig Sesum-vektgrunnlag.');
   if(product.ean!==null){const eans=Array.isArray(product.ean)?product.ean:[product.ean];if(eans.length>30||!eans.every(ean=>typeof ean==='string'&&/^\d{8,14}$/.test(ean)))throw Error('Ugyldig Sesum-strekkode.');}

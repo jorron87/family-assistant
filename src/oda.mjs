@@ -80,6 +80,13 @@ export function createOda({dataDir,shopping,redirectUrl,now=()=>new Date(),makeC
     return call('product_search',{queries:[query],page:1,size:10});
   });}
   async function tools() {return exclusive(async()=>{const c=await connect();if(!c)throw Error('Fullfør Oda-innloggingen i nettleseren.');return c.listTools();});}
+  async function readCatalog(input){return exclusive(async()=>{
+    const queries=[...new Set(input.queries??[])],page=input.page??1;
+    if(!queries.length||queries.length>10||queries.some(q=>typeof q!=='string'||!q.trim()||q.length>200)||!Number.isInteger(page)||page<1||page>50)throw Error('Select 1–10 actual product queries and a supported Oda page.');
+    const response=await call('product_search',{queries,page,size:20}),observedAt=now().toISOString();
+    if(!Array.isArray(response.result)||response.result.length!==queries.length||response.result.some(row=>!queries.includes(row.query)||!Array.isArray(row.products)||row.products.length>20||typeof row.hasMore!=='boolean')||new Set(response.result.map(r=>r.query)).size!==queries.length)throw Error('Invalid Oda catalogue search receipt.');
+    return {result:response.result,observedAt,page};
+  });}
   async function refreshPrices(input={}) {
     const maxPages=input.maxPages??5;
     if(!Number.isInteger(maxPages)||maxPages<1||maxPages>5||input.watchIds!==undefined&&(!Array.isArray(input.watchIds)||input.watchIds.length>10||input.watchIds.some(id=>typeof id!=='string')))throw Error('Velg høyst ti varefamilier og én til fem sider.');
@@ -173,5 +180,5 @@ export function createOda({dataDir,shopping,redirectUrl,now=()=>new Date(),makeC
     }catch{shopping.cartReceipt(requestId,{status:'uncertain'});throw Error('Kurvhandlingen kunne ikke bekreftes. Kontroller handlekurven hos Oda; handlingen gjentas ikke automatisk.');}
   });}
   function status(){const configured=existsSync(path);let connected=!!client;try{connected||=configured&&!!read().tokens;}catch{lastError='Oda-oppsettet kunne ikke leses. Kontroller oppsettet lokalt.';}return {configured,connected,busy,error:lastError};}
-  return {refreshPrices,changeCart,swapInCart,probeLimit,tools,authorize,callback,sync,search,addToCart,status,close,cart:()=>exclusive(()=>call('get_cart'))};
+  return {readCatalog,refreshPrices,changeCart,swapInCart,probeLimit,tools,authorize,callback,sync,search,addToCart,status,close,cart:()=>exclusive(()=>call('get_cart'))};
 }

@@ -25,6 +25,11 @@
       const url = new URL(value);
       if (url.origin !== ORIGIN || url.username || url.password || url.hash) return false;
       if (kind === 'search') return url.pathname === '/sok' && !!url.searchParams.get('q')?.trim();
+      if (kind === 'catalogue') {
+        if (!/^\/kategori(?:\/[1-9]\d*(?:-[^/?#]+)?)?\/?$/.test(url.pathname)) return false;
+        for (const [key,val] of url.searchParams) if (!['side','page','visning'].includes(key) || (key==='visning'?val!=='alle':!/^[1-9]\d{0,7}$/.test(val)) || url.searchParams.getAll(key).length !== 1) return false;
+        return true;
+      }
       if (kind === 'product') return /^\/produkt\/[1-9]\d*(?:-[^/?#]+)?\/?$/.test(url.pathname);
       return allowedUrl(value, 'search') || allowedUrl(value, 'product');
     } catch { return false; }
@@ -228,7 +233,8 @@
     const chainNames = { KIWI: ['KIWI'], REMA_1000: ['REMA 1000'], COOP_EXTRA: ['Extra', 'Coop Extra'], EXTRA: ['Extra', 'Coop Extra'],
       MENY_NO: ['MENY'], MENY: ['MENY'], SPAR_NO: ['SPAR'], SPAR: ['SPAR'], ODA_NO: ['Oda'], ODA: ['Oda'],
       EUROPRIS_NO: ['Europris'], EUROPRIS: ['Europris'], COOP_OBS: ['Obs', 'Coop Obs'], OBS: ['Obs', 'Coop Obs'],
-      COOP_PRIX: ['Prix', 'Coop Prix'], PRIX: ['Prix', 'Coop Prix'], COOP_MEGA: ['Mega', 'Coop Mega'], MEGA: ['Mega', 'Coop Mega'] };
+      COOP_PRIX: ['Prix', 'Coop Prix'], PRIX: ['Prix', 'Coop Prix'], COOP_MEGA: ['Mega', 'Coop Mega'], MEGA: ['Mega', 'Coop Mega'],
+      JOKER_NO: ['Joker'], JOKER: ['Joker'], BUNNPRIS: ['Bunnpris'], MATKROKEN: ['Matkroken', 'Coop Marked'], COOP_MARKED: ['Matkroken', 'Coop Marked'] };
     for (const row of rows) {
       if (row.section.headings.length !== 1 || !/^(?:Priser denne uken|Eldre priser)$/.test(row.section.headings[0])) continue;
       for (const button of row.buttons) {
@@ -292,6 +298,17 @@
             sourceUrl: candidateUrl, reason: 'site_similarity_not_reviewed' });
         }
       }
+      const categoryPaths=[];
+      for(const nav of input.matchAll(/<nav\b([^>]*)>([\s\S]*?)<\/nav\s*>/gi)){
+        if(!/^(?:Brødsmuler|Breadcrumbs?)$/i.test(attribute(nav[1],'aria-label')??''))continue;
+        const path=[];for(const anchor of nav[2].matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a\s*>/gi)){
+          const href=attribute(anchor[1],'href');if(!href)continue;let linked;try{linked=new URL(href,url);}catch{continue;}if(linked.origin!==ORIGIN)continue;
+          const id=positiveId(linked.pathname.match(/^\/kategori\/(\d+)/)?.[1]??linked.searchParams.get('kategori'));if(id)path.push(String(id));
+        }
+        if(path.length)categoryPaths.push(path);
+      }
+      if(new Set(categoryPaths.map(JSON.stringify)).size>1)throw Error('conflicting_own_category_breadcrumbs');
+      product.categoryPathIds=categoryPaths[0]??[];
       return { ok: true, kind: 'product', sourceUrl: url, product, prices, candidates: [...candidates.values()], errors: [] };
     } catch (error) { return failure('product', url, error); }
   }
@@ -374,5 +391,60 @@
     } catch (error) { return failure('search', url, error); }
   }
 
-  return Object.freeze({ ORIGIN, LIMITS, allowedUrl, parseProduct, parseSearch });
+  function parseCatalogue(input, url) {
+    try {
+      url = sourceUrl(url, 'catalogue');
+      const current = new URL(url), indexPage = /^\/kategori\/?$/.test(current.pathname);
+      const data = readData(input), products = new Map(), categories = new Map(), nextUrls = new Set();
+      const categoryNodes=new Map(),parents=new Map();
+      let filtered = false, filterSeen = false, explicitEnd = false;
+      data.walk(node => {
+        if(positiveId(node.id)&&typeof node.name==='string'&&Array.isArray(node.children)&&Object.keys(node).every(k=>['id','name','children','alle'].includes(k))){
+          const id=String(node.id),name=text(typeof node.alle==='string'?node.alle:node.name,false),old=categoryNodes.get(id);if(old&&old.name!==name)throw Error('conflicting_source_category_name');categoryNodes.set(id,{id,name});
+          for(const child of node.children)if(object(child)&&positiveId(child.id)){const childId=String(child.id);if(parents.has(childId)&&parents.get(childId)!==id)throw Error('conflicting_source_category_parent');parents.set(childId,id);}
+        }
+        if (Array.isArray(node.chains) && object(node.filter) && own(node, 'categoryId')) {
+          filterSeen = true;
+          if (node.chains.length || node.brand != null || node.filter.onlyPromo === true || node.filter.onlyEco === true || node.filter.promoType != null) filtered = true;
+        }
+        if (object(node.pagination) && (node.pagination.hasMore === false || node.pagination.endReached === true || node.pagination.complete === true)) explicitEnd = true;
+      });
+      for (const match of input.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a\s*>/gi)) {
+        const href = attribute(match[1], 'href'); if (!href) continue;
+        const p = safeLink(href, url, 'product');
+        if (p) { products.set(new URL(p).pathname.match(/^\/produkt\/(\d+)/)[1], p); continue; }
+        const c = safeLink(href, url, 'catalogue'); if (!c) continue;
+        const linked = new URL(c), label = attribute(match[1], 'aria-label') ?? entities(match[2].replace(/<[^>]*>/g, ' ')).trim();
+        if (linked.pathname === current.pathname && linked.search && (/\bnext\b/i.test(attribute(match[1], 'rel') ?? '') || /^(?:neste(?:\s+side)?|next(?:\s+page)?)\s*[›»→]?$/i.test(label))) nextUrls.add(c);
+        else if (!linked.search && linked.pathname !== current.pathname && !/^\/kategori\/?$/.test(linked.pathname)) categories.set(linked.pathname.match(/^\/kategori\/(\d+)/)[1], c);
+      }
+      const visible = entities(input.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '').replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, '').replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ');
+      const countPattern = indexPage ? /(\d[\d\s]{0,15})\s+kategorier med varer/i : /(\d[\d\s]{0,15})\s+varer\s+i ditt utvalg/i;
+      const match = visible.match(countPattern), total = match ? Number(match[1].replace(/\s/g, '')) : null;
+      if (filtered || !indexPage && !filterSeen) throw Error('unverified_or_filtered_catalogue');
+      if (indexPage) {
+        if (!Number.isSafeInteger(total) || total < 1 || categories.size !== total || categoryNodes.size>0&&categoryNodes.size!==total) throw Error('category_index_count_mismatch');
+        explicitEnd = true;
+      } else {
+        if (!Number.isSafeInteger(total) || products.size > total) throw Error('catalogue_count_mismatch');
+        if (!current.searchParams.has('side') && !current.searchParams.has('page') && products.size === total) explicitEnd = true;
+        // The observed public category uses a Sider navigation with an
+        // aria-current page and explicit later links. A missing next alone
+        // is never proof of the final page (hydration/schema may be missing).
+        for (const nav of input.matchAll(/<nav\b([^>]*)>([\s\S]*?)<\/nav\s*>/gi)) {
+          if (attribute(nav[1], 'aria-label') !== 'Sider') continue;
+          const page = Number(current.searchParams.get('side') ?? current.searchParams.get('page') ?? 1);
+          const currentPage = [...nav[2].matchAll(/<[^>]*aria-current=["']page["'][^>]*>([\s\S]*?)<\//gi)].some(m => Number(m[1].replace(/<[^>]*>/g, '').trim()) === page);
+          const later = [...nav[2].matchAll(/<a\b([^>]*)>/gi)].some(m => {const link = safeLink(attribute(m[1], 'href'), url, 'catalogue');return link && new URL(link).pathname === current.pathname && Number(new URL(link).searchParams.get('side') ?? new URL(link).searchParams.get('page') ?? 1) > page;});
+          if (currentPage && !later && products.size > 0) explicitEnd = true;
+        }
+      }
+      if (!explicitEnd && !nextUrls.size) throw Error('catalogue_end_unproven');
+      const heading=input.match(/<h1\b[^>]*>([\s\S]*?)<\/h1\s*>/i)?.[1];
+      const categoryName=heading?entities(heading.replace(/<[^>]*>/g,' ')).replace(/\s+/g,' ').trim():null;
+      const sourceCategories=[...categoryNodes].map(([id,node])=>({...node,parentId:parents.get(id)??null,sourceUrl:categories.get(id)??(current.pathname.match(/^\/kategori\/(\d+)/)?.[1]===id?url:null)}));
+      return {ok:true,kind:'catalogue',sourceUrl:url,categoryName,categories:sourceCategories,productUrls:[...products.values()],categoryUrls:[...categories.values()],nextUrls:[...nextUrls],endReached:explicitEnd && !nextUrls.size,filtersVerified:true,total,errors:[]};
+    } catch(error) { return failure('catalogue', url, error); }
+  }
+  return Object.freeze({ ORIGIN, LIMITS, allowedUrl, parseProduct, parseSearch, parseCatalogue });
 });

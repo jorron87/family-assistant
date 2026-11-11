@@ -99,3 +99,15 @@ Tunnelens gjenstartsforsøk kjører uten konsollvindu, også når Pi-en ikke sva
 - En utløpt økt gir synlig dekningshull og et forståelig varsel.
 - Mobil tekst/bilde behandles straks lease er ledig; lokal visning og kalender samsvarer.
 - Gjenstart av web/PC bevarer data, låseregler og familiens valg.
+
+## Optional whole-assortment library
+
+Copy shopping-assortment.example.json to the ignored config/shopping-assortment.json. Keep enabled and collectionEnabled false until the source contracts, actual price dates and scoped workers have been tested. Whole-assortment mode uses the existing encrypted Kassal API configuration and the installed Chrome extension (1.9.0 or newer). With familySource:"sesum", Sesum is the category/product master and Oda is imported separately through the read-only MCP product search. Kassal enumeration is disabled in this mode. The independent reviewed-library compatibility mode can enumerate Kassal products with no search filter, unique=0 and size=100. Both modes use Sesum's public category index/pages with no household chain/promotion filters. Public catalogue requests omit session cookies so household site preferences cannot narrow the sweep; authenticated/private endpoints are not used. Ordinary search/product collection remains available when the mode is disabled.
+
+The optional priceHorizonDays defaults to 14. This selects recently priced library products; it is not proof of local stock. The original household/history horizon and stricter 48-hour actionable-price checks remain separate. Products, reviews and native chain identities are preserved when parked. Actual receipt dates are required; fetchedAt and product updated_at do not refresh a price.
+
+Large catalogue observations and semantic reviews are stored in a separate encrypted transaction repository under the instance data directory, not inside the household archive. Include the assortment directory and assortment-collection transaction files in private backups together with the existing encryption key. Do not copy another household's data or key. A partial/invalid encrypted transaction fails closed and requires recovery from the actual preserved journal/backup; never delete it to claim completion.
+
+Start the bounded household category plan with shopping-taxonomy and shopping-taxonomy-bootstrap; the durable source whitelist automatically pauses after its selected receipts. This never resumes unrelated source jobs or starts an agent. Native IDs/names/hierarchy are preserved; household stock, need and exact variant records remain intact.
+
+Starting full collection is explicit. shopping-assortment-start accepts a UTF-8 JSON file with validationReads:1 through 8 for a bounded live validation; its durable budget cannot turn into a full sweep on restart. Pause collection with shopping-assortment-pause. Resume an existing sweep only when the owner has authorized it. Enabling this config never enables an agent runtime, changes models/permissions or bypasses the dispatch pause.

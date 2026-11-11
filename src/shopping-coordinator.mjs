@@ -71,14 +71,15 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
   const digest=proposalHash({...note,recordedAt:null});if(!notes.some(n=>n.digest===digest)){if(notes.length>=20)throw Error('Preserve further research through a serial review; this source already has twenty checkpoints.');notes.push({...note,digest});write(file,notes);}
   if(note.needsBrowser)slot.needsBrowser=true;save();return {saved:true,sourceKey:input.sourceKey,sourceFingerprint:source.observation.sourceFingerprint,notes:notes.length,...(clarification?{clarification}:{}),authority:'Research checkpoint, not a product or price approval.'};
  }
- function readResult(slot,frame,value,{groupId=null}={}){
-  const body=JSON.stringify(value);if(body.length<=16000){if(groupId&&value?.fingerprint)frame.groupReads[groupId]=value.fingerprint;return value;}
-  const readId=randomUUID(),pages=[];for(let offset=0;offset<body.length;offset+=6000)pages.push(body.slice(offset,offset+6000));frame.reads[readId]={pages,served:[],groupId,fingerprint:value?.fingerprint};
+ function readResult(slot,frame,value,{groupId=null,groups=[]}={}){
+  const body=JSON.stringify(value);if(body.length<=16000){if(groupId&&value?.fingerprint)frame.groupReads[groupId]=value.fingerprint;for(const g of groups)frame.groupReads[g.groupId]=g.fingerprint;return value;}
+  const readId=randomUUID(),pages=[];for(let offset=0;offset<body.length;offset+=6000)pages.push(body.slice(offset,offset+6000));frame.reads[readId]={pages,served:[],groupId,groups,fingerprint:value?.fingerprint};
   return {readId,pages:pages.length,next:'Read all zero-based shopping_read kind=page pages. Concatenate the complete JSON text; no facts are omitted.'};
  }
  function readWorker(slot,input){
   const frame=loadFrame(slot),shop=store.shopping;
-  if(input.kind==='page'){const record=frame.reads[input.readId],index=input.page;if(!record||!Number.isInteger(index)||!record.pages[index])throw Error('Unknown zero-based read page.');record.served=[...new Set([...record.served,index])];if(record.groupId&&record.served.length===record.pages.length)frame.groupReads[record.groupId]=record.fingerprint;return {readId:input.readId,page:index,pages:record.pages.length,text:record.pages[index]};}
+  if(input.kind==='page'){const record=frame.reads[input.readId],index=input.page;if(!record||!Number.isInteger(index)||!record.pages[index])throw Error('Unknown zero-based read page.');record.served=[...new Set([...record.served,index])];if(record.groupId&&record.served.length===record.pages.length)frame.groupReads[record.groupId]=record.fingerprint;if(record.served.length===record.pages.length)for(const g of record.groups??[])frame.groupReads[g.groupId]=g.fingerprint;return {readId:input.readId,page:index,pages:record.pages.length,text:record.pages[index]};}
+  if(input.kind==='group-search'){const result=shop.agentGroupSearch(text(input.query,2,200),{offset:input.offset??0,limit:input.limit??20,expectedFingerprint:input.expectedFingerprint});return readResult(slot,frame,result,{groups:result.items});}
   if(input.kind==='library-search')return readResult(slot,frame,shop.agentLibrarySearch(text(input.query,2,200),{offset:input.offset??0,limit:input.limit??20,expectedFingerprint:input.expectedFingerprint}));
   if(input.kind==='product')return readResult(slot,frame,shop.agentProduct(input.productKey));
   if(input.kind==='group'){const group=shop.agentGroup(input.groupId);if(!group)throw Error('Unknown reviewed product group.');return readResult(slot,frame,group,{groupId:input.groupId});}

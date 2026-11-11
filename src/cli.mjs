@@ -61,6 +61,24 @@ async function execute(command, args, flags) {
   let result;
   switch (command) {
     case 'shopping': result=await request('/api/shopping');break;
+    case 'shopping-assortment': result=await request('/api/shopping/assortment/status');break;
+    case 'shopping-taxonomy': result=await request('/api/shopping/assortment/taxonomy-plan');break;
+    case 'shopping-taxonomy-bootstrap': result=await request('/api/shopping/assortment/taxonomy-bootstrap','POST',{});break;
+    case 'shopping-taxonomy-category-collect': result=await request('/api/shopping/assortment/taxonomy-category-collect','POST',{});break;
+    case 'shopping-taxonomy-watch-link': result=await request('/api/shopping/assortment/taxonomy-watch-link','POST',json(args[0]));break;
+    case 'shopping-taxonomy-product': result=await request('/api/shopping/assortment/taxonomy-product?productKey='+encodeURIComponent(args[0]));break;
+    case 'shopping-taxonomy-place': result=await request('/api/shopping/assortment/taxonomy-place','POST',json(args[0]));break;
+    case 'shopping-taxonomy-oda-unavailable': result=await request('/api/shopping/assortment/oda-unavailable','POST',json(args[0]));break;
+    case 'shopping-taxonomy-oda-import': result=await request('/api/shopping/assortment/oda-import','POST',json(args[0]));break;
+    case 'shopping-assortment-start': result=await request('/api/shopping/assortment/start','POST',args[0]?json(args[0]):{});break;
+    case 'shopping-assortment-validate': result=await request('/api/shopping/assortment/validate','POST',json(args[0]));break;
+    case 'shopping-assortment-pause': result=await request('/api/shopping/assortment/pause','POST',{});break;
+    case 'shopping-assortment-resume': result=await request('/api/shopping/assortment/resume','POST',{});break;
+    case 'shopping-assortment-step': result=await request('/api/shopping/assortment/step','POST',{});break;
+    case 'shopping-assortment-import': result=await request('/api/shopping/assortment/import','POST',args[0]?json(args[0]):{});break;
+    case 'shopping-assortment-families': result=await request('/api/shopping/assortment/families?'+new URLSearchParams({query:args[0]??'',offset:option('--offset')??'0',limit:option('--limit')??'20',...(option('--fingerprint')?{expectedFingerprint:option('--fingerprint')}:{})}));break;
+    case 'shopping-assortment-product': result=await request('/api/shopping/assortment/product?productKey='+encodeURIComponent(args[0]??''));break;
+    case 'shopping-assortment-classify': result=await request('/api/shopping/assortment/classify','POST',json(args[0]));break;
     case 'shopping-sesum': result=await request('/api/shopping/sesum/status');break;
     case 'shopping-sesum-refresh': result=await request('/api/shopping/sesum/refresh','POST',{});break;
     case 'shopping-sesum-retry': result=await request('/api/shopping/sesum/retry','POST',json(args[0]));break;

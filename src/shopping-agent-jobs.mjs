@@ -10,12 +10,14 @@ export function shoppingAgentJobs(queue = []) {
   const metadata=new Map();
   for(const item of queue)if(item.sourceKey&&item.researchProductKey){const prior=metadata.get(item.researchProductKey);if(prior)parent.set(root(item.sourceKey),root(prior));else metadata.set(item.researchProductKey,item.sourceKey);}
   const jobs = new Map();
+  const sesumJobs=new Map();for(const item of queue)if(item.sourceKey){for(const key of keys(item)){const nativeId=key.match(/^sesum(?:-product:|:[A-Z0-9_]+:)(\d+)$/)?.[1];if(nativeId)sesumJobs.set('sesum:CATALOGUE:'+nativeId,'source:'+root(key));}}
   for (const [index,item] of queue.entries()) {
     // Market calibration is independently bounded per family, not per row.
     const rows=item.do==='shopping-market-refresh'&&item.watchIds?.length ? [...new Set(item.watchIds)].map(id=>({...item,groups:1,watchIds:[id]})) : [item];
     for(const row of rows){
-      const id=row.sourceKey ? 'source:'+root(row.sourceKey) : row.do==='shopping-product-review'&&row.productKey ? 'product:'+row.productKey : row.do==='shopping-market-refresh'&&row.watchIds?.length ? 'market:'+row.watchIds[0] : 'task:'+index;
-      const job=jobs.get(id)??{id,sourceKeys:[],productKey:row.do==='shopping-product-review'?row.productKey??null:null,items:[]};
+      const id=row.sourceKey ? 'source:'+root(row.sourceKey) : ['shopping-product-review','shopping-assortment-review','shopping-oda-category'].includes(row.do)&&row.productKey ? sesumJobs.get(row.productKey)??'product:'+row.productKey : row.do==='shopping-market-refresh'&&row.watchIds?.length ? 'market:'+row.watchIds[0] : 'task:'+index;
+      const job=jobs.get(id)??{id,sourceKeys:[],productKey:['shopping-product-review','shopping-assortment-review','shopping-oda-category'].includes(row.do)?row.productKey??null:null,items:[]};
+      job.productKey??=['shopping-product-review','shopping-assortment-review','shopping-oda-category'].includes(row.do)?row.productKey??null:null;
       job.sourceKeys=[...new Set([...job.sourceKeys,...keys(row)])].sort();job.items.push(row);jobs.set(id,job);
     }
   }

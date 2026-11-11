@@ -10,6 +10,7 @@ import {createClarifications} from './clarifications.mjs';
 import { mergeTask } from "./tasks.mjs";
 import { phoneStore } from './phone.mjs';
 import { shoppingStore } from './shopping.mjs';
+import {createAssortmentRepository} from './assortment-repository.mjs';
 import { shoppingWorkBatch } from './shopping-work-batch.mjs';
 import { currentSourcePhase } from './source-phase-checkpoint.mjs';
 import {sourceIdentity} from './source-identity.mjs';
@@ -55,7 +56,7 @@ const validDate = (value, field, nullable = false) => {
   return value;
 };
 
-export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionStatus,sesumResearchTerms,sesumResearchMaxPriceAgeHours,odaConnected}={}) {
+export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionStatus,sesumResearchTerms,sesumResearchMaxPriceAgeHours,odaConnected,assortmentConfig,assortmentCollectionStatus}={}) {
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(join(dataDir, "attachments"), { recursive: true });
   const runDir = join(dataDir, "runs");
@@ -1652,7 +1653,8 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
   }
   const clarifications=createClarifications(state.clarifications??={},{save,members:()=>state.profile.members,subjectExists:subject=>subject.type!=='shopping-family'||Object.hasOwn(state.shopping?.watches??{},subject.id)});
   const phone=phoneStore(state,{save,upsertRaw,addAttachment});
-  const shopping=shoppingStore(state,{save,libraryPrices,sesumCollectionStatus,sesumResearchTerms,sesumResearchMaxPriceAgeHours,odaConnected,files:{write:(id,bytes)=>writeFileSync(join(dataDir,'attachments',`${id}.enc`),encrypt(bytes,key)),read:id=>decrypt(readFileSync(join(dataDir,'attachments',`${id}.enc`)),key)}});
+  const assortmentRepository=assortmentConfig?.enabled?createAssortmentRepository({dataDir,encryptionKey:key}):null;
+  const shopping=shoppingStore(state,{save,libraryPrices,assortmentRepository,sesumCollectionStatus,sesumResearchTerms,sesumResearchMaxPriceAgeHours,odaConnected,assortmentConfig,assortmentCollectionStatus,files:{write:(id,bytes)=>writeFileSync(join(dataDir,'attachments',`${id}.enc`),encrypt(bytes,key)),read:id=>decrypt(readFileSync(join(dataDir,'attachments',`${id}.enc`)),key)}});
   if(reconcileSourceReviews(state.sourceStatus,state.runs))save();
   return { runLease:()=>structuredClone(state.runLease), shopping, clarifications, repairText, backupArchive, eventHistory, event, mergeEvents, splitHomework, activityFacebook, changeCompletion, collectedItems, collectedList, sourceItems, editProfile, phone, calendarActions, calendarAction, setEventVisibility, upsertActivity, activityReaction, activityPlan, activitySource, snapshot, runHistory, profile: () => profileView(state.profile), profileFact, reviewProfile, documentStatus, reviewDocument, checkTask, upsertRaw, upsertFinding, updateSource, observeListing, markReviewed, updateSurface, reviewQueue, completionReport, sourceCompletionReport, addAttachment, getAttachment, linkDrive, linkCalendar, updateProfile, recordRun, beginRun, renewRun, endRun, collectorIngest, collectorConfig, collectorStatus, collectorRefresh, collectorFacebookSweep, collectedItem, activityFeedHsia, activityFeedCandidates, activityFeedNeedsDetail, activityFeedDetail, activityFeedPage, activityFeedError, activityFeedPageText, activityFeedStatus };
 }

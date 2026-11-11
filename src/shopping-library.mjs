@@ -67,7 +67,7 @@ export function createIndexReader(index,{horizonDays=PRICE_HORIZON_DAYS}={}) {
   };
   const rowOf=(row,groupId)=>{const product=index.products[row.k],price=priceOf(product);return {productKey:row.k,groupId,status:row.s,reviewCurrent:row.r,product,price,unitPrice:row.u,eligible:row.u!==null&&price.fresh&&!price.reasons.length,quality:row.q,nutrition:row.n??null};};
   const own=(map,key)=>Object.hasOwn(map,key)?map[key]:null;
-  const active=key=>withinPriceHorizon(own(index.products,key)?.quote.receiptAt,at,horizonDays);
+  const active=key=>{const p=own(index.products,key);return p?.assortmentPriceHorizonDays!=null?p.available&&at>=Date.parse(p.quote.receiptAt)&&withinPriceHorizon(p.quote.receiptAt,at,p.assortmentPriceHorizonDays):withinPriceHorizon(p?.quote.receiptAt,at,horizonDays);};
   // Identity lookups below stay complete: a parked product can still be scanned,
   // matched to an order or priced. Only family listings leave it out.
   const members=(groupId,{all=false}={})=>(own(index.members,groupId)??[]).filter(row=>all||active(row.k)).map(row=>rowOf(row,groupId));
@@ -98,7 +98,7 @@ export function createIndexReader(index,{horizonDays=PRICE_HORIZON_DAYS}={}) {
    if(terms.length)for(const [key,haystack]of haystacks){
     if(!match(haystack,terms))continue;
     const receipt=index.products[key].quote.receiptAt;
-    if(Number.isFinite(Date.parse(receipt??''))&&!withinPriceHorizon(receipt,at,horizonDays)){parked++;continue;}
+    if(index.products[key].assortmentPriceHorizonDays!=null?!active(key):Number.isFinite(Date.parse(receipt??''))&&!withinPriceHorizon(receipt,at,horizonDays)){parked++;continue;}
     found.push(key);
    }
    found.sort((a,b)=>Number(fresh(index.products[b].quote.receiptAt))-Number(fresh(index.products[a].quote.receiptAt))||index.products[a].name.localeCompare(index.products[b].name,'nb')||(a<b?-1:a>b?1:0));

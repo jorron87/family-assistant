@@ -27,6 +27,8 @@ import {weeklyLetters} from './weekly-letters.mjs';
 import {createOda} from './oda.mjs';
 import {createShoppingMaintenance} from './shopping-maintenance.mjs';
 import {createKassal} from './kassal.mjs';
+import {createAssortmentCollection} from './assortment-collection.mjs';
+import {assortmentConfig as validateAssortmentConfig} from './shopping-assortment.mjs';
 import {createSesumCollector,sesumSenderAllowed} from './shopping-sesum.mjs';
 import {createShoppingCoordinator} from './shopping-coordinator.mjs';
 import {clarificationHandler} from './clarification-routes.mjs';
@@ -37,8 +39,9 @@ const shoppingWorkerRequests=createShoppingWorkerScheduler();
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 let libraryPrices;
 try{const config=readConfig('shopping-library.json');if(config.enabled===true&&typeof config.file==='string'){const file=resolve(dirname(configPath('shopping-library.json')),config.file);libraryPrices=libraryPriceProvider(file,{indexFile:join(dirname(file),'shopping-index.json'),horizonDays:config.priceHorizonDays});}}catch(error){if(error.code!=='ENOENT')throw error;}
-let sesum,oda;
-const store = createStore(DATA_DIR,{sesumResearchMaxPriceAgeHours:()=>{try{return readConfig('shopping-sesum.json').researchMaxPriceAgeHours??null;}catch(error){if(error.code==='ENOENT')return null;throw error;}},sesumResearchTerms:()=>{try{return readConfig('shopping-sesum.json').researchTerms??null;}catch(error){if(error.code==='ENOENT')return null;throw error;}},libraryPrices,sesumCollectionStatus:()=>sesum?.status(),odaConnected:()=>oda?.status().connected===true});
+let sesum,oda,assortmentCollection;
+let assortmentConfig=validateAssortmentConfig();try{assortmentConfig=validateAssortmentConfig(readConfig('shopping-assortment.json'));}catch(error){if(error.code!=='ENOENT')throw error;}
+const store = createStore(DATA_DIR,{assortmentConfig,assortmentCollectionStatus:()=>assortmentCollection?.status(),sesumResearchMaxPriceAgeHours:()=>{try{return readConfig('shopping-sesum.json').researchMaxPriceAgeHours??null;}catch(error){if(error.code==='ENOENT')return null;throw error;}},sesumResearchTerms:()=>{try{return readConfig('shopping-sesum.json').researchTerms??null;}catch(error){if(error.code==='ENOENT')return null;throw error;}},libraryPrices,sesumCollectionStatus:()=>sesum?.status(),odaConnected:()=>oda?.status().connected===true});
 const resources = createResources({dataDir:DATA_DIR,store});
 const googlePublisher=createGooglePublisher({store,dataDir:DATA_DIR,config:readConfig('sources.json')});
 const homeAssistant=createHomeAssistant({config:process.env.FAMILIEN_HOME_ASSISTANT_CONFIG?JSON.parse(readFileSync(process.env.FAMILIEN_HOME_ASSISTANT_CONFIG,'utf8')):readConfig('home-assistant.json'),dataDir:DATA_DIR});
@@ -73,7 +76,8 @@ const kassal=createKassal({dataDir:DATA_DIR});
 let sesumConfig={enabled:false};
 try{sesumConfig=readConfig('shopping-sesum.json');}catch(error){if(error.code!=='ENOENT')throw error;}
 sesum=createSesumCollector({dataDir:DATA_DIR,config:sesumConfig,families:()=>store.shopping.sesumFamilies(),receivePrices:input=>store.shopping.sesumReceivePrices(input),receiveMetadata:input=>store.shopping.sesumReceiveMetadata(input)});
-const sesumStatus=()=>({...sesum.status(),priceIntegration:store.shopping.sesumPriceStatus()});
+assortmentCollection=createAssortmentCollection({dataDir:DATA_DIR,config:assortmentConfig,kassal,receiveSesum:input=>store.shopping.assortment.receiveSesum(input),receiveKassal:input=>store.shopping.assortment.receiveKassal(input),receiveCategories:input=>store.shopping.taxonomy?.receive(input),reuseSesum:input=>store.shopping.assortment.attachSesumCategories(input)});
+const sesumStatus=()=>({...sesum.status(),priceIntegration:store.shopping.sesumPriceStatus(),assortmentCollection:assortmentCollection.status()});
 PUBLIC_FILES.set('shopping-view.mjs','text/javascript; charset=utf-8');PUBLIC_FILES.set('barcode.mjs','text/javascript; charset=utf-8');
 PUBLIC_FILES.set('shopping.css','text/css; charset=utf-8');
 PUBLIC_FILES.set('pantry-groups.mjs','text/javascript; charset=utf-8');
@@ -110,12 +114,51 @@ async function handle(req, res) {
     const method = req.method;
     if(requestEntry)requestEntry.kind=method+' '+path.split('/').slice(0,4).join('/');
     if(await clarificationRoutes(req,res))return;
+    if(path.startsWith('/api/shopping/assortment/')){
+      if(!sesumSenderAllowed(req.headers,{write:method==='POST'}))return send(res,403,{error:'Invalid local assortment sender.'});
+      if(method==='POST'&&!String(req.headers['content-type']??'').toLowerCase().startsWith('application/json'))return send(res,403,{error:'Assortment operations require JSON.'});
+      if(path==='/api/shopping/assortment/status'&&method==='GET')return send(res,200,{...(store.shopping.taxonomy?{enabled:true,...store.shopping.taxonomy.status()}:store.shopping.assortment.status()),collection:assortmentCollection.status()});
+      if(path==='/api/shopping/assortment/taxonomy-plan'&&method==='GET')return send(res,200,store.shopping.taxonomyBootstrapPlan());
+      if(path==='/api/shopping/assortment/taxonomy-category-collect'&&method==='POST'){
+        const plan=store.shopping.taxonomyBootstrapPlan(),ids=[...new Set(plan.watchLinks.map(l=>l.categoryId).filter(Boolean))];
+        if(!ids.length)throw Error('Associate actual household categories before collecting their products.');
+        return send(res,200,{categories:ids.length,collection:assortmentCollection.bootstrap({categoryUrls:ids.map(id=>'https://www.sesum.no/kategori/'+id)})});
+      }
+      if(path==='/api/shopping/assortment/taxonomy-watch-link'&&method==='POST')return send(res,200,store.shopping.taxonomy.linkWatch(await json(req)));
+      if(path==='/api/shopping/assortment/taxonomy-product'&&method==='GET')return send(res,200,store.shopping.taxonomy.dossier(new URL(req.url,'http://localhost').searchParams.get('productKey')));
+      if(path==='/api/shopping/assortment/taxonomy-place'&&method==='POST')return send(res,200,store.shopping.taxonomy.place(await json(req)));
+      if(path==='/api/shopping/assortment/taxonomy-bootstrap'&&method==='POST'){
+        const plan=store.shopping.taxonomyBootstrapPlan(),urls=[...new Set(plan.families.flatMap(f=>f.products.filter(p=>p.source==='sesum').slice(0,2).map(p=>p.sourceUrl)))];
+        return send(res,200,{families:plan.familyCount,products:urls.length,collection:assortmentCollection.bootstrap({productUrls:urls})});
+      }
+      if(path==='/api/shopping/assortment/oda-unavailable'&&method==='POST')return send(res,200,store.shopping.assortment.receiveOdaAvailability(await json(req)));
+      if(path==='/api/shopping/assortment/oda-import'&&method==='POST'){
+        const result=await oda.readCatalog(await json(req)),products=[...new Map(result.result.flatMap(r=>r.products).map(p=>[p.id,p])).values()];
+        const receipt=store.shopping.assortment.receiveOda({products,observedAt:result.observedAt});return send(res,200,{...receipt,page:result.page,observedAt:result.observedAt,queries:result.result.map(r=>({query:r.query,hasMore:r.hasMore,productIds:r.products.map(p=>p.id)}))});
+      }
+      if(path==='/api/shopping/assortment/families'&&method==='GET'){const q=new URL(req.url,'http://localhost').searchParams;return send(res,200,store.shopping.agentGroupSearch(q.get('query'),{offset:Number(q.get('offset')??0),limit:Number(q.get('limit')??20),expectedFingerprint:q.get('expectedFingerprint')}));}
+      if(path==='/api/shopping/assortment/product'&&method==='GET')return send(res,200,store.shopping.assortment.dossier(new URL(req.url,'http://localhost').searchParams.get('productKey')));
+      if(path==='/api/shopping/assortment/classify'&&method==='POST')return send(res,200,store.shopping.assortment.classify(await json(req)));
+      if(path==='/api/shopping/assortment/start'&&method==='POST')return send(res,200,assortmentCollection.start(await json(req)));
+      if(path==='/api/shopping/assortment/validate'&&method==='POST')return send(res,200,assortmentCollection.validate(await json(req)));
+      if(path==='/api/shopping/assortment/pause'&&method==='POST')return send(res,200,assortmentCollection.pause());
+      if(path==='/api/shopping/assortment/resume'&&method==='POST')return send(res,200,assortmentCollection.resume());
+      if(path==='/api/shopping/assortment/step'&&method==='POST')return send(res,200,await assortmentCollection.step());
+      if(path==='/api/shopping/assortment/import'&&method==='POST'){
+        const input=await json(req),offset=input.offset??0,limit=input.limit??100;if(!Number.isSafeInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>100)throw Error('Use an explicit bounded import page.');
+        const rows=sesum.catalog().items,selected=rows.slice(offset,offset+limit);let observed=0;
+        observed=store.shopping.assortment.importSesum(selected).observed;
+        return send(res,200,{observed,total:rows.length,offset,nextOffset:offset+selected.length<rows.length?offset+selected.length:null,sourceReads:0});
+      }
+      return send(res,405,{error:'Unknown assortment operation.'});
+    }
     if(path.startsWith('/api/shopping/sesum/')){
       const extension=path==='/api/shopping/sesum/work'||path==='/api/shopping/sesum/receive';
       if(!sesumSenderAllowed(req.headers,{extension,write:method==='POST'}))return send(res,403,{error:'Ugyldig Sesum-avsender.'});
       if(method==='POST'&&!String(req.headers['content-type']??'').toLowerCase().startsWith('application/json'))return send(res,403,{error:'Sesum krever JSON.'});
       if(path==='/api/shopping/sesum/work'&&method==='GET'){
         const peek=new URL(req.url,`http://${host}`).searchParams.get('peek')==='1';
+        if(assortmentConfig.enabled){if(assortmentConfig.familySource==='sesum'&&!peek&&req.headers['x-family-collector-version']!=='1.9.0'&&req.headers['x-family-request']!=='1')return send(res,200,{enabled:false,jobs:[],reason:'collector-update-required',minimumVersion:'1.9.0'});return send(res,200,assortmentCollection.work({peek}));}
         if(!peek)await sesum.replayPending();
         return send(res,200,sesum.work({peek}));
       }
@@ -129,7 +172,7 @@ async function handle(req, res) {
       if(path==='/api/shopping/sesum/offers'&&method==='GET')return send(res,200,store.shopping.sesumOfferCandidates(new URL(req.url,`http://${host}`).searchParams.get('familyId')??undefined));
       if(path==='/api/shopping/sesum/offer-review'&&method==='POST')return send(res,200,store.shopping.sesumOfferReview(await json(req)));
       if(path==='/api/shopping/sesum/catalog'&&method==='GET')return send(res,200,sesum.catalog({familyId:new URL(req.url,`http://${host}`).searchParams.get('familyId')}));
-      if(path==='/api/shopping/sesum/receive'&&method==='POST')return send(res,200,await sesum.receive(await json(req)));
+      if(path==='/api/shopping/sesum/receive'&&method==='POST'){const input=await json(req);return send(res,200,await (input.runId?.startsWith('assortment-')?assortmentCollection:sesum).receive(input));}
       if(path==='/api/shopping/sesum/review'&&method==='POST')return send(res,200,store.shopping.sesumPriceReview(await json(req)));
       if(path==='/api/shopping/sesum/register'&&method==='POST')return send(res,200,store.shopping.sesumRegister(await json(req)));
       if(path==='/api/shopping/sesum/refresh'&&method==='POST'){sesum.refresh();return send(res,200,sesumStatus());}
@@ -537,6 +580,7 @@ async function handle(req, res) {
 }
 const mobileHandle=phoneHandler({odaCart,productImages,oda,store,root,send,body,json,onQueued:dispatchTick,weather,sessionMaintenance});
 setInterval(dispatchTick,5000).unref();
+setInterval(()=>{if(!restarting&&!process.env.FAMILIEN_NO_DISPATCH&&readConfig('collector.json').dispatch?.enabled===true&&assortmentConfig.collectionEnabled)trackHostWork('assortment-collection',()=>assortmentCollection.step()).catch(()=>{});},5000).unref();
 // Aktivitetskilder hentes direkte over HTTP med jevne mellomrom (kildene har egne intervaller i config/activity-feeds.json).
 if(!process.env.FAMILIEN_NO_DISPATCH&&!process.env.FAMILIEN_NO_FEED){setInterval(()=>feedRunner.run().catch(()=>{}),20*60000).unref();setTimeout(()=>feedRunner.run().catch(()=>{}),90000).unref();}
 if(!process.env.FAMILIEN_NO_DISPATCH){setInterval(()=>{if(!restarting)trackHostWork('resource-maintenance',()=>resources.tick()).catch(()=>{});},15000).unref();}
