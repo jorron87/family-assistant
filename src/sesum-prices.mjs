@@ -59,6 +59,7 @@ function packOf(source){
  if(unit==='ml')return {amount:weight/1000,unit:'l'};
  if(['l','liter'].includes(unit))return {amount:weight,unit:'l'};
  if(['stk','pcs','st','stykk'].includes(unit))return {amount:weight,unit:'stk'};
+ if(unit==='m')return {amount:weight,unit:'m'};
  return null;
 }
 export function sesumSourceFingerprint(source){
@@ -241,6 +242,11 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
   const identity=!!donor&&donorAllowed(row,bridge.productKey,donor)&&sesumDonorFingerprint(donor)===bridge.productFingerprint&&currentGroups(base,bridge.productKey).length>0&&donor.unit===bridge.unit&&boundNativeIdentity(donor,base,row.source.store)!==false;
   if(!identity)return false;
   if(bridge.priceBasis==='direct-unit')return row.source.soldByWeight===true&&bridge.packAmount===null&&donor.pack===null&&!donor.nativeIdentity&&['kg','l'].includes(bridge.unit)&&bridge.priceIncludesVat===true&&!!bridge.vatEvidence&&!!bridge.variableWeightEvidence&&!!bridge.unitPriceEvidence&&(donor.variableWeightReviewed===true||bridge.variableDonorVerified===true)&&Array.isArray(bridge.reviewedGroups)&&bridge.reviewedGroups.length>0&&bridge.reviewedGroups.every(g=>base.group(g.groupId)?.fingerprint===g.groupFingerprint&&currentGroups(base,bridge.productKey).some(m=>m.groupId===g.groupId));
+  const sourcePack=packOf({...row.source,soldByWeight:false});
+  if(sourcePack?.unit==='m'){
+   if(bridge.unit==='m'){if(!near(sourcePack.amount,bridge.packAmount))return false;}
+   else try{if(!countedPackage(row.source,bridge.countedPack,{packAmount:bridge.packAmount,unit:bridge.unit,packBasis:bridge.packBasis,fixedPackVerified:bridge.fixedPackVerified,at:clock().getTime()}))return false;}catch{return false;}
+  }
   return donor.packKnown&&near(donor.pack,bridge.packAmount);
  }
  function ingest(input){
@@ -325,7 +331,7 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
     if(sourcePack?.unit!=='kg'||input.unit!=='kg'||input.packAmount>sourcePack.amount&&!near(input.packAmount,sourcePack.amount))throw Error('A drained package needs known gross kg at least as large as the reviewed drained kg.');
     next.packBasis='drained';next.packBasisEvidence=text(input.packBasisEvidence,'drained package evidence',6000,{required:true});
    }else{
-    if(!measure&&sourcePack&&(sourcePack.unit!==input.unit||!near(sourcePack.amount,input.packAmount)))throw Error('Sesum and donor package amounts disagree.'+(sourcePack.unit==='stk'&&['kg','l'].includes(input.unit)?' Use countedPack only after actual primary whole-pack measurement review.':''));
+    if(!measure&&sourcePack&&(sourcePack.unit!==input.unit||!near(sourcePack.amount,input.packAmount)))throw Error('Sesum and donor package amounts disagree.'+(sourcePack.unit==='stk'&&['kg','l'].includes(input.unit)?' Use countedPack only after actual primary whole-pack measurement review.':sourcePack.unit==='m'&&input.unit==='stk'?' Use countedPack with rule:measured-package-count-v1 only after primary review of the same whole pack length and item count.':''));
     if(input.packBasis==='net')next.packBasis='net';
    }
    next.packAmount=input.packAmount;next.unit=input.unit;
