@@ -149,6 +149,7 @@ export function createIngestionDispatcher({store,resources,root,dataDir,shopping
     }
     const cfg=config();if(running||cfg.enabled!==true)return;
     if(cfg.shoppingWorkers!=null&&(!Number.isInteger(cfg.shoppingWorkers)||cfg.shoppingWorkers<1||cfg.shoppingWorkers>3)){state.lastError='dispatch.shoppingWorkers må være et heltall fra 1 til 3.';save();return;}
+    if(cfg.shoppingWorkerBatchSize!=null&&(!Number.isInteger(cfg.shoppingWorkerBatchSize)||cfg.shoppingWorkerBatchSize<1||cfg.shoppingWorkerBatchSize>20)){state.lastError='dispatch.shoppingWorkerBatchSize må være et heltall fra 1 til 20.';save();return;}
     // Family-submitted work has priority over automatically discovered work.
     if(store.phone.list().some(item=>['queued','processing'].includes(item.status))||store.calendarActions().length)return;
     if(store.shopping?.stockIntake?.work().some(item=>!item.retryAt||Date.parse(item.retryAt)<=clock()))return;
@@ -182,11 +183,11 @@ export function createIngestionDispatcher({store,resources,root,dataDir,shopping
     // monopolize the worker pool. Alternate an independent wave and that serial
     // follow-up; neither lane removes anything from the actual domain queue.
     const excludedKeys=new Set(serial.flatMap(i=>[i.sourceKey,i.productKey,...(i.relatedSources??[]).map(r=>r.sourceKey)].filter(Boolean)));
-    const independentPlan=shoppingOnly&&shoppingCoordinator&&serial.length&&cfg.shoppingWorkers>1&&state.lastShoppingLane!=='independent'?planShoppingWorkers(shoppingQueue,cfg.shoppingWorkers,{independent:true,excludedKeys}):null;
+    const independentPlan=shoppingOnly&&shoppingCoordinator&&serial.length&&cfg.shoppingWorkers>1&&(state.lastShoppingLane!=='independent'||shoppingCoordinator.status().last?.code===1)?planShoppingWorkers(shoppingQueue,cfg.shoppingWorkers,{independent:true,excludedKeys,limit:cfg.shoppingWorkerBatchSize??20}):null;
     if(serial.length&&!independentPlan){const selected=new Set(serial);shoppingQueue=[...serial,...shoppingQueue.filter(i=>!selected.has(i))];}
     const currentShopping=shoppingOnly?new Set(shoppingCohortSignal(store,shoppingQueue).items):null;
     const heldCohort=shoppingOnly&&state.shoppingCohort?.signals?.length&&state.shoppingCohort.signals.every(item=>currentShopping.has(item))?state.shoppingCohort:null;
-    const poolPlan=independentPlan??(shoppingOnly&&shoppingCoordinator&&!serial.length&&cfg.shoppingWorkers>1?planShoppingWorkers(shoppingQueue,cfg.shoppingWorkers):null);
+    const poolPlan=independentPlan??(shoppingOnly&&shoppingCoordinator&&!serial.length&&cfg.shoppingWorkers>1?planShoppingWorkers(shoppingQueue,cfg.shoppingWorkers,{limit:cfg.shoppingWorkerBatchSize??20}):null);
     const plannedBatch=shoppingOnly?(poolPlan?.batch??shoppingAgentBatch(shoppingQueue)):null;
     const retryBatch=heldCohort&&!poolPlan&&!serial.length&&(heldCohort.jobCount??20)<=20?{items:heldCohort.items,jobs:heldCohort.jobs??shoppingAgentBatch(heldCohort.items).jobs,summary:shoppingAgentBatch(shoppingQueue,{limit:Math.min(20,heldCohort.jobCount??heldCohort.shown)}).summary}:plannedBatch;
     const assignedSignal=shoppingOnly?shoppingCohortSignal(store,retryBatch.items):null;

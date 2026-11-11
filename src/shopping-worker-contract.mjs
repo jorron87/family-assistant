@@ -16,10 +16,11 @@ export function workerBatch(jobs,queue=[]){
  const items=jobs.flatMap(j=>j.items),all=shoppingWorkBatch(queue,{limit:0}).summary,shown=shoppingWorkBatch(items,{full:true}).summary.total;
  return {jobs,items,summary:{...all,shown,remaining:Math.max(0,all.total-shown),agentJobs:{shown:jobs.length,total:shoppingAgentJobs(queue).length,remaining:Math.max(0,shoppingAgentJobs(queue).length-jobs.length)}}};
 }
-export function planShoppingWorkers(queue,workers=3,{independent=false,excludedKeys=new Set()}={}){
+export function planShoppingWorkers(queue,workers=3,{independent=false,excludedKeys=new Set(),limit=20}={}){
  if(!Number.isInteger(workers)||workers<1||workers>3)throw Error('Use one to three shopping workers.');
+ if(!Number.isInteger(limit)||limit<1||limit>20)throw Error('Use one to twenty whole products per worker.');
  const jobs=[];for(const job of shoppingAgentJobs(queue)){
-  if(jobs.length===workers*20)break;
+  if(jobs.length===workers*limit)break;
   if(!workerEligible(job)||[...job.sourceKeys,job.productKey].some(k=>excludedKeys.has(k))){if(independent)continue;break;}
   jobs.push(job);
  }
@@ -60,13 +61,14 @@ export function workerOperationGuide(types){
 
 // All functions below run synchronously in the one archive-owning server. A
 // worker selects semantic actions; code binds exact fingerprints and scope.
-export function applyWorkerProposal({store,assignment,packet,operation,input,groupReads=new Map()}){
+export function applyWorkerProposal({store,assignment,packet,operation,input,groupReads=new Map(),placementGuard=null}){
  if(packet.assignmentChanges.length)throw Error('Assigned source changed; stop and request a new assignment.');
  const data=structuredClone(input??{}),shop=store.shopping;
  if(operation==='placement'){
   const rows=Array.isArray(data)?data:data.decisions;if(!Array.isArray(rows)||!rows.length)throw Error('Explicit placement decisions are required.');
   const decisions=rows.map(row=>{const keys=Array.isArray(row.sourceKeys)?row.sourceKeys:[row.sourceKey];if(!keys.length||keys.some(k=>typeof k!=='string'))throw Error('Placement requires explicit sourceKey or sourceKeys, never positional identity alone.');const indexes=keys.map(k=>{const i=packet.sources.findIndex(s=>s.sourceKey===k);if(i<0)throw Error('Placement source is outside the current worker frame.');return i;});if(row.sourceIndex!=null&&(indexes.length!==1||indexes[0]!==row.sourceIndex)||row.sourceIndexes!=null&&JSON.stringify(row.sourceIndexes)!==JSON.stringify(indexes))throw Error('Placement source key and source index disagree; read the actual source mapping.');return {...row,sourceIndex:undefined,sourceIndexes:indexes};});
-  return shop.agentPlacement({assignment,contextFingerprint:packet.contextFingerprint,decisions:Array.isArray(data)?decisions:{...data,decisions}});
+  const proposal={assignment,contextFingerprint:packet.contextFingerprint,decisions:Array.isArray(data)?decisions:{...data,decisions}};
+  return placementGuard&&shop.agentPlacementAsync?shop.agentPlacementAsync(proposal,placementGuard):shop.agentPlacement(proposal);
  }
  if(operation==='catalog-review'){
   const key=data.productKey;if(!assignment.jobs.some(j=>j.productKey===key))throw Error('Native product is outside this assignment.');

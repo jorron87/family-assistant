@@ -1540,9 +1540,11 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   }
   const sesumSubjectRecord=key=>key?.startsWith('sesum-product:')?sesumCatalogue.record(key):sesumPrices.sourceRecord(key);
   function sesumPlacementSubjects(reader,chains){
+    return readValue('sesum-placement-subjects',()=>{
     const real=sesumPrices.sourceSummaries().filter(source=>chains.has(source.store)&&sesumCatalogue.researchable(sesumPrices.sourceRecord(source.sourceKey).source)&&(!source.receiptAt||withinPriceHorizon(source.receiptAt,now().getTime(),reader?.horizonDays)));
     const ids=new Set(real.map(source=>sesumPrices.sourceRecord(source.sourceKey).source.id));
     return [...real,...sesumCatalogue.summaries().filter(source=>!source.parked&&!ids.has(sesumCatalogue.record(source.sourceKey).source.id))];
+    });
   }
   function sesumPlacement(...args){return inReadContext(()=>sesumPlacementInContext(...args));}
   function sesumPlacementInContext(sourceKey){
@@ -1558,8 +1560,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       const current=!!proof;
       items.push({...source,rawFamilyIds:[...source.familyIds],researchedFamilyIds:[...new Set([...sesumResearchedFamilyIds(source,semantic.families),...(current?review.targets.map(t=>t.familyId):[])])],registrationFingerprint,familySetFingerprint:semantic.familySetFingerprint,fingerprint:hash(JSON.stringify([source.sourceKey,source.sourceFingerprint,registrationFingerprint,semantic.familySetFingerprint])),status:current?review.status:'pending',reason:current?review.reason??null:'review-all-active-family-placement',retryAt:current?review.retryAt??null:null,review:review?structuredClone(review):null,...(sourceKey?{source:sesumSubjectRecord(source.sourceKey).source,registration:source.kind==='catalogue'?null:discovery.record(source.sourceKey)}:{})});
     }
-    const knownEans=new Set(sesumFamilies().flatMap(f=>f.products.filter(p=>p.source!=='sesum'&&p.reviewCurrent).flatMap(p=>Array.isArray(p.ean)?p.ean:p.ean?[p.ean]:[])));
-    const scopeFor=createResearchScope(semantic.families,sesumResearchTerms()),maxAge=sesumResearchMaxPriceAgeHours(),freshIds=new Set(items.filter(i=>i.receiptAt&&now().getTime()-Date.parse(i.receiptAt)>=0&&now().getTime()-Date.parse(i.receiptAt)<=maxAge*3600000).map(i=>sesumSubjectRecord(i.sourceKey).source.id));
+    const knownEans=readValue('sesum-placement-known-eans',()=>new Set(sesumFamilies().flatMap(f=>f.products.filter(p=>p.source!=='sesum'&&p.reviewCurrent).flatMap(p=>Array.isArray(p.ean)?p.ean:p.ean?[p.ean]:[]))));
+    const scopeFor=readValue('sesum-placement-router',()=>createResearchScope(semantic.families,sesumResearchTerms())),maxAge=sesumResearchMaxPriceAgeHours(),freshIds=new Set(items.filter(i=>i.receiptAt&&now().getTime()-Date.parse(i.receiptAt)>=0&&now().getTime()-Date.parse(i.receiptAt)<=maxAge*3600000).map(i=>sesumSubjectRecord(i.sourceKey).source.id));
     for(const item of items){item.discoveryScope=scopeFor(item);const raw=sesumSubjectRecord(item.sourceKey).source;if((raw.ean??[]).some(e=>knownEans.has(e)))item.discoveryScope={...item.discoveryScope,candidate:true,reason:'reviewed-identity-candidate',reviewedIdentityCandidate:true,retainedKnownResearch:true};if(item.registrationFingerprint||item.researchedFamilyIds.length||item.review?.targets?.length||item.status==='blocked')item.discoveryScope={...item.discoveryScope,candidate:true,retainedKnownResearch:true};if(Number.isFinite(maxAge)&&maxAge>0&&item.discoveryScope.candidate&&!item.discoveryScope.retainedKnownResearch&&!freshIds.has(sesumSubjectRecord(item.sourceKey).source.id))item.discoveryScope={...item.discoveryScope,candidate:false,reason:'await-current-price'};}
     return {...semantic,items,total:items.length,hasMore:false,scope:{mode:sourceKey?'exact-source':'all-active-sources',sourceKey:sourceKey??null}};
   }
@@ -1863,6 +1865,18 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const receipts=decisions.map(decision=>sesumPlacementReview(decision));
     return {saved:receipts.length,receipts:receipts.map(({sourceKey,sourceFingerprint,registrationFingerprint,familySetFingerprint,status,reviewedAt,targets})=>({sourceKey,sourceFingerprint,registrationFingerprint,familySetFingerprint,status,reviewedAt,targets}))};
   });}
+  async function agentPlacementAsync(input,guard=()=>{}){
+    const packet=agentContext(input.assignment);
+    if(input.contextFingerprint!==packet.contextFingerprint)throw Error('Agent context changed; read a current packet before deciding.');
+    const decisions=bindPlacementDecisions(packet,input.decisions),receipts=[];
+    // Prevalidate every decision before saving any, then revalidate each small
+    // synchronous chunk. No read cache or unchecked approval crosses an await.
+    for(const dryRun of [true,false])for(let offset=0;offset<decisions.length;offset+=4){
+      await new Promise(resolve=>setImmediate(resolve));guard();
+      inReadContext(()=>{for(const decision of decisions.slice(offset,offset+4)){const receipt=sesumPlacementReview(decision,{dryRun});if(!dryRun)receipts.push(receipt);}});
+    }
+    return {saved:receipts.length,receipts:receipts.map(({sourceKey,sourceFingerprint,registrationFingerprint,familySetFingerprint,status,reviewedAt,targets})=>({sourceKey,sourceFingerprint,registrationFingerprint,familySetFingerprint,status,reviewedAt,targets}))};
+  }
   function agentProgressSince(batch,startedAt){return inReadContext(()=>{
     const semantic=sesumPlacementFamilies(),research=sesumResearches(),entries=catalog.entries();
     return (batch?.items??[]).some(item=>{
@@ -1926,5 +1940,5 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     }
   }
   });
-  return {agentPlacement,agentProgressSince,agentContext,agentContexts,agentProduct,agentLibrarySearch,agentGroup:id=>inReadContext(()=>{const group=libReader()?.group(id);return group?{groupId:id,...structuredClone(group)}:null;}),agentFamilyBasis:()=>inReadContext(()=>agentFamilyBasis(sesumPlacementFamilies().families)),marketRefreshPlan,odaRefreshPlan,odaRefreshReceive,sesumFamilies,sesumPlacement,sesumReceivePrices,sesumReceiveMetadata:input=>sesumCatalogue.ingest(input),sesumCandidates,sesumRegister,sesumPriceReview,sesumOfferCandidates,sesumOfferReview,sesumPriceStatus:()=>inReadContext(()=>({...sesumPrices.status(),discovery:discovery.status(),catalogue:sesumCatalogue.status()})),familyReopen,listFamily,listFamilyWork,explorer,productInfo,libraryAudit,libraryAuditAck,libraryLink,libraryLinkCandidates,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
+  return {agentPlacement,agentPlacementAsync,agentProgressSince,agentContext,agentContexts,agentProduct,agentLibrarySearch,agentGroup:id=>inReadContext(()=>{const group=libReader()?.group(id);return group?{groupId:id,...structuredClone(group)}:null;}),agentFamilyBasis:()=>inReadContext(()=>agentFamilyBasis(sesumPlacementFamilies().families)),marketRefreshPlan,odaRefreshPlan,odaRefreshReceive,sesumFamilies,sesumPlacement,sesumReceivePrices,sesumReceiveMetadata:input=>sesumCatalogue.ingest(input),sesumCandidates,sesumRegister,sesumPriceReview,sesumOfferCandidates,sesumOfferReview,sesumPriceStatus:()=>inReadContext(()=>({...sesumPrices.status(),discovery:discovery.status(),catalogue:sesumCatalogue.status()})),familyReopen,listFamily,listFamilyWork,explorer,productInfo,libraryAudit,libraryAuditAck,libraryLink,libraryLinkCandidates,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
 }

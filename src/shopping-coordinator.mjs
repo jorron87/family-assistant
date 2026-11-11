@@ -76,7 +76,7 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
   if(input.kind==='source-offers')return readResult(slot,frame,shop.sesumOfferCandidates().items.filter(r=>r.sourceKey===input.sourceKey));
   throw Error('Unknown read-only worker operation.');
  }
- function propose(slot,input){
+ async function propose(slot,input){
   if(typeof input.proposalId!=='string'||!/^[a-zA-Z0-9_-]{8,100}$/.test(input.proposalId))throw Error('Use a unique bounded proposal ID.');
   const digest=proposalHash(input),prior=slot.proposals[input.proposalId];
   if(prior){if(prior.digest!==digest)throw Error('A proposal ID cannot be reused for different content.');return prior.receipt?{...prior.receipt,replayed:true}:{uncertain:true,next:'Read the current domain context and verify existing receipts. This ambiguous proposal will not be repeated automatically.'};}
@@ -85,7 +85,8 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
   if(Object.keys(missing).length)throw Error('Read the complete current worker frame before proposing. Missing requiredPages='+JSON.stringify(missing)+'. Call shopping_context for EACH listed section and page index. Product/group/source-candidates reads do not deliver these context pages. Do not repeat the proposal until these exact pages are read. No proposal was saved.');
   const current=store.shopping.agentContext(frame.assignment);if(current.contextFingerprint!==frame.packet.contextFingerprint||current.assignmentChanges.length)throw Error('Context changed; refresh and read the actual changes before another proposal.');
   slot.proposals[input.proposalId]={digest,status:'pending',startedAt:clockISO(clock)};save();
-  let result;try{const data=input.operation==='placement'?guardNegativePlacement(current,input.input,placementRecallHints(current,researchFor(current))):input.input;result=applyWorkerProposal({store,assignment:frame.assignment,packet:current,operation:input.operation,input:data,groupReads:groupReads(frame)});}catch(error){
+  const placementGuard=()=>{if(terminal(slot)||!ownsLease()||state.safetyStop||shouldYield())throw Error('Worker capability is unavailable or revoked.');};
+  let result;try{const data=input.operation==='placement'?guardNegativePlacement(current,input.input,placementRecallHints(current,researchFor(current))):input.input;result=await applyWorkerProposal({store,assignment:frame.assignment,packet:current,operation:input.operation,input:data,groupReads:groupReads(frame),placementGuard});}catch(error){
    // A compound domain operation can save its first receipt before throwing.
    // Such an ambiguous operation must never be silently repeated.
    let unchanged=false;try{unchanged=store.shopping.agentContext(frame.assignment).contextFingerprint===current.contextFingerprint;}catch{}

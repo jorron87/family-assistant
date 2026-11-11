@@ -55,6 +55,28 @@ test('independent recovery crosses serial work without claiming it or splitting 
  assert.equal(plan.batch.summary.agentJobs.total,64);assert.equal(JSON.stringify(queue),before);
  assert.equal(planShoppingWorkers(queue,3),null,'normal prefix routing remains conservative');
 });
+
+test('smaller live batches retain the entire queue and every related chain identity',()=>{
+ const f=fixture(60,{chains:true});try{const queue=f.shop.queue().filter(i=>i.do==='shopping-sesum-placement-review'),plan=planShoppingWorkers(queue,3,{limit:5});assert.deepEqual(plan.batches.map(b=>b.jobs.length),[5,5,5]);assert.equal(plan.batch.summary.agentJobs.total,60);assert.equal(plan.batch.summary.agentJobs.remaining,45);assert.ok(plan.batch.jobs.every(j=>j.sourceKeys.length===3));assert.throws(()=>planShoppingWorkers(queue,3,{limit:0}),/twenty/);}finally{f.close();}
+});
+
+test('yielding placement matches synchronous domain receipts exactly and revalidates changed families before any write',async()=>{
+ const a=fixture(20),b=fixture(20),c=fixture(20);try{
+  const input=f=>{const packet=f.packet(0);return {assignment:workerManifest(f.plan.batches[0]),contextFingerprint:packet.contextFingerprint,decisions:f.decisions(packet)};};
+  a.shop.agentPlacement(input(a));await b.shop.agentPlacementAsync(input(b));assert.deepEqual(b.state.shopping.sesumPlacementReviews,a.state.shopping.sesumPlacementReviews);
+  const pending=c.shop.agentPlacementAsync(input(c));setImmediate(()=>c.shop.watch({...c.state.shopping.watches['synthetic-beef-strips'],note:'Actual changed family: frozen only.'}));
+  await assert.rejects(pending,/endret/);assert.equal(Object.keys(c.state.shopping.sesumPlacementReviews).length,0);
+ }finally{a.close();b.close();c.close();}
+});
+
+test('revoking a capability between placement chunks stops subsequent writes and preserves partial receipts as uncertain',async()=>{
+ const f=fixture(20);try{f.start();const packet=f.packet(0),original=f.shop.agentPlacementAsync;let chunks=0;
+  f.shop.agentPlacementAsync=(input,guard)=>original(input,()=>{if(++chunks===7)f.yielding.value=true;guard();});
+  const request={proposalId:'chunked-partial-write',contextFingerprint:packet.contextFingerprint,operation:'placement',input:f.decisions(packet)};
+  await assert.rejects(f.call(0,'shopping_propose',request),/capability/);assert.equal(Object.keys(f.state.shopping.sesumPlacementReviews).length,4);
+  f.yielding.value=false;assert.equal((await f.call(0,'shopping_propose',request)).uncertain,true);assert.equal(Object.keys(f.state.shopping.sesumPlacementReviews).length,4);
+ }finally{f.close();}
+});
 test('coordinator rejects overlapping assignments and foreign leases before launching',()=>{
  const f=fixture();try{assert.throws(()=>f.coordinator.start({token:'foreign',batches:f.plan.batches}),/lease/);assert.throws(()=>f.coordinator.start({token:f.state.runLease.token,batches:[f.plan.batches[0],f.plan.batches[0]]}),/Overlapping/);assert.equal(f.launches.length,0);}finally{f.close();}
 });
@@ -89,7 +111,7 @@ test('a missing current-stage page is named precisely so a worker can repair rea
  const f=fixture(20);try{f.start();const h=await f.call(0,'shopping_context',{reread:true,focus:'all'});for(const [section,indexes]of Object.entries(h.requiredPages))if(section!=='jobs')for(const page of indexes)await f.call(0,'shopping_context',{section,page});const input={proposalId:'actually-unread-job-page',contextFingerprint:h.contextFingerprint,operation:'placement',input:f.decisions(f.packet(0))};await assert.rejects(f.call(0,'shopping_propose',input),e=>{assert.ok(e.message.includes('Missing requiredPages='+JSON.stringify({jobs:h.requiredPages.jobs}))); assert.match(e.message,/No proposal was saved/);return true;});assert.equal(f.coordinator.status().applied,0);for(const page of h.requiredPages.jobs)await f.call(0,'shopping_context',{section:'jobs',page});assert.equal((await f.call(0,'shopping_propose',input)).saved,true,'the same unsaved proposal ID is safe after actual missing-page delivery');}finally{f.close();}
 });
 test('ambiguous partially persisted domain writes remain uncertain and are never automatically retried',async()=>{
- const f=fixture(20);try{f.start();const p=f.packet(0),original=f.shop.agentPlacement;let attempts=0;f.shop.agentPlacement=input=>{attempts++;original(input);throw Error('Synthetic crash after the domain receipt was saved.');};const input={proposalId:'ambiguous-placement-write',contextFingerprint:p.contextFingerprint,operation:'placement',input:f.decisions(p)};await assert.rejects(f.call(0,'shopping_propose',input),/crash/);assert.equal((await f.call(0,'shopping_propose',input)).uncertain,true);assert.equal(attempts,1);assert.equal(Object.keys(f.state.shopping.sesumPlacementReviews).length,20);}finally{f.close();}
+ const f=fixture(20);try{f.start();const p=f.packet(0),original=f.shop.agentPlacementAsync;let attempts=0;f.shop.agentPlacementAsync=async(input,guard)=>{attempts++;await original(input,guard);throw Error('Synthetic crash after the domain receipt was saved.');};const input={proposalId:'ambiguous-placement-write',contextFingerprint:p.contextFingerprint,operation:'placement',input:f.decisions(p)};await assert.rejects(f.call(0,'shopping_propose',input),/crash/);assert.equal((await f.call(0,'shopping_propose',input)).uncertain,true);assert.equal(attempts,1);assert.equal(Object.keys(f.state.shopping.sesumPlacementReviews).length,20);}finally{f.close();}
 });
 test('encrypted research survives restart, is source-bound and does not approve product identity or prices',async()=>{
  const f=fixture(20);try{f.start();const key=f.packet(0).sources[0].sourceKey,input={sourceKey:key,evidence:'Read actual complete primary label for this fixed package.',labelText:'SYNTHETIC PRIVATE LABEL TEXT',sourceReceipts:[{url:'https://example.test/primary',observedAt:'2026-11-10T12:00:00Z',evidence:'Actual synthetic fixed-pack primary declaration.'}]};await f.call(0,'shopping_checkpoint',input);assert.equal((await f.call(0,'shopping_checkpoint',input)).notes,1);const restored=createShoppingCoordinator({...f.options,launch(){throw Error('Must not relaunch recovered workers.');}});const notes=await f.call(0,'shopping_read',{kind:'research'},restored);assert.equal(notes[0].notes[0].labelText,input.labelText);assert.equal(f.packet(0).sources[0].reviewedIdentity,null);assert.equal(readFileSync(join(f.dir,'shopping-coordinator.enc')).includes(Buffer.from(f.launches[0].token)),false);await assert.rejects(f.call(0,'shopping_checkpoint',{...input,sourceKey:'sesum-product:9999'}),/outside/);restored.tick();assert.equal(restored.status().running,true);}finally{f.close();}

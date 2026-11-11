@@ -34,6 +34,12 @@ test('parallel dispatcher owns one lease, recovers its coordinator and reports o
  }finally{f.close();}
 });
 
+test('configured live batch size bounds workers while all later jobs remain counted',()=>{
+ const rows=Array.from({length:60},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+i,sourceFingerprint:'same-'+i}));let active=false;
+ const pool={status:()=>({running:active,runId:'small-wave'}),tick(){},preferSerial:()=>[],start({batches}){active=true;assert.deepEqual(batches.map(b=>b.jobs.length),[5,5,5]);return this.status();}},f=shoppingDispatchFixture(rows,{shoppingWorkers:3,shoppingWorkerBatchSize:5},undefined,false,pool);
+ try{f.dispatcher.tick();assert.equal(f.dispatcher.status().shoppingBatch.summary.agentJobs.total,60);assert.equal(f.dispatcher.status().shoppingBatch.jobs.length,15);assert.equal(f.queue.rows.length,60);}finally{f.close();}
+});
+
 test('coordinator safety stop also prevents the legacy full-tool fallback',()=>{
  const pool={status:()=>({running:false,attention:{reason:'An explicit runtime safety stop.'}})},f=shoppingDispatchFixture([{do:'shopping-review',storeId:'one'}],{shoppingWorkers:3},undefined,false,pool);try{f.dispatcher.tick();assert.equal(f.launches.length,0);assert.equal(f.store.snapshot().runLease,null);}finally{f.close();}
 });
