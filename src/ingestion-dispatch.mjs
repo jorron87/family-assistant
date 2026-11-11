@@ -191,7 +191,10 @@ export function createIngestionDispatcher({store,resources,root,dataDir,shopping
     const progressGap=shoppingOnly&&state.lastWorkScope==='handel'&&state.shoppingContinuation===true&&Number.isInteger(continuationSeconds)&&continuationSeconds>=10&&continuationSeconds<=900;
     const gap=progressGap?continuationSeconds*1000:(cfg.minGapMinutes??15)*60000;
     const gapFrom=progressGap?state.lastFinishedAt:state.lastStartedAt;
-    if(!retryAfterLogin&&clock()-(gapFrom??0)<gap)return;
+    // Source cooldowns must not idle independent shopping after that source
+    // run has finished. Same-scope failures still use their retry budgets.
+    const enteringShopping=shoppingOnly&&state.lastWorkScope!=='handel';
+    if(!retryAfterLogin&&!enteringShopping&&clock()-(gapFrom??0)<gap)return;
     if(!fullDue&&!changed && (!budget.retryAt || budget.retryAt>clock() || (budget.attempts??0)>=3))return;
     const lease=store.beginRun();if(!lease.acquired)return;
     retryAfterLogin=false;

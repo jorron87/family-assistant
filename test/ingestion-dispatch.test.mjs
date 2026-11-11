@@ -3,6 +3,11 @@ import {createIngestionDispatcher,changeSignal} from '../src/ingestion-dispatch.
 import {createStore} from '../src/store.mjs';
 import {agentFamilyBasis,buildAgentContext} from '../src/shopping-agent-context.mjs';
 
+test('finished source work hands independent shopping over immediately while family priority and shopping failure backoff remain',()=>{
+ const f=shoppingDispatchFixture([{do:'shopping-product-review',productKey:'kassal:ODA_NO:1',watchId:'family',fingerprint:'needs-review'}]);f.store.reviewQueue=()=>({items:[{source:'spond',externalId:'known-blocked',listingHash:'same',reason:'Actual unchanged source gap'}]});
+ try{f.dispatcher.tick();assert.equal(f.dispatcher.status().workerScope,'kildeendringer');f.launches[0].onExit(0);f.store.phone.list=()=>[{status:'queued'}];f.dispatcher.tick();assert.equal(f.launches.length,1);f.store.phone.list=()=>[];f.dispatcher.tick();assert.equal(f.launches.length,2,'the source minGap does not delay the first shopping wave');assert.equal(f.dispatcher.status().workerScope,'handel');f.launches[1].onExit(1);f.dispatcher.tick();assert.equal(f.launches.length,2,'same shopping cohort failure retains backoff');}finally{f.close();}
+});
+
 test('parallel dispatcher owns one lease, recovers its coordinator and reports only actual scoped work',()=>{
  let active=false,last=null,launches=0,polls=0;const rows=Array.from({length:65},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+(1000+i),sourceFingerprint:'current-'+i}));
  const pool={status:()=>({running:active,runId:active?'coordinated-run':null,last}),preferSerial:()=>[],tick(){polls++;},start(input){launches++;active=true;assert.equal(input.batches.length,3);assert.equal(input.batches.flatMap(b=>b.jobs).length,60);return this.status();}};
