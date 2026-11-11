@@ -135,7 +135,7 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
   // The dispatcher refills an empty lane on its next poll. A bounded rolling
   // session keeps its own lease while that code-only scheduling takes place.
   if(canRefill())return;
-  const run=state.active;state.last={id:run.id,finishedAt:clock(),startedAt:run.startedAt,code:run.slots.some(s=>['error','safety-stop','stale','abandoned'].includes(s.status))?1:0,positiveProgress:run.positiveProgress,applied:run.applied,preempted:run.preempted===true,...(run.pool?{pool:run.pool}:{}),slots:run.slots.map(({tokenHash,assignment,proposals,...s})=>s)};
+  const run=state.active;state.last={id:run.id,finishedAt:clock(),startedAt:run.startedAt,code:run.slots.some(s=>['error','safety-stop','stale','abandoned'].includes(s.status))?1:0,positiveProgress:run.positiveProgress,applied:run.applied,preempted:run.preempted===true,...(run.pool?{pool:run.pool}:{}),slots:run.slots.map(({tokenHash,assignment,proposals,...s})=>({...s,proposalSummary:proposalSummary({proposals})}))};
   // Keep the exact caller-owned lease in the private encrypted journal until
   // the dispatcher acknowledges release. Public status never includes it.
   state.finishedLease={token:run.leaseToken,runId:run.id,finishedAt:state.last.finishedAt};state.active=null;frames.clear();save();
@@ -222,5 +222,15 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
  }
  function finishedLeaseForRecovery(){const receipt=state.finishedLease;return !state.active&&!state.safetyStop&&validLeaseToken(receipt?.token)&&receipt.token===currentLease()?.token?{...receipt}:null;}
  function acknowledgeFinishedLease(token){if(validLeaseToken(token)&&state.finishedLease?.token===token){delete state.finishedLease;save();}}
- return {start,tick,handle,status,refill,drain,preferSerial,researchFor,finishedLeaseForRecovery,acknowledgeFinishedLease,currentRunId:()=>state.active?.id??null};
+ function reviewStop(input){
+  if(state.active)throw Error('Review requires a fully stopped coordinator.');
+  const stop=state.safetyStop;
+  if(!stop||input?.expectedStopFingerprint!==proposalHash(stop))throw Error('Read the exact current safety stop before reviewing it.');
+  if(input.reviewed!==true||input.receiptsVerified!==true)throw Error('An explicit operator review and verification of current durable receipts are required.');
+  const evidence=text(input.evidence,40,6000);
+  if(state.last?.slots?.some(s=>s.proposalSummary?.pending||s.proposalSummary?.uncertain))throw Error('Unconfirmed proposal receipts require reconciliation before resuming.');
+  const receipt={stop:structuredClone(stop),runId:state.last?.id??null,reviewedAt:clockISO(clock),evidence,receiptsVerified:true};
+  (state.stopReviews??=[]).push(receipt);state.lastStopReview=receipt;delete state.safetyStop;save();return structuredClone(receipt);
+ }
+ return {start,tick,handle,status,refill,drain,preferSerial,researchFor,finishedLeaseForRecovery,acknowledgeFinishedLease,reviewStop,currentRunId:()=>state.active?.id??null};
 }

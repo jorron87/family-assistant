@@ -134,6 +134,12 @@ async function handle(req, res) {
       return send(res,405,{error:'Ukjent Sesum-operasjon.'});
     }
     if(path==='/shopping-setup'&&method==='GET')return send(res,200,readFileSync(join(root,'public','shopping-setup.html')),'text/html; charset=utf-8');
+    if(path==='/api/ingestion/dispatcher/shopping/review-stop'&&method==='POST'){
+      if(req.headers['x-family-request']!=='1'||!String(req.headers['content-type']??'').startsWith('application/json')||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host))return send(res,403,{error:'Explicit local operator review requires JSON and a valid sender.'});
+      const input=await json(req),receipt=shoppingCoordinator.reviewStop(input);
+      const dispatcher=input.resumeShopping===true?await ingestionDispatcher.requestShopping({retryFailed:true,preferParallel:true}):ingestionDispatcher.status();
+      return send(res,200,{receipt,dispatcher});
+    }
     if(path==='/api/shopping/agent-worker'&&method==='POST'){
       if(!String(req.headers['content-type']??'').startsWith('application/json'))return send(res,403,{error:'Worker requires JSON.'});
       const input=await json(req);try{

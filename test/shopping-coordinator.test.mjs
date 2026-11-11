@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {shoppingStore} from '../src/shopping.mjs';
 import {createShoppingCoordinator} from '../src/shopping-coordinator.mjs';
-import {planShoppingWorkers,workerManifest,applyWorkerProposal} from '../src/shopping-worker-contract.mjs';
+import {planShoppingWorkers,workerManifest,applyWorkerProposal,proposalHash} from '../src/shopping-worker-contract.mjs';
 import {shoppingWorkerArgs} from '../src/shopping-worker-runtime.mjs';
 import {agentContextPages} from '../src/shopping-agent-context.mjs';
 import {expandedFamilies,expandedCorpus} from '../scripts/fixtures/shopping-agent-corpus.mjs';
@@ -141,6 +141,28 @@ test('one bounded worker deadline retains unfinished identities and permits inde
 
 test('an explicit safety stop remains authoritative when the supervisor also reports a deadline',()=>{
  const f=fixture();try{f.start();writeFileSync(join(f.launches[0].directory,'exit.json'),JSON.stringify({code:1,error:'Worker deadline reached.'}));finish(f,0,'safety-stop');assert.ok(f.coordinator.status().attention);assert.equal(f.coordinator.status().last.slots[0].status,'safety-stop');assert.equal(f.coordinator.status().last.code,1);assert.throws(f.start,/attention/);}finally{f.close();}
+});
+
+test('only an exact explicit operator review can acknowledge a stopped wave without changing any lease or domain receipt',()=>{
+ const f=fixture();try{
+  f.start();assert.throws(()=>f.coordinator.reviewStop({}),/fully stopped/);finish(f,0,'safety-stop');const stop=f.coordinator.status().attention,domain=JSON.stringify(f.state.shopping),review={expectedStopFingerprint:proposalHash(stop),reviewed:true,receiptsVerified:true,evidence:'Operator read the exact worker result and verified the current durable domain receipts before an explicitly requested new turn.'};
+  assert.throws(f.start,/attention/);const restarted=createShoppingCoordinator(f.options);assert.deepEqual(restarted.status().attention,stop);
+  for(const invalid of [{...review,expectedStopFingerprint:'stale'},{...review,reviewed:false},{...review,receiptsVerified:false},{...review,evidence:'Unverified'}]){assert.throws(()=>restarted.reviewStop(invalid));assert.deepEqual(restarted.status().attention,stop);}
+  f.state.runLease={token:'new-foreign-owner'};const receipt=restarted.reviewStop(review);assert.deepEqual(receipt.stop,stop);assert.equal(restarted.status().attention,null);assert.equal(f.state.runLease.token,'new-foreign-owner');assert.equal(restarted.finishedLeaseForRecovery(),null);assert.equal(JSON.stringify(f.state.shopping),domain);
+  assert.throws(()=>restarted.reviewStop(review),/exact current/);const afterRestart=createShoppingCoordinator(f.options);assert.equal(afterRestart.status().attention,null);assert.throws(()=>afterRestart.start({token:'owner-test-lease',batches:f.plan.batches}),/current lease/);
+ }finally{f.close();}
+});
+
+test('operator review cannot erase an unconfirmed proposal in a cancelled peer',async()=>{
+ const f=fixture();let release;try{
+  f.start();await readAll(f,0);const packet=f.packet(0),original=f.shop.agentPlacementAsync;
+  f.shop.agentPlacementAsync=async(...args)=>{await new Promise(r=>{release=r;});return original(...args);};
+  const pending=f.call(0,'shopping_propose',{proposalId:'pending-when-peer-stops',contextFingerprint:packet.contextFingerprint,operation:'placement',input:f.decisions(packet)}).then(()=>null,e=>e);
+  assert.equal(typeof release,'function');finish(f,1,'safety-stop');const stop=f.coordinator.status().attention;
+  assert.ok(f.coordinator.status().last.slots.some(s=>s.proposalSummary.pending===1));
+  assert.throws(()=>f.coordinator.reviewStop({expectedStopFingerprint:proposalHash(stop),reviewed:true,receiptsVerified:true,evidence:'A textual operator claim cannot override an actual unconfirmed proposal which still needs durable reconciliation.'}),/reconciliation/);
+  release();assert.ok((await pending)instanceof Error);assert.deepEqual(f.coordinator.status().attention,stop);
+ }finally{release?.();f.close();}
 });
 
 test('a runtime failure drains the pool instead of repeatedly launching new failing workers',()=>{
