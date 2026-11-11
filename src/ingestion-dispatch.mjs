@@ -284,6 +284,16 @@ Kontroller faktisk lagrede kvitteringer og completion før avslutning. Påstå a
     if(state.daily?.day===osloDayAndHour(clock()).day){state.daily.retryAt=null;state.daily.attempts=0;}
     save();retryAfterLogin=true;tick();return status();
   }
-  function requestShopping(){state.shoppingRequested=true;save();tick();return status();}
+  function requestShopping({retryFailed=false}={}){
+    if(typeof retryFailed!=='boolean')throw Error('retryFailed must be an explicit boolean.');
+    if(retryFailed){
+      if(running||state.worker||config().enabled!==true||shoppingCoordinator?.status().attention||!state.lastError||state.lastWorkScope!=='handel')throw Error('Only an idle, enabled shopping runtime failure can be explicitly resumed; safety stops require review.');
+      // The operator repaired an operational failure. Rebuild assignments from
+      // current domain receipts; never replay an ambiguous proposal or reset a
+      // source budget, capability, external cart operation or safety stop.
+      state.retryAt=null;state.lastSignature=null;state.shoppingCohort=null;state.attempts=0;state.lastError=null;state.lastShoppingLane='serial';
+    }
+    state.shoppingRequested=true;save();tick();return status();
+  }
   return {tick,poll,renew,resumeAfterLogin,requestShopping,status};
 }

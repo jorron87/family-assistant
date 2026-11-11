@@ -1,6 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {researchScope,groupPlacementWork,placementProof,placementDelta} from '../src/sesum-research-scope.mjs';
+import {researchScope,createResearchScope,groupPlacementWork,placementProof,placementDelta} from '../src/sesum-research-scope.mjs';
+
+test('compiled routing preserves all results and a later read recompiles changed terms',()=>{
+ const families=[{familyId:'milk'},{familyId:'salt'},{familyId:'cheese'},{familyId:'beans'}],terms={milk:['melk','mjølk'],salt:['salt'],cheese:['ost','gulost',null,'ab'],beans:['kaffebønner']};
+ const original=(source,f,t)=>{
+  if(!t||f.some(x=>!Array.isArray(t[x.familyId])||!t[x.familyId].length))return {mode:'unrestricted',candidate:true};
+  const fold=s=>s.normalize('NFKD').replace(/\p{M}/gu,'').toLocaleLowerCase('nb').replace(/ø/g,'o').replace(/æ/g,'ae'),name=fold(source.name),words=new Set(name.match(/[\p{L}\d]+/gu)??[]),matches=f.filter(x=>t[x.familyId].some(v=>{if(typeof v!=='string'||v.trim().length<3)return false;const term=fold(v).trim();return term.length<=4?words.has(term):name.includes(term);})).map(x=>x.familyId);
+  return {mode:'targeted-discovery',candidate:matches.length>0,familyIds:matches,reason:matches.length?'category-term-candidate':'outside-configured-discovery-terms'};
+ };
+ const names=['Helmjølk','Melk og salt','Frokostkjeks usaltet','Gulost','Kaffebonner 500g','Opaque brand','SALT','Økologisk ost','mélk'];
+ for(const config of [terms,null,{}, {...terms,milk:[]}]){const compiled=createResearchScope(families,config);for(const name of names)assert.deepEqual(compiled({name}),original({name},families,config));}
+ const old=createResearchScope(families,terms);terms.beans=['espresso'];assert.equal(old({name:'Kaffebønner'}).candidate,true);assert.equal(createResearchScope(families,terms)({name:'Kaffebønner'}).candidate,false);
+});
 test('targeted discovery is brand independent, accent tolerant and fails open without complete family configuration',()=>{
  const f=[{familyId:'milk'},{familyId:'beans'}],terms={milk:['melk','mjølk'],beans:['kaffebønner']};
  assert.equal(researchScope({name:'New brand Kaffebonner 500g'},f,terms).candidate,true);

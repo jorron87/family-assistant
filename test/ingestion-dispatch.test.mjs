@@ -13,6 +13,13 @@ test('requesting the same failed cohort retains its backoff and cannot indefinit
  try{f.dispatcher.tick();f.launches[0].onExit(1);f.dispatcher.requestShopping();assert.equal(f.launches.length,1);f.store.reviewQueue=()=>({items:[{source:'spond',externalId:'new-source',listingHash:'new',reason:'Actual new source change'}]});f.dispatcher.tick();assert.equal(f.launches.length,2);assert.equal(f.dispatcher.status().workerScope,'kildeendringer');f.launches[1].onExit(0);}finally{f.close();}
 });
 
+test('explicit repaired-runtime resume rebuilds shopping work but cannot resume a safety stop',()=>{
+ const f=shoppingDispatchFixture([{do:'shopping-product-review',productKey:'kassal:ODA_NO:1',watchId:'family',fingerprint:'same'}]);
+ try{f.dispatcher.tick();f.launches[0].onExit(1);f.dispatcher.requestShopping({retryFailed:true});assert.equal(f.launches.length,2);f.launches[1].onExit(0);assert.throws(()=>f.dispatcher.requestShopping({retryFailed:true}),/Only an idle/);}finally{f.close();}
+ let stopped=false;const pool={status:()=>({running:false,attention:stopped?{reason:'Explicit stop'}:null}),preferSerial:()=>[]},g=shoppingDispatchFixture([{do:'shopping-product-review',productKey:'kassal:ODA_NO:1',watchId:'family',fingerprint:'same'}],{},undefined,false,pool);
+ try{g.dispatcher.tick();g.launches[0].onExit(1);stopped=true;assert.throws(()=>g.dispatcher.requestShopping({retryFailed:true}),/safety stops/);assert.equal(g.launches.length,1);}finally{g.close();}
+});
+
 test('parallel dispatcher owns one lease, recovers its coordinator and reports only actual scoped work',()=>{
  let active=false,last=null,launches=0,polls=0;const rows=Array.from({length:65},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+(1000+i),sourceFingerprint:'current-'+i}));
  const pool={status:()=>({running:active,runId:active?'coordinated-run':null,last}),preferSerial:()=>[],tick(){polls++;},start(input){launches++;active=true;assert.equal(input.batches.length,3);assert.equal(input.batches.flatMap(b=>b.jobs).length,60);return this.status();}};

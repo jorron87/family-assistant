@@ -1,11 +1,19 @@
 // Discovery routing only. Terms never approve identity, equivalence or prices.
 const fold=s=>s.normalize('NFKD').replace(/\p{M}/gu,'').toLocaleLowerCase('nb').replace(/ø/g,'o').replace(/æ/g,'ae');
 export function researchScope(source,families,terms){
- if(!terms||families.some(f=>!Array.isArray(terms[f.familyId])||!terms[f.familyId].length))return {mode:'unrestricted',candidate:true};
+ return createResearchScope(families,terms)(source);
+}
+// Compile the same family terms once per synchronous read, not once for every
+// term of every catalogue row. Do not retain a plan across changed requests.
+export function createResearchScope(families,terms){
+ if(!terms||families.some(f=>!Array.isArray(terms[f.familyId])||!terms[f.familyId].length))return ()=>({mode:'unrestricted',candidate:true});
+ const prepared=families.map(f=>({familyId:f.familyId,terms:terms[f.familyId].filter(t=>typeof t==='string'&&t.trim().length>=3).map(t=>fold(t).trim())}));
+ return source=>{
  const name=fold(source.name);
  const words=new Set(name.match(/[\p{L}\d]+/gu)??[]);
- const matches=families.filter(f=>terms[f.familyId].some(t=>{if(typeof t!=='string'||t.trim().length<3)return false;const term=fold(t).trim();return term.length<=4?words.has(term):name.includes(term);})).map(f=>f.familyId);
+ const matches=prepared.filter(f=>f.terms.some(term=>term.length<=4?words.has(term):name.includes(term))).map(f=>f.familyId);
  return {mode:'targeted-discovery',candidate:matches.length>0,familyIds:matches,reason:matches.length?'category-term-candidate':'outside-configured-discovery-terms'};
+ };
 }
 export function groupPlacementWork(rows,identity){
  const groups=new Map();

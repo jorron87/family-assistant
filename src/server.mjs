@@ -29,6 +29,8 @@ import {createShoppingMaintenance} from './shopping-maintenance.mjs';
 import {createKassal} from './kassal.mjs';
 import {createSesumCollector,sesumSenderAllowed} from './shopping-sesum.mjs';
 import {createShoppingCoordinator} from './shopping-coordinator.mjs';
+import {createShoppingWorkerScheduler} from './shopping-worker-scheduler.mjs';
+const shoppingWorkerRequests=createShoppingWorkerScheduler();
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 let libraryPrices;
@@ -128,7 +130,13 @@ async function handle(req, res) {
     if(path==='/shopping-setup'&&method==='GET')return send(res,200,readFileSync(join(root,'public','shopping-setup.html')),'text/html; charset=utf-8');
     if(path==='/api/shopping/agent-worker'&&method==='POST'){
       if(!String(req.headers['content-type']??'').startsWith('application/json'))return send(res,403,{error:'Worker requires JSON.'});
-      const input=await json(req);try{return send(res,200,await shoppingCoordinator.handle(input.workerId,req.headers['x-family-worker'],input.call,input.input));}catch(error){return send(res,/capability.*revoked/.test(error.message)?403:409,{error:error.message});}
+      const input=await json(req);try{
+        // Authenticate immediately and again at execution, so a queued request
+        // cannot survive a revoked capability or run after its client leaves.
+        const pulse=await shoppingCoordinator.handle(input.workerId,req.headers['x-family-worker'],'heartbeat',{});
+        const result=input.call==='heartbeat'?pulse:await shoppingWorkerRequests.run({isConnected:()=>!req.aborted&&!res.destroyed,execute:()=>shoppingCoordinator.handle(input.workerId,req.headers['x-family-worker'],input.call,input.input)});
+        return send(res,200,result);
+      }catch(error){return send(res,/capability.*revoked/.test(error.message)?403:409,{error:error.message});}
     }
     if(path==='/api/shopping/agent-context'&&method==='POST'){
       if(req.headers['x-family-request']!=='1')return send(res,403,{error:'Ugyldig avsender.'});
@@ -296,7 +304,8 @@ async function handle(req, res) {
     if(path==='/api/ingestion/dispatcher'&&method==='GET')return send(res,200,{...ingestionDispatcher.status(),shoppingCoordinator:shoppingCoordinator.status(),automaticShopping:shoppingMaintenance.status()});
     if(path==='/api/ingestion/dispatcher/shopping'&&method==='POST'){
       if(req.headers['x-family-request']!=='1'||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host))return send(res,403,{error:'Ugyldig avsender.'});
-      return send(res,200,ingestionDispatcher.requestShopping());
+      const bytes=await body(req,1024),input=bytes.length?JSON.parse(bytes.toString('utf8')):{};
+      return send(res,200,ingestionDispatcher.requestShopping(input));
     }
     if(path==='/api/ingestion/dispatcher/resume-after-login'&&method==='POST'){
       if(req.headers['x-family-request']!=='1'||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host))return send(res,403,{error:'Ugyldig avsender.'});

@@ -19,7 +19,8 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
  const read=file=>JSON.parse(decrypt(readFileSync(file),key).toString('utf8'));
  const write=(file,value)=>{writeFileSync(file+'.tmp',encrypt(Buffer.from(JSON.stringify(value),'utf8'),key));renameSync(file+'.tmp',file);};
  let state=existsSync(file)?read(file):{version:1,deferred:[]},frames=new Map();
- state.deferred??=[];const save=()=>write(file,state),ownsLease=()=>state.active&&store.snapshot().runLease?.token===state.active.leaseToken;
+ state.deferred??=[];const currentLease=()=>typeof store.runLease==='function'?store.runLease():store.snapshot().runLease;
+ const save=()=>write(file,state),ownsLease=()=>state.active&&currentLease()?.token===state.active.leaseToken;
  // Only the original supervisor owns its child handle, including on recovery.
  if(state.active)for(const slot of state.active.slots)if(!terminal(slot))slot.lastHeartbeat=clock();
  const frameFile=id=>join(framesDir,id+'.enc');
@@ -131,7 +132,7 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
  }
  function start({token,batches}){
   if(state.active||state.safetyStop)throw Error('Coordinator is already active or requires attention.');
-  if(store.snapshot().runLease?.token!==token)throw Error('Coordinator requires its caller’s current lease.');
+  if(currentLease()?.token!==token)throw Error('Coordinator requires its caller’s current lease.');
   if(!Array.isArray(batches)||!batches.length||batches.length>3)throw Error('Use one to three disjoint worker batches.');
   const seen=new Set(),manifests=batches.map(workerManifest);for(const m of manifests)for(const j of m.jobs)for(const identity of [...j.sourceKeys,...(j.productKey?[j.productKey]:[])]){if(seen.has(identity))throw Error('Overlapping worker identities are forbidden.');seen.add(identity);}
   const packets=store.shopping.agentContexts?store.shopping.agentContexts(manifests):manifests.map(m=>store.shopping.agentContext(m));

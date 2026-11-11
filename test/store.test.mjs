@@ -14,6 +14,11 @@ function fixture(fn) {
   }
 }
 
+test('the lightweight current lease read is detached and follows renewal and release',()=>fixture(dir=>{
+ const store=createStore(dir),lease=store.beginRun().lease,read=store.runLease();assert.equal(read.token,lease.token);
+ read.token='foreign-edit';assert.equal(store.runLease().token,lease.token);store.renewRun(lease.token);assert.equal(store.runLease().token,lease.token);store.endRun(lease.token);assert.equal(store.runLease(),null);
+}));
+
 test('continued records only a shopping checkpoint with server counts and preserves all completion blockers',()=>fixture(dir=>{
   const store=createStore(dir),work=[{do:'shopping-market-refresh',watchIds:Array.from({length:24},(_,i)=>'family-'+i)},{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1'}];
   const blocked={sourceKey:'sesum-product:2',status:'blocked',retryAt:new Date(Date.now()+3600000).toISOString(),reason:'A readable ingredient label is unavailable.'};
