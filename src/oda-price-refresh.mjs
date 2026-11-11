@@ -32,13 +32,17 @@ export function odaPriceRefreshPlan({entries,watches,prices,attempts={},at,force
     list.due||=due;
     // A short, existing catalogue query is usually better than a display label.
     const query=entry.query?.split('|')[0]?.trim();
-    if(query&&query.length<=200&&!/manually reviewed|initial catalogue/i.test(query))list.query=query;
+    // Older exact-ID maintenance overwrote this field with an operation label.
+    // That label is not a product query; use the real household family name.
+    if(query&&query.length<=200&&!/manually reviewed|initial catalogue|^automatic reviewed market refresh$/i.test(query.replace(/\s+/gu,' ')))list.query=query;
     list.products.push(row);grouped.set(watch.id,list);
   }
   return [...grouped.values()].filter(group=>group.due).map(({due,...group})=>{
     group.products.sort((a,b)=>a.odaProductId-b.odaProductId||a.id.localeCompare(b.id));
     const watch=watches.find(w=>w.id===group.watchId);
-    group.fingerprint=hash([watch.name,watch.unit,watch.note??null,watch.family?.kind??null,(watch.variants??[]).map(v=>[v.groupId,v.groupFingerprint,v.requires,v.brands,v.excludeProductKeys]),group.products.map(p=>[p.id,p.odaProductId,p.fingerprint,p.packAmount,p.unit])]);
+    // A failed search applies only to that actual query and reviewed basis.
+    // A repaired query gets one normal attempt; identical failures still wait.
+    group.fingerprint=hash([1,group.query,watch.name,watch.unit,watch.note??null,watch.family?.kind??null,(watch.variants??[]).map(v=>[v.groupId,v.groupFingerprint,v.requires,v.brands,v.excludeProductKeys]),group.products.map(p=>[p.id,p.odaProductId,p.fingerprint,p.packAmount,p.unit])]);
     const prior=attempts[group.watchId];
     return {...group,retryAt:prior?.fingerprint===group.fingerprint?prior.retryAt??null:null};
   }).filter(group=>force||ignoreRetry||!group.retryAt||Date.parse(group.retryAt)<=at);

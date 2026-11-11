@@ -15,7 +15,9 @@ export async function refreshReviewedMarket({shopping,kassal,watchId}) {
     if(!p||String(p.id)!==expected.id||p.store?.code!==expected.store)throw Error('Market source identity changed.');
     const current=typeof p.current_price==='object'?p.current_price?.price:p.current_price;
     const receiptAt=(typeof p.current_price==='object'?p.current_price?.date:null)??p.price_history?.[0]?.date;
-    shopping.catalogObserve({watchId,query:'Automatic reviewed market refresh',products:[{id:p.id,store:p.store.code,name:p.name,ean:p.ean??null,brand:p.brand??null,ingredients:p.ingredients??null,description:p.description??null,weight:p.weight??null,weightUnit:p.weight_unit??null,sourceUrl:p.url??null,categories:p.category??[],image:p.image,...(Number(current)>0&&receiptAt?{currentPrice:Number(current),lastChecked:receiptAt}:{})}]});
+    // This is an exact-ID read, not a product search. Preserve the actual
+    // discovery query rather than replacing it with an operation label.
+    shopping.catalogObserve({watchId,products:[{id:p.id,store:p.store.code,name:p.name,ean:p.ean??null,brand:p.brand??null,ingredients:p.ingredients??null,description:p.description??null,weight:p.weight??null,weightUnit:p.weight_unit??null,sourceUrl:p.url??null,categories:p.category??[],image:p.image,...(Number(current)>0&&receiptAt?{currentPrice:Number(current),lastChecked:receiptAt}:{})}]});
     const checked=shopping.catalogEntries(watchId).find(e=>e.id===expected.id&&e.store===expected.store);
     if(checked?.status!=='approved'||checked.fingerprint!==expected.fingerprint)return {watchId,deferred:true,reason:'source-metadata-changed'};
     products.push({id:checked.id,ean:checked.ean,name:checked.name,store:checked.store,unit:checked.unit,packAmount:checked.packAmount,reviewed:true,equivalenceEvidence:checked.equivalenceEvidence,currentPrice:Number(current)>0?Number(current):null,lastChecked:receiptAt??null,history:Array.isArray(p.price_history)?p.price_history:[]});

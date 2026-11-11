@@ -8,6 +8,7 @@ import {createOda} from '../src/oda.mjs';
 import {checkedOdaPrice,odaPriceRefreshPlan,createOdaPriceOverlay} from '../src/oda-price-refresh.mjs';
 import {createIndexReader} from '../src/shopping-library.mjs';
 import {productTextHash} from '../src/product-library.mjs';
+import {refreshReviewedMarket} from '../src/shopping-market-refresh.mjs';
 
 const NOW='2026-11-10T12:00:00Z',OLD='2026-11-07T12:00:00Z';
 const product=(id=701)=>({id,name:'Synthetic plain oil',description:'1 l',price:'29.00',unitPrice:'29.00',unitName:'liter',url:`https://oda.com/no/products/${id}-synthetic/`,availability:{isAvailable:true,code:'available'}});
@@ -58,6 +59,24 @@ test('refresh selection retains parking and explicit metadata approvals',()=>{
  for(const patch of [{status:'excluded'},{status:'pending'},{store:'KIWI'},{lastChecked:'2025-01-01T00:00:00Z'},{sourceUrl:'https://prices.example.test/products/701-oil/'}])assert.equal(odaPriceRefreshPlan({...args,entries:[{...entry,...patch}]}).length,0);
  assert.equal(odaPriceRefreshPlan({...args,watches:[{...args.watches[0],enabled:false}]}).length,0);
 });
+
+test('legacy operation labels are not Oda searches and actual query changes invalidate only their old retry',()=>{
+ const {shop,state}=fixture(),entry=shop.catalogEntries()[0];
+ for(const query of ['Automatic reviewed market refresh','  automatic   reviewed market refresh  ','Manually reviewed exact pack','Initial catalogue research']){
+  shop.catalogObserve({watchId:entry.watchId,query,products:[{id:entry.id,store:entry.store,name:entry.name}]});assert.equal(shop.odaRefreshPlan()[0].query,'Plain oil');
+ }
+ const original=shop.odaRefreshPlan()[0];shop.odaRefreshReceive({plan:original,receipts:[],observedAt:NOW,searchComplete:true});assert.equal(shop.odaRefreshPlan().length,0);
+ const before=structuredClone(shop.catalogEntries()[0]);shop.catalogObserve({watchId:entry.watchId,query:'refined plain oil|another configured query',products:[{id:entry.id,store:entry.store,name:entry.name}]});
+ const repaired=shop.odaRefreshPlan()[0];assert.equal(repaired.query,'refined plain oil');assert.notEqual(repaired.fingerprint,original.fingerprint);assert.equal(repaired.retryAt,null);assert.equal(shop.catalogEntries()[0].fingerprint,before.fingerprint);assert.deepEqual(shop.catalogEntries()[0].review,before.review);
+ shop.odaRefreshReceive({plan:repaired,receipts:[],observedAt:NOW,searchComplete:true});assert.equal(shop.odaRefreshPlan().length,0,'an identical failed corrected search retains normal bounded retry');assert.equal(shop.completion().blockedOda.length,1);assert.equal(Object.keys(state.shopping.odaPriceReceipts).length,0);
+});
+
+test('routine exact-ID maintenance preserves a real discovery query through the shopping catalogue',async()=>{
+ const {shop}=fixture(),entry=shop.catalogEntries()[0];
+ const kassal={product:async()=>({data:{id:Number(entry.id),store:{code:entry.store},name:entry.name,ean:entry.ean,brand:entry.brand,ingredients:entry.ingredients,description:entry.description,weight:entry.weight,weight_unit:entry.weightUnit,url:entry.sourceUrl,category:entry.categories,current_price:{price:30,date:OLD},price_history:[{price:30,date:OLD}]}})};
+ await refreshReviewedMarket({shopping:shop,kassal,watchId:entry.watchId});
+ const after=shop.catalogEntries()[0];assert.equal(after.query,'plain oil');assert.equal(after.fingerprint,entry.fingerprint);assert.deepEqual(after.review,entry.review);assert.equal(shop.odaRefreshPlan()[0].query,'plain oil');
+});
 test('MCP prices require exact identity, reviewed package arithmetic, matching units and explicit availability',()=>{
  const expected={odaProductId:701,packAmount:1,unit:'l',sourceUrl:'https://oda.com/no/products/701-oil/'};
  assert.equal(checkedOdaPrice(expected,product()).ok,true);
@@ -71,6 +90,15 @@ test('Oda MCP refresh paginates actual searches, targets known IDs only and neve
  }};
  const oda=createOda({dataDir:dir,shopping:shop,redirectUrl:'http://127.0.0.1:1/callback',now:()=>new Date(NOW),makeClient:()=>client,makeTransport:()=>({})});
  await oda.authorize();try{const result=await oda.refreshPrices();assert.equal(result.families,1);assert.equal(result.results[0].refreshed,1);assert.deepEqual(calls.map(c=>c.args.page),[1,2]);assert.equal(shop.familyView().odaDraft.items[0].productId,701);}finally{await oda.close();}
+});
+
+test('a legacy maintenance query and retry recover through real refresh planning and the read-only MCP path',async t=>{
+ const dir=mkdtempSync(join(tmpdir(),'oda-query-recovery-'));t.after(()=>{assert.ok(resolve(dir).startsWith(resolve(tmpdir(),'oda-query-recovery-')));rmSync(dir,{recursive:true,force:true});});
+ const {shop,state}=fixture(),entry=shop.catalogEntries()[0];shop.catalogObserve({watchId:entry.watchId,query:'Automatic reviewed market refresh',products:[{id:entry.id,store:entry.store,name:entry.name}]});
+ state.shopping.odaRefreshAttempts[entry.watchId]={fingerprint:'legacy-query-unbound-attempt',retryAt:'2026-11-10T18:00:00Z',results:[{id:entry.id,odaProductId:701,ok:false,reason:'missing-exact-product'}]};
+ const calls=[],client={connect:async()=>{},close:async()=>{},callTool:async({name,arguments:args})=>{calls.push({name,args});assert.equal(name,'product_search');assert.deepEqual(args.queries,['Plain oil']);return {structuredContent:{result:[{query:'Plain oil',hasMore:false,products:[product()]}]}};}};
+ const oda=createOda({dataDir:dir,shopping:shop,redirectUrl:'http://127.0.0.1:1/callback',now:()=>new Date(NOW),makeClient:()=>client,makeTransport:()=>({})});
+ await oda.authorize();try{const result=await oda.refreshPrices();assert.equal(result.results[0].refreshed,1);assert.equal(calls.length,1);assert.equal(shop.familyView().odaDraft.items[0].productId,701);assert.equal(shop.familyView().odaDraft.items[0].unitPrice,29);assert.equal(shop.completion().blockedOda.length,0);assert.equal(shop.catalogEntries()[0].query,'Automatic reviewed market refresh','the old source metadata remains intact; it is simply not misused as a product query');}finally{await oda.close();}
 });
 test('an Oda MCP read failure records a bounded retry and cannot create a fresh price',async t=>{
  const dir=mkdtempSync(join(tmpdir(),'oda-price-failure-'));t.after(()=>{assert.ok(resolve(dir).startsWith(resolve(tmpdir(),'oda-price-failure-')));rmSync(dir,{recursive:true,force:true});});
