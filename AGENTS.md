@@ -10,6 +10,8 @@ Keep agents, collectors and external publishing disabled until configured and ma
 
 ## Normal runs
 
+Shopping source-family jobs expose their current `familyDecisionKind`. An own or undecided family needs the ordinary explicit family review; scoped workers cannot replace that decision. The planner routes the whole product to ordinary work without removing it from queue/completion. If registration reveals this downstream dependency during a scoped assignment, preserve a concrete checkpoint, leave that product unresolved and continue independent assigned products. `shopping_context.serialRequiredJobs` identifies these handoffs; it is never a completion receipt.
+
 Read config/sources.json, `node src/cli.mjs profile` and applicable docs/runbook.md sections. Follow the current command contracts there. Use `begin-run`, then `next`; if a dispatcher supplied a lease, reuse it. Never take over or release another agent's lease. Renew your own lease every 30 minutes and release it in finally. Do not start with the large `status` dump. Phone submissions and family calendar actions have priority.
 
 Use collected/resources/resource before browser work. Reuse stable native source IDs and reviewed document receipts. An unchanged native file ID does not need another download or checksum. Read all pages of genuinely new/changed documents, visually when needed, and record document-review only after complete reading. Text extraction alone is not a reading receipt. HTML login/error responses are not PDF/DOCX originals even when the filename suggests otherwise.

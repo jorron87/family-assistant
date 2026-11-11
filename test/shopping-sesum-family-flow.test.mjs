@@ -7,7 +7,7 @@ import {shoppingStore} from '../src/shopping.mjs';
 import {libraryPriceProvider} from '../src/shopping-library.mjs';
 import {productMetadataFingerprint,groupMetadataFingerprint} from '../src/product-library.mjs';
 import {sesumDonorFingerprint} from '../src/sesum-prices.mjs';
-import {workerManifest,applyWorkerProposal} from '../src/shopping-worker-contract.mjs';
+import {workerManifest,applyWorkerProposal,workerEligible,planShoppingWorkers,workerTaskSignature} from '../src/shopping-worker-contract.mjs';
 import {shoppingAgentBatch} from '../src/shopping-agent-jobs.mjs';
 
 const NOW='2026-11-10T12:00:00Z',SOURCE='sesum:KIWI:72';
@@ -83,6 +83,17 @@ test('own narrow, brand and required-attribute decisions cannot be replaced by s
   f.link([f.B],{brands:['Baseline']});assert.equal(f.work().length,0);assert.ok(f.shop.queue().some(row=>row.sourceKey===SOURCE&&row.do==='shopping-sesum-placement-review'),'a changed brand requirement must first be researched across the current family set');assert.throws(()=>f.place(),/merke/);
   f.link([f.B],{requires:['glutenFree']});assert.equal(f.work().length,0);assert.throws(()=>f.place(),/egenskapskrav/,'an unknown required attribute is not true');
   f.link([f.B],{requires:['organic'],brands:['New']});assert.equal(f.work().length,0,'actual reviewed matching attributes and brand can support the explicit decision');
+});
+
+test('whole product work needing an ordinary family decision stays visible and out of scoped parallel assignments',t=>{
+ const f=setup(t,{linked:false});f.ingest();f.register();f.place();
+ const currentJob=()=>shoppingAgentBatch(f.shop.queue()).jobs.find(j=>j.sourceKeys.includes(SOURCE));
+ let job=currentJob();assert.equal(job.items.find(i=>i.do==='shopping-sesum-family-review').familyDecisionKind,'undecided');assert.equal(workerEligible(job),false);
+ f.link([]);f.place();job=currentJob();assert.equal(job.items.find(i=>i.do==='shopping-sesum-family-review').familyDecisionKind,'own');assert.equal(workerEligible(job),false);
+ const before=structuredClone(f.shop.queue()),other=[9001,9002].map(id=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+id})),queue=[...job.items,...other];
+ assert.equal(planShoppingWorkers(queue,3),null,'ordinary family work keeps its normal priority');
+ const independent=planShoppingWorkers(queue,3,{independent:true});assert.equal(independent.batch.jobs.length,2);assert.ok(independent.batch.jobs.every(j=>!j.sourceKeys.includes(SOURCE)));assert.deepEqual(f.shop.queue(),before,'routing never removes or completes the source job');
+ const signature=workerTaskSignature(job.items,new Set(job.sourceKeys));f.link([f.A]);f.place();job=currentJob();assert.equal(job.items.find(i=>i.do==='shopping-sesum-family-review').familyDecisionKind,'library');assert.equal(workerEligible(job),true,'an explicit broad family decision makes additive work eligible again');assert.notEqual(workerTaskSignature(job.items,new Set(job.sourceKeys)),signature);assert.equal(f.work().length,1,'the unapproved new group is still real work');
 });
 
 test('only a matching fixed same-chain native identity and current exact catalogue approval can settle the family',t=>{

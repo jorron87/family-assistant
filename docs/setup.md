@@ -11,6 +11,8 @@
 
 ## Handel (valgfritt)
 
+Egne eller ennå uavklarte familiebeslutninger går til vanlig familiegjennomgang. De parallelle varearbeiderne kan utvide en allerede valgt bred familie innen gjeldende krav, men kan ikke erstatte et slikt familievalg. Arbeidet beholdes i kø og fullføring; denne rutingen krever ingen ny innstilling.
+
 Når handel, Oda-tilkobling og `collector.dispatch` er aktivert, oppfrisker tjenesten kjente gjennomgåtte Oda-priser med kode uten agentstart. Se runbookens «Varejobber og automatisk rutinearbeid» for avgrensning, pauser og status. Automatisk prislesing gir ingen kurv- eller variantgodkjenning.
 
 Sesum kan supplere kjedeprisene gjennom den eksisterende Chrome-utvidelsen. `config/shopping-sesum.example.json` er avslått som standard; opprett en privat `config/shopping-sesum.json`, velg kjeder som faktisk brukes, og prøv innhentingen med syntetiske familier i separat datamappe før aktivering. Last inn den oppdaterte utvidelsen og bruk én ledig Sesum-fane. Samleren leser bare offentlige søke- og varesider på `https://www.sesum.no`; den kopierer ingen cookies og oppretter ingen Sesum-konto. Tilgangsfeil og rategrenser gir pause, ikke omgåelse.
