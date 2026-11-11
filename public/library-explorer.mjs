@@ -808,14 +808,14 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     entry.tab??='approved';entry.byQuality??=false;entry.mode??='grid';entry.order??='best';
     const groups={approved:found.members.filter(m=>m.status==='approved'&&m.reviewCurrent),unknown:found.members.filter(m=>m.status==='unknown'||m.status==='approved'&&!m.reviewCurrent),excluded:found.members.filter(m=>m.status==='excluded')};
     const campaigns=found.offers??[];
-    const live=[...groups.approved.filter(m=>m.fresh&&m.unitPrice!==null).map(m=>m.unitPrice),...campaigns.map(c=>c.unitPrice)],brands=new Set(groups.approved.map(m=>m.brand?.toLocaleLowerCase('nb-NO')).filter(Boolean)),chains=new Set([...groups.approved.map(m=>m.store),...campaigns.map(c=>c.storeName)]);
+    const live=family.sourceCategory&&family.parentId===null?[]:[...groups.approved.filter(m=>m.fresh&&m.unitPrice!==null).map(m=>m.unitPrice),...campaigns.map(c=>c.unitPrice)],brands=new Set(groups.approved.map(m=>m.brand?.toLocaleLowerCase('nb-NO')).filter(Boolean)),chains=new Set([...groups.approved.map(m=>m.store),...campaigns.map(c=>c.storeName)]);
     const strip=el('div',undefined,'lx-family-stats');
     const lowest=live.length?Math.min(...live):null,highest=live.length?Math.max(...live):null;
     for(const [value,label] of [[String(brands.size),brands.size===1?'merke':'merker'],[String(chains.size),chains.size===1?'butikk':'butikker'],lowest!==null?[`${short(lowest)} kr`,`billigst per ${found.unit}`]:null,lowest!==null&&highest>lowest?[times(highest/lowest),'fra billigst til dyrest']:null].filter(Boolean)){
       const stat=el('div',undefined,'lx-stat');stat.append(el('strong',value),el('span',label));strip.append(stat);
     }
     body.append(strip);
-    if(family.followed)body.append(householdPanel(family.followed));
+    if(family.followed&&!family.sourceCategory)body.append(householdPanel(family.followed));
     if(family.variants?.length)body.append(el('p','Varianter i familien: '+family.variants.join(' · '),'lx-note'));
     if(campaigns.length){
       const offers=el('section',undefined,'lx-block lx-offers');
@@ -832,7 +832,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
       body.append(offers);
     }
     const tabs=el('div',undefined,'lx-tabs');
-    for(const [key,label] of [['approved','Godkjent'],['unknown','Uavklart'],['excluded','Holdt utenfor']]){
+    for(const [key,label] of [['approved',family.sourceCategory?'Varer':'Godkjent'],['unknown','Uavklart'],['excluded','Holdt utenfor']]){
       if(!groups[key].length)continue;
       tabs.append(button(`${label} (${groups[key].length})`,()=>{entry.tab=key;draw();},''));
     }
@@ -917,7 +917,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
       tbody.append(tr);
     }
     table.append(tbody);scroll.append(table);
-    const legend=el('p',`Kroner per ${found.unit}. Grønt er billigst i familien, og fet skrift er billigst for den varen. Innrammet er tilbud fra kundeavis. Gult er en eldre pris som aldri regnes som billigst. Trykk på en kolonne for å sortere.`,'lx-note');
+    const legend=el('p',`${found.unit?'Kroner per '+found.unit+'.':'Kontroller enheten på hver vare.'} Grønt er billigst i ${model.familySource==='sesum'?'kategorien':'familien'}, og fet skrift er billigst for den varen. Innrammet er tilbud fra kundeavis. Gult er en eldre pris som aldri regnes som billigst. Trykk på en kolonne for å sortere.`,'lx-note');
     box.append(scroll,legend);
     return box;
   }
