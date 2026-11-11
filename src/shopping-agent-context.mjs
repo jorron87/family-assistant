@@ -136,11 +136,20 @@ export function bindPlacementDecisions(packet,decisions){
   if(!p||!packet.jobs.some(j=>j.items.some(i=>i.do==='shopping-sesum-placement-review'&&(i.sourceKey===source.sourceKey||i.relatedSources?.some(r=>r.sourceKey===source.sourceKey)))))throw Error('Source has no assigned current placement stage.');
   if(!Array.isArray(d.targets))throw Error('Placement decisions[].targets must be an explicit array for source '+source.sourceKey+'. Use targets:[] for a genuinely blocked or no-active-family decision, or explicit reviewed family targets for reviewed. A top-level targets field does not supply a decision field. No decision was saved.');
   const targets=d.targets.map(t=>{const f=Number.isInteger(t.familyIndex)?packet.families[t.familyIndex]:null;if(!f)throw Error('Invalid family index.');return {familyId:f.familyId,familyFingerprint:f.familyFingerprint,equivalenceEvidence:t.equivalenceEvidence};});
+  const delta=p.reviewDelta,pending=new Set(delta?.familiesToReview??[]);
+  // Workers describe their actual positive assessment. Project redundant
+  // unchanged positives into the domain's incremental contract in code; the
+  // domain retains the original current proof, not replacement agent prose.
+  const incrementalTargets=d.status==='reviewed'?targets.filter(t=>{
+   if(pending.has(t.familyId))return true;
+   if((delta?.retainedTargets??[]).some(old=>old.familyId===t.familyId&&old.familyFingerprint===t.familyFingerprint))return false;
+   throw Error('Placement target '+t.familyId+' is outside reviewDelta.familiesToReview and is not a retained current positive. Preserve unchanged negative decisions; an explicit reopen or family audit is required. No decision was saved.');
+  }):targets;
   // An explicit negative assessment already supplied as evidence can fill the
   // redundant display reason. Copy it exactly; never repair an explicit null,
   // invalid reason, unknown product fact or another placement status.
   const reason=d.reason===undefined&&d.status==='no-active-family'?d.evidence:d.reason;
-  const input={kind:'placement',sourceKey:source.sourceKey,sourceFingerprint:p.sourceFingerprint,registrationFingerprint:p.registrationFingerprint,familySetFingerprint:p.familySetFingerprint,status:d.status,evidence:d.evidence,scopeEvidence:d.scopeEvidence,reviewedAllFamilies:d.reviewedAllFamilies,noActiveFamilyVerified:d.noActiveFamilyVerified,reason,retryAt:d.retryAt,targets};
+  const input={kind:'placement',sourceKey:source.sourceKey,sourceFingerprint:p.sourceFingerprint,registrationFingerprint:p.registrationFingerprint,familySetFingerprint:p.familySetFingerprint,status:d.status,evidence:d.evidence,scopeEvidence:d.scopeEvidence,reviewedAllFamilies:d.reviewedAllFamilies,noActiveFamilyVerified:d.noActiveFamilyVerified,reason,retryAt:d.retryAt,targets:incrementalTargets};
   if(['reviewed','no-active-family'].includes(d.status))input.reviewedFamilyIds=p.reviewDelta.familiesToReview;
   return input;
  });

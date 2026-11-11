@@ -5,6 +5,13 @@ import {agentManifest,buildAgentContext,agentContextPages,bindPlacementDecisions
 import {shoppingProtocol} from '../src/shopping-agent-protocol.mjs';
 const facts={families:()=>[{familyId:'beans',familyFingerprint:'criteria'}],sources:key=>({sourceKey:key,ingredients:'Coffee beans'}),products:key=>({key})};
 
+test('incremental binding preserves current retained positives and cannot reverse unchanged negatives',()=>{
+ const source='sesum-product:1',queue=[{do:'shopping-sesum-placement-review',sourceKey:source}],retained={familyId:'beans',familyFingerprint:'criteria',equivalenceEvidence:'Original actually reviewed source-family proof.'},packet=buildAgentContext(queue,agentManifest(shoppingAgentBatch(queue)),{...facts,families:()=>[...facts.families(),{familyId:'new-family',familyFingerprint:'new-criteria'},{familyId:'held-negative',familyFingerprint:'held'}],sources:key=>({sourceKey:key,placement:{sourceFingerprint:'source',registrationFingerprint:null,familySetFingerprint:'set',reviewDelta:{familiesToReview:['new-family'],retainedTargets:[retained]}}})});
+ const input={sourceIndex:0,status:'reviewed',reviewedAllFamilies:true,evidence:'The complete actual source and current family criteria were reviewed.',scopeEvidence:'Actual unchanged and new family requirements were checked.',targets:[{familyIndex:0,equivalenceEvidence:'Redundant restatement of an already reviewed positive.'},{familyIndex:1,equivalenceEvidence:'Actual source facts match the genuinely new family.'}]},before=structuredClone(packet);
+ const bound=bindPlacementDecisions(packet,[input])[0];assert.deepEqual(bound.reviewedFamilyIds,['new-family']);assert.deepEqual(bound.targets.map(t=>t.familyId),['new-family']);assert.deepEqual(packet,before);assert.equal(packet.sources[0].placement.reviewDelta.retainedTargets[0].equivalenceEvidence,retained.equivalenceEvidence);
+ assert.throws(()=>bindPlacementDecisions(packet,[{...input,targets:[{familyIndex:2,equivalenceEvidence:'New unsupported reversal of an unchanged negative.'}]}]),/explicit reopen|family audit/);
+});
+
 test('family prompt contains every complete criterion and shortcut requires identical current data',()=>{
  const families=Array.from({length:91},(_,i)=>({familyId:'family-'+i,familyFingerprint:'fp-'+i,note:'ø'.repeat(3000),variants:[{requires:['actual label '+i]}]}));
  const basis=agentFamilyBasis(families),document=JSON.parse(basis.prompt.split('\n')[1]);
