@@ -160,12 +160,13 @@ export function createIngestionDispatcher({store,resources,root,dataDir,shopping
     const dailyPending=cfg.dailyFullFallback===true && (local.hour>7 || local.hour===7&&local.minute>=15) && !fullRunRecorded(store,local.day);
     const dailyReady=state.daily.attempts<3&&(!state.daily.retryAt||state.daily.retryAt<=clock());
     const finalizeFull=!!(dailyPending&&dailyReady&&resumeSourcePhase&&report.complete);
-    const fullDue=finalizeFull||dailyPending&&dailyReady&&!resumeSourcePhase;
+    const requestedShopping=state.shoppingRequested===true;
+    const fullDue=!requestedShopping&&(finalizeFull||dailyPending&&dailyReady&&!resumeSourcePhase);
     const sourceWork=fullDue||resumeSourcePhase?null:changeSignal(store,resources,{sourceOnly:true}),sourceBudget=state.sourceBudget;
     const sourceWait=sourceWork?.signature?resourceWait(sourceWork):null;if(sourceWait&&(!sourceBudget.retryAt||sourceBudget.retryAt<sourceWait)){sourceBudget.retryAt=sourceWait;save();}
-    const sourceDue=sourceWork?.signature&&!knownBlockedOriginalsOnly(sourceWork)&&!sourceWait&&(retryAfterLogin||sourceWork.signature!==sourceBudget.lastSignature||sourceBudget.retryAt&&sourceBudget.retryAt<=clock()&&sourceBudget.attempts<3);
+    const sourceDue=!requestedShopping&&sourceWork?.signature&&!knownBlockedOriginalsOnly(sourceWork)&&!sourceWait&&(retryAfterLogin||sourceWork.signature!==sourceBudget.lastSignature||sourceBudget.retryAt&&sourceBudget.retryAt<=clock()&&sourceBudget.attempts<3);
     const work=fullDue?null:sourceDue?sourceWork:changeSignal(store,resources,{shoppingOnly:true});
-    if(!fullDue&&!work.signature)return;
+    if(!fullDue&&!work.signature){if(requestedShopping){state.shoppingRequested=false;save();}return;}
     if(!fullDue&&!work.shoppingOnly){
       // A repeatedly rejected unchanged original is checked by the daily full
       // run or after new data/access. Do not start Luna just to rediscover it.
@@ -177,12 +178,17 @@ export function createIngestionDispatcher({store,resources,root,dataDir,shopping
     let shoppingQueue=shoppingOnly?agentQueue():null;
     if(shoppingOnly&&!shoppingQueue.length)return;
     const serial=shoppingOnly?shoppingCoordinator?.preferSerial(shoppingQueue)??[]:[];
-    if(serial.length){const selected=new Set(serial);shoppingQueue=[...serial,...shoppingQueue.filter(i=>!selected.has(i))];}
+    // An unchanged deferred product still needs serial follow-up, but must not
+    // monopolize the worker pool. Alternate an independent wave and that serial
+    // follow-up; neither lane removes anything from the actual domain queue.
+    const excludedKeys=new Set(serial.flatMap(i=>[i.sourceKey,i.productKey,...(i.relatedSources??[]).map(r=>r.sourceKey)].filter(Boolean)));
+    const independentPlan=shoppingOnly&&shoppingCoordinator&&serial.length&&cfg.shoppingWorkers>1&&state.lastShoppingLane!=='independent'?planShoppingWorkers(shoppingQueue,cfg.shoppingWorkers,{independent:true,excludedKeys}):null;
+    if(serial.length&&!independentPlan){const selected=new Set(serial);shoppingQueue=[...serial,...shoppingQueue.filter(i=>!selected.has(i))];}
     const currentShopping=shoppingOnly?new Set(shoppingCohortSignal(store,shoppingQueue).items):null;
     const heldCohort=shoppingOnly&&state.shoppingCohort?.signals?.length&&state.shoppingCohort.signals.every(item=>currentShopping.has(item))?state.shoppingCohort:null;
-    const poolPlan=shoppingOnly&&shoppingCoordinator&&!serial.length&&cfg.shoppingWorkers>1?planShoppingWorkers(shoppingQueue,cfg.shoppingWorkers):null;
+    const poolPlan=independentPlan??(shoppingOnly&&shoppingCoordinator&&!serial.length&&cfg.shoppingWorkers>1?planShoppingWorkers(shoppingQueue,cfg.shoppingWorkers):null);
     const plannedBatch=shoppingOnly?(poolPlan?.batch??shoppingAgentBatch(shoppingQueue)):null;
-    const retryBatch=heldCohort&&!poolPlan&&(heldCohort.jobCount??20)<=20?{items:heldCohort.items,jobs:heldCohort.jobs??shoppingAgentBatch(heldCohort.items).jobs,summary:shoppingAgentBatch(shoppingQueue,{limit:Math.min(20,heldCohort.jobCount??heldCohort.shown)}).summary}:plannedBatch;
+    const retryBatch=heldCohort&&!poolPlan&&!serial.length&&(heldCohort.jobCount??20)<=20?{items:heldCohort.items,jobs:heldCohort.jobs??shoppingAgentBatch(heldCohort.items).jobs,summary:shoppingAgentBatch(shoppingQueue,{limit:Math.min(20,heldCohort.jobCount??heldCohort.shown)}).summary}:plannedBatch;
     const assignedSignal=shoppingOnly?shoppingCohortSignal(store,retryBatch.items):null;
     const dispatchSignature=shoppingOnly?assignedSignal.signature:work?.signature;
     const budget=shoppingOnly?state:state.sourceBudget;
@@ -190,19 +196,23 @@ export function createIngestionDispatcher({store,resources,root,dataDir,shopping
     const continuationSeconds=cfg.shoppingProgressGapSeconds;
     const progressGap=shoppingOnly&&state.lastWorkScope==='handel'&&state.shoppingContinuation===true&&Number.isInteger(continuationSeconds)&&continuationSeconds>=10&&continuationSeconds<=900;
     const gap=progressGap?continuationSeconds*1000:(cfg.minGapMinutes??15)*60000;
-    const gapFrom=progressGap?state.lastFinishedAt:state.lastStartedAt;
+    const gapFrom=shoppingOnly?(progressGap?state.lastFinishedAt:state.lastStartedAt):fullDue?state.daily.lastStartedAt:state.sourceBudget.lastStartedAt??(state.lastWorkScope==='kildeendringer'?state.lastStartedAt:0);
     // Source cooldowns must not idle independent shopping after that source
     // run has finished. Same-scope failures still use their retry budgets.
     const enteringShopping=shoppingOnly&&state.lastWorkScope!=='handel';
-    if(!retryAfterLogin&&!enteringShopping&&clock()-(gapFrom??0)<gap)return;
+    const enteringIndependent=shoppingOnly&&independentPlan&&changed&&!state.lastError;
+    const requestedFresh=shoppingOnly&&requestedShopping&&changed;
+    if(requestedShopping&&shoppingOnly&&!changed&&(!budget.retryAt||budget.retryAt>clock()||(budget.attempts??0)>=3)){state.shoppingRequested=false;save();return;}
+    if(!retryAfterLogin&&!enteringShopping&&!enteringIndependent&&!requestedFresh&&clock()-(gapFrom??0)<gap)return;
     if(!fullDue&&!changed && (!budget.retryAt || budget.retryAt>clock() || (budget.attempts??0)>=3))return;
     const lease=store.beginRun();if(!lease.acquired)return;
     retryAfterLogin=false;
     const token=lease.lease.token;running=true;
+    if(shoppingOnly){state.shoppingRequested=false;state.lastShoppingLane=independentPlan?'independent':poolPlan?'parallel':'serial';}
     const scope=fullDue?'alle':work.shoppingOnly?'handel':'kildeendringer';
     const shoppingBatch=scope!=='kildeendringer'?structuredClone(retryBatch??shoppingAgentBatch(agentQueue())):null;
-    if(fullDue){state.daily.attempts++;state.daily.retryAt=null;}
-    else{budget.lastSignature=dispatchSignature;budget.attempts=changed?1:(budget.attempts??0)+1;budget.retryAt=null;}
+    if(fullDue){state.daily.attempts++;state.daily.retryAt=null;state.daily.lastStartedAt=clock();}
+    else{budget.lastSignature=dispatchSignature;budget.attempts=changed?1:(budget.attempts??0)+1;budget.retryAt=null;budget.lastStartedAt=clock();}
     state.lastWorkScope=scope;
     if(shoppingOnly)state.shoppingCohort={items:structuredClone(shoppingBatch.items),jobs:structuredClone(shoppingBatch.jobs),signals:assignedSignal.items,shown:shoppingBatch.summary.shown,jobCount:shoppingBatch.summary.agentJobs.shown};
     state.lastStartedAt=clock();save();
@@ -274,5 +284,6 @@ Kontroller faktisk lagrede kvitteringer og completion før avslutning. Påstå a
     if(state.daily?.day===osloDayAndHour(clock()).day){state.daily.retryAt=null;state.daily.attempts=0;}
     save();retryAfterLogin=true;tick();return status();
   }
-  return {tick,poll,renew,resumeAfterLogin,status};
+  function requestShopping(){state.shoppingRequested=true;save();tick();return status();}
+  return {tick,poll,renew,resumeAfterLogin,requestShopping,status};
 }

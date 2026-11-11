@@ -47,6 +47,14 @@ test('small waves fill all configured workers without splitting identities or pa
   if(length===27)assert.deepEqual(sizes,[9,9,9]);
  }
 });
+
+test('independent recovery crosses serial work without claiming it or splitting a deferred chain identity',()=>{
+ const queue=[{do:'shopping-product-review',productKey:'held'},{do:'shopping-review',storeId:'flyer'},{do:'shopping-sesum-placement-review',sourceKey:'chain:a',relatedSources:[{sourceKey:'chain:b'}]},...Array.from({length:61},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'new:'+i}))],before=JSON.stringify(queue);
+ const plan=planShoppingWorkers(queue,3,{independent:true,excludedKeys:new Set(['held','chain:b'])});
+ assert.equal(plan.batch.jobs.length,60);assert.ok(plan.batch.jobs.every(j=>j.sourceKeys.length===1&&j.sourceKeys[0].startsWith('new:')));
+ assert.equal(plan.batch.summary.agentJobs.total,64);assert.equal(JSON.stringify(queue),before);
+ assert.equal(planShoppingWorkers(queue,3),null,'normal prefix routing remains conservative');
+});
 test('coordinator rejects overlapping assignments and foreign leases before launching',()=>{
  const f=fixture();try{assert.throws(()=>f.coordinator.start({token:'foreign',batches:f.plan.batches}),/lease/);assert.throws(()=>f.coordinator.start({token:f.state.runLease.token,batches:[f.plan.batches[0],f.plan.batches[0]]}),/Overlapping/);assert.equal(f.launches.length,0);}finally{f.close();}
 });

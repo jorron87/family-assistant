@@ -294,6 +294,10 @@ async function handle(req, res) {
     }
     if(path==='/api/phone/dispatcher'&&method==='GET')return send(res,200,phoneDispatcher.status());
     if(path==='/api/ingestion/dispatcher'&&method==='GET')return send(res,200,{...ingestionDispatcher.status(),shoppingCoordinator:shoppingCoordinator.status(),automaticShopping:shoppingMaintenance.status()});
+    if(path==='/api/ingestion/dispatcher/shopping'&&method==='POST'){
+      if(req.headers['x-family-request']!=='1'||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host))return send(res,403,{error:'Ugyldig avsender.'});
+      return send(res,200,ingestionDispatcher.requestShopping());
+    }
     if(path==='/api/ingestion/dispatcher/resume-after-login'&&method==='POST'){
       if(req.headers['x-family-request']!=='1'||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host))return send(res,403,{error:'Ugyldig avsender.'});
       return send(res,200,ingestionDispatcher.resumeAfterLogin());

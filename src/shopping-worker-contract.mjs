@@ -16,9 +16,13 @@ export function workerBatch(jobs,queue=[]){
  const items=jobs.flatMap(j=>j.items),all=shoppingWorkBatch(queue,{limit:0}).summary,shown=shoppingWorkBatch(items,{full:true}).summary.total;
  return {jobs,items,summary:{...all,shown,remaining:Math.max(0,all.total-shown),agentJobs:{shown:jobs.length,total:shoppingAgentJobs(queue).length,remaining:Math.max(0,shoppingAgentJobs(queue).length-jobs.length)}}};
 }
-export function planShoppingWorkers(queue,workers=3){
+export function planShoppingWorkers(queue,workers=3,{independent=false,excludedKeys=new Set()}={}){
  if(!Number.isInteger(workers)||workers<1||workers>3)throw Error('Use one to three shopping workers.');
- const jobs=[];for(const job of shoppingAgentJobs(queue)){if(!workerEligible(job)||jobs.length===workers*20)break;jobs.push(job);}
+ const jobs=[];for(const job of shoppingAgentJobs(queue)){
+  if(jobs.length===workers*20)break;
+  if(!workerEligible(job)||[...job.sourceKeys,job.productKey].some(k=>excludedKeys.has(k))){if(independent)continue;break;}
+  jobs.push(job);
+ }
  if(jobs.length<2)return null;
  const count=Math.min(workers,jobs.length);
  return {batch:workerBatch(jobs,queue),batches:Array.from({length:count},(_,i)=>workerBatch(jobs.slice(Math.floor(i*jobs.length/count),Math.floor((i+1)*jobs.length/count)),queue))};

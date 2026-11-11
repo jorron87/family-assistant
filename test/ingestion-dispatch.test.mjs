@@ -8,6 +8,11 @@ test('finished source work hands independent shopping over immediately while fam
  try{f.dispatcher.tick();assert.equal(f.dispatcher.status().workerScope,'kildeendringer');f.launches[0].onExit(0);f.store.phone.list=()=>[{status:'queued'}];f.dispatcher.tick();assert.equal(f.launches.length,1);f.store.phone.list=()=>[];f.dispatcher.tick();assert.equal(f.launches.length,2,'the source minGap does not delay the first shopping wave');assert.equal(f.dispatcher.status().workerScope,'handel');f.launches[1].onExit(1);f.dispatcher.tick();assert.equal(f.launches.length,2,'same shopping cohort failure retains backoff');}finally{f.close();}
 });
 
+test('requesting the same failed cohort retains its backoff and cannot indefinitely mask source work',()=>{
+ const f=shoppingDispatchFixture([{do:'shopping-product-review',productKey:'kassal:ODA_NO:1',watchId:'family',fingerprint:'same'}]);
+ try{f.dispatcher.tick();f.launches[0].onExit(1);f.dispatcher.requestShopping();assert.equal(f.launches.length,1);f.store.reviewQueue=()=>({items:[{source:'spond',externalId:'new-source',listingHash:'new',reason:'Actual new source change'}]});f.dispatcher.tick();assert.equal(f.launches.length,2);assert.equal(f.dispatcher.status().workerScope,'kildeendringer');f.launches[1].onExit(0);}finally{f.close();}
+});
+
 test('parallel dispatcher owns one lease, recovers its coordinator and reports only actual scoped work',()=>{
  let active=false,last=null,launches=0,polls=0;const rows=Array.from({length:65},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+(1000+i),sourceFingerprint:'current-'+i}));
  const pool={status:()=>({running:active,runId:active?'coordinated-run':null,last}),preferSerial:()=>[],tick(){polls++;},start(input){launches++;active=true;assert.equal(input.batches.length,3);assert.equal(input.batches.flatMap(b=>b.jobs).length,60);return this.status();}};
@@ -26,9 +31,28 @@ test('coordinator safety stop also prevents the legacy full-tool fallback',()=>{
  const pool={status:()=>({running:false,attention:{reason:'An explicit runtime safety stop.'}})},f=shoppingDispatchFixture([{do:'shopping-review',storeId:'one'}],{shoppingWorkers:3},undefined,false,pool);try{f.dispatcher.tick();assert.equal(f.launches.length,0);assert.equal(f.store.snapshot().runLease,null);}finally{f.close();}
 });
 
-test('serial handoff after an unchanged sixty-product wave never reuses its oversized worker manifest',()=>{
+test('an unchanged deferred wave yields to other products before its bounded serial follow-up',()=>{
  let active=false,last=null,serial=false;const rows=Array.from({length:65},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+(1000+i),sourceFingerprint:'unchanged-'+i})),pool={status:()=>({running:active,runId:active?'handoff-run':null,last}),tick(){},preferSerial:queue=>serial?queue.slice(0,60):[],start(){active=true;return this.status();}},f=shoppingDispatchFixture(rows,{shoppingWorkers:3},undefined,false,pool);
- try{f.dispatcher.tick();active=false;last={id:'handoff-run',code:0,applied:0,positiveProgress:false,slots:[]};serial=true;f.dispatcher.poll();f.clock.at+=16*60000;f.dispatcher.tick();assert.equal(f.launches.length,1);assert.equal(f.dispatcher.status().shoppingBatch.jobs.length,20);assert.equal(f.dispatcher.status().shoppingBatch.summary.agentJobs.total,65);f.launches[0].onExit(0);}finally{f.close();}
+ try{f.dispatcher.tick();active=false;last={id:'handoff-run',code:0,applied:0,positiveProgress:false,slots:[]};serial=true;f.dispatcher.poll();f.dispatcher.tick();assert.equal(f.launches.length,0);assert.equal(f.dispatcher.status().shoppingBatch.jobs.length,5,'fresh products are not delayed by the old cohort failure gap');active=false;f.dispatcher.poll();f.clock.at+=16*60000;f.dispatcher.tick();assert.equal(f.launches.length,1);assert.equal(f.dispatcher.status().shoppingBatch.jobs.length,20);assert.equal(f.dispatcher.status().shoppingBatch.summary.agentJobs.total,65);f.launches[0].onExit(0);}finally{f.close();}
+});
+
+test('deferred native reviews and serial flyers cannot monopolize independent workers, and serial work keeps its turn',()=>{
+ const native=Array.from({length:27},(_,i)=>({do:'shopping-product-review',productKey:'kassal:ODA_NO:'+i,watchId:'family',fingerprint:'held-'+i})),fresh=Array.from({length:60},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+i,sourceFingerprint:'actual-'+i})),rows=[...native,{do:'shopping-review',storeId:'flyer'},...fresh];
+ let active=false,last=null,starts=0;const pool={status:()=>({running:active,runId:'recovery-run',last}),tick(){},preferSerial:queue=>queue.filter(i=>native.includes(i)),start({batches}){starts++;active=true;assert.deepEqual(batches.map(b=>b.jobs.length),[20,20,20]);assert.ok(batches.flatMap(b=>b.items).every(i=>fresh.includes(i)));return this.status();}};
+ const f=shoppingDispatchFixture(rows,{shoppingWorkers:3},undefined,false,pool);try{
+  f.dispatcher.tick();assert.equal(starts,1);assert.equal(f.queue.rows.length,88);assert.equal(f.dispatcher.status().shoppingBatch.summary.agentJobs.total,88);
+  active=false;last={id:'recovery-run',code:0,applied:0,positiveProgress:false,slots:[]};f.dispatcher.poll();f.clock.at+=16*60000;f.dispatcher.tick();assert.equal(starts,1);assert.equal(f.launches.length,1);assert.deepEqual(f.dispatcher.status().shoppingBatch.items,native.slice(0,20));f.launches[0].onExit(0);
+ }finally{f.close();}
+});
+
+test('an explicit shopping request takes one turn before due source work but retains owner, family, lease and safety gates',()=>{
+ for(const gate of ['none','phone','calendar','stock','paused','lease','safety']){
+  const rows=Array.from({length:3},(_,i)=>({do:'shopping-product-review',productKey:'kassal:ODA_NO:'+i,watchId:'family',fingerprint:'current-'+i}));let active=false,starts=0;
+  const pool={status:()=>({running:active,runId:'requested-shopping',attention:gate==='safety'?{reason:'Explicit safety stop'}:null}),tick(){},preferSerial:()=>[],start(){starts++;active=true;return this.status();}},f=shoppingDispatchFixture(rows,{shoppingWorkers:3,dailyFullFallback:true,enabled:gate!=='paused'},undefined,false,pool);
+  f.clock.at=Date.parse('2026-11-10T08:00:00Z');f.store.runHistory=()=>({runs:[],nextCursor:null});f.store.reviewQueue=()=>({items:[{source:'spond',externalId:'still-unread',listingHash:'actual',reason:'Source review remains pending'}]});
+  if(gate==='phone')f.store.phone.list=()=>[{status:'queued'}];if(gate==='calendar')f.store.calendarActions=()=>[{}];if(gate==='stock')f.store.shopping.stockIntake={work:()=>[{}]};if(gate==='lease')f.store.beginRun=()=>({acquired:false});
+  try{f.dispatcher.requestShopping();assert.equal(starts,gate==='none'?1:0,gate);assert.equal(f.launches.length,0);assert.equal(f.dispatcher.status().dailyFull?.attempts??0,0,'request does not certify or consume source coverage');assert.equal(f.store.reviewQueue().items.length,1);}finally{f.close();}
+ }
 });
 
 test('shopping launch supplies complete stable family data before its variable assignment',()=>{
@@ -42,6 +66,7 @@ function shoppingDispatchFixture(initialRows,config={},resources=undefined,autom
   const dir=mkdtempSync(join(tmpdir(),'familien-dispatch-batch-')),clock={at:Date.parse('2026-11-10T02:00:00Z')},queue={rows:initialRows},launches=[];let lease=null;
   const store={snapshot:()=>({runLease:lease,rawItems:{},events:{}}),phone:{list:()=>[]},calendarActions:()=>[],activityFacebook:()=>[],activityFeedStatus:()=>({changedPages:[]}),reviewQueue:()=>({items:[]}),completionReport:()=>({profileReviews:[],missingDrive:[],unsyncedCalendar:[],shopping:{complete:false,blockedPlacements:[{status:'blocked',retryAt:'2026-11-11T02:00:00Z'}]}}),shopping:{queue:()=>queue.rows},beginRun:()=>({acquired:true,lease:lease={token:'owned-test-batch'}}),endRun:token=>{assert.equal(token,lease.token);lease=null;},renewRun(){}};
   const dispatcher=createIngestionDispatcher({store,resources,root:dir,dataDir:dir,shoppingCoordinator,automaticShopping,clock:()=>clock.at,readConfig:()=>({enabled:true,minGapMinutes:15,...config}),alive:()=>true,launch:input=>{launches.push(input);return {pid:123};}});
+  store.recordRun??=()=>{};
   return {dir,dispatcher,clock,queue,launches,store,close(){assert.ok(dir.startsWith(join(tmpdir(),'familien-dispatch-batch-')));rmSync(dir,{recursive:true,force:true});}};
 }
 
