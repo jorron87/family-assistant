@@ -58,9 +58,16 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
   if(!allKeys(slot).has(input.sourceKey))throw Error('Research source is outside the frozen assignment.');
   const packet=store.shopping.agentContext(slot.assignment),source=packet.sources.find(s=>s.sourceKey===input.sourceKey);if(!source||packet.assignmentChanges.length)throw Error('Assigned source changed before checkpoint.');
   const note={evidence:text(input.evidence),...(input.labelText?{labelText:text(input.labelText,1)}:{}),...(input.reason?{reason:text(input.reason)}:{}),needsBrowser:input.needsBrowser===true,recordedAt:clockISO(clock),sourceReceipts:(input.sourceReceipts??[]).map(r=>{const u=new URL(r.url);if(u.protocol!=='https:'||u.username||u.password||!Number.isFinite(Date.parse(r.observedAt))||Date.parse(r.observedAt)>clock()+60000)throw Error('Actual HTTPS primary receipts are required.');return {url:u.href,observedAt:r.observedAt,evidence:text(r.evidence)};})};
+  let clarification;
+  if(input.clarification){
+   const c=input.clarification,family=packet.families.find(f=>f.familyId===c.familyId);
+   const relevant=packet.jobs.flatMap(j=>j.items).filter(i=>i.sourceKey===input.sourceKey||i.relatedSources?.some(r=>r.sourceKey===input.sourceKey)).some(i=>i.familyId===c.familyId||i.watchId===c.familyId||i.familyIds?.includes(c.familyId))||source.placement?.status==='reviewed'&&source.placement.review?.targets?.some(t=>t.familyId===c.familyId);
+   if(!family||!relevant||!store.clarifications)throw Error('Household clarification must concern a current researched family of this exact assigned source.');
+   clarification=store.clarifications.request({key:c.key,subject:{type:'shopping-family',id:family.familyId,label:family.name},question:c.question,reason:c.reason,options:c.options,contextFingerprint:family.familyFingerprint,evidence:c.reason+' Assigned source '+source.sourceKey+' with metadata '+source.observation.sourceFingerprint+'. Complete primary research remains separate in the encrypted checkpoint.'});
+  }
   const file=researchFile(source.sourceKey,source.observation.sourceFingerprint),notes=existsSync(file)?read(file):[];
   const digest=proposalHash({...note,recordedAt:null});if(!notes.some(n=>n.digest===digest)){if(notes.length>=20)throw Error('Preserve further research through a serial review; this source already has twenty checkpoints.');notes.push({...note,digest});write(file,notes);}
-  if(note.needsBrowser)slot.needsBrowser=true;save();return {saved:true,sourceKey:input.sourceKey,sourceFingerprint:source.observation.sourceFingerprint,notes:notes.length,authority:'Research checkpoint, not a product or price approval.'};
+  if(note.needsBrowser)slot.needsBrowser=true;save();return {saved:true,sourceKey:input.sourceKey,sourceFingerprint:source.observation.sourceFingerprint,notes:notes.length,...(clarification?{clarification}:{}),authority:'Research checkpoint, not a product or price approval.'};
  }
  function readResult(slot,frame,value,{groupId=null}={}){
   const body=JSON.stringify(value);if(body.length<=16000){if(groupId&&value?.fingerprint)frame.groupReads[groupId]=value.fingerprint;return value;}

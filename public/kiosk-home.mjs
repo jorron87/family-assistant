@@ -427,6 +427,7 @@ export function render(ctx) {
   const waste = wastePanel(ctx, wasteEvents);
   if (waste) now.append(waste);
   now.append(presence);
+  if(ctx.clarificationsSummary)now.append(ctx.clarificationsSummary);
   const suggestions = ctx.activityChoices(true).slice(0, 2);
   if (suggestions.length) {
     const nearby = el('button', undefined, 'k-nearby'); nearby.type = 'button';

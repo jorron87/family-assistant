@@ -176,7 +176,7 @@ export function createIngestionDispatcher({store,resources,root,dataDir,shopping
     if(cfg.shoppingWorkers!=null&&(!Number.isInteger(cfg.shoppingWorkers)||cfg.shoppingWorkers<1||cfg.shoppingWorkers>3)){state.lastError='dispatch.shoppingWorkers må være et heltall fra 1 til 3.';save();return;}
     if(cfg.shoppingWorkerBatchSize!=null&&(!Number.isInteger(cfg.shoppingWorkerBatchSize)||cfg.shoppingWorkerBatchSize<1||cfg.shoppingWorkerBatchSize>20)){state.lastError='dispatch.shoppingWorkerBatchSize må være et heltall fra 1 til 20.';save();return;}
     // Family-submitted work has priority over automatically discovered work.
-    if(store.phone.list().some(item=>['queued','processing'].includes(item.status))||store.calendarActions().length)return;
+    if(store.phone.list().some(item=>['queued','processing'].includes(item.status))||store.calendarActions().length||store.clarifications?.ready().length)return;
     if(store.shopping?.stockIntake?.work().some(item=>!item.retryAt||Date.parse(item.retryAt)<=clock()))return;
     const local=osloDayAndHour(clock());
     if(state.daily?.day!==local.day){state.daily={day:local.day,attempts:0,retryAt:null};save();}

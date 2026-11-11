@@ -7,6 +7,8 @@ const $=s=>document.querySelector(s);
 const node=(tag,text,cls)=>{const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(cls)el.className=cls;return el;};
 const dayText=(day,opts={weekday:'long',day:'numeric',month:'long'})=>new Intl.DateTimeFormat('nb-NO',{timeZone:'Europe/Oslo',...opts}).format(new Date(day+'T12:00:00Z'));
 export function installFamily({api,post,status}) {
+ const clarificationSummary=node('section');clarificationSummary.setAttribute('aria-label','Familiens avklaringer');$('#family-home').prepend(clarificationSummary);
+ let clarificationView;import('./clarifications-view.mjs').then(({installClarifications})=>{clarificationView=installClarifications({summary:clarificationSummary,base:'/send/api/clarifications'});}).catch(()=>{});
  let editor,shopping;
  async function openShopping(){try{if(!shopping){const {installShoppingView}=await import('./shopping-view.mjs?v='+Date.now());shopping=installShoppingView({panel:$('#family-shopping'),base:'/send/api/shopping',compact:true,onExplore:id=>{setView('explore');if(id)explorerInstance().then(view=>view.openFamily(id));}});}shopping.open();}catch{$('#family-shopping').textContent='Handel blir tilgjengelig når den pågående kjøringen er ferdig.';}}
  let explorerReady;
@@ -77,6 +79,6 @@ export function installFamily({api,post,status}) {
   holder.append(button);if(letter.status!=='current')holder.append(node('span',letter.status==='upcoming'?'Neste skoleuke':'Sist tilgjengelig','weekly-letter-note'));
  }
  function showLogin(){const line=$('#login-line');line.hidden=!data.login;if(!data.login)return;line.textContent=(data.login.level==='login'?'🔒 ':'⚠ ')+data.login.text;line.className='login-line '+data.login.level;}
- function update(next){const json=JSON.stringify(next)+osloDay();data=next;showLogin();if(json!==signature){signature=json;render();if(openedId)openEvent(openedId);}}
+ function update(next){clarificationView?.refresh().catch(()=>{});const json=JSON.stringify(next)+osloDay();data=next;showLogin();if(json!==signature){signature=json;render();if(openedId)openEvent(openedId);}}
  return {update,setView,refresh,openEvent,get view(){return view;}};
 }

@@ -29,6 +29,7 @@ import {createShoppingMaintenance} from './shopping-maintenance.mjs';
 import {createKassal} from './kassal.mjs';
 import {createSesumCollector,sesumSenderAllowed} from './shopping-sesum.mjs';
 import {createShoppingCoordinator} from './shopping-coordinator.mjs';
+import {clarificationHandler} from './clarification-routes.mjs';
 import {createShoppingWorkerScheduler} from './shopping-worker-scheduler.mjs';
 import {createShoppingHostActivity} from './shopping-worker-liveness.mjs';
 const shoppingWorkerRequests=createShoppingWorkerScheduler();
@@ -49,7 +50,7 @@ const weatherConfig=readConfig('weather.json');
 const weather=createWeather({config:weatherConfig,dataDir:DATA_DIR});
 const phoneDispatcher=createPhoneDispatcher({store,root});
 const shoppingHostActivity=createShoppingHostActivity({dataDir:DATA_DIR});
-const shoppingCoordinator=createShoppingCoordinator({store,root,dataDir:DATA_DIR,workerActivityPath:shoppingHostActivity.file,endpoint:`http://127.0.0.1:${Number(process.env.FAMILIEN_PORT??4318)}/api/shopping/agent-worker`,shouldYield:()=>process.env.FAMILIEN_NO_DISPATCH||readConfig('agent.json').enabled!==true||readConfig('collector.json').dispatch?.enabled!==true||store.phone.list().some(i=>['queued','processing'].includes(i.status))||store.calendarActions().length>0||store.shopping.stockIntake.work().some(i=>!i.retryAt||Date.parse(i.retryAt)<=Date.now())});
+const shoppingCoordinator=createShoppingCoordinator({store,root,dataDir:DATA_DIR,workerActivityPath:shoppingHostActivity.file,endpoint:`http://127.0.0.1:${Number(process.env.FAMILIEN_PORT??4318)}/api/shopping/agent-worker`,shouldYield:()=>process.env.FAMILIEN_NO_DISPATCH||readConfig('agent.json').enabled!==true||readConfig('collector.json').dispatch?.enabled!==true||store.phone.list().some(i=>['queued','processing'].includes(i.status))||store.calendarActions().length>0||store.clarifications.ready().length>0||store.shopping.stockIntake.work().some(i=>!i.retryAt||Date.parse(i.retryAt)<=Date.now())});
 const ingestionDispatcher=createIngestionDispatcher({store,resources,root,dataDir:DATA_DIR,shoppingCoordinator,automaticShopping:true,automaticMarketPlan:()=>shoppingMaintenance.marketPlan()});
 // Nye visningsfiler serveres fra public/ etter navn (ingen stier fra klienten).
 const PUBLIC_FILES=new Map([['kiosk.css','text/css; charset=utf-8'],['kiosk-home.mjs','text/javascript; charset=utf-8'],['event-display.mjs','text/javascript; charset=utf-8'],['weather-widget.mjs','text/javascript; charset=utf-8'],['login-status.mjs','text/javascript; charset=utf-8'],['sun.mjs','text/javascript; charset=utf-8'],['dtf.mjs','text/javascript; charset=utf-8'],['home-tasks.mjs','text/javascript; charset=utf-8'],['celebrate.mjs','text/javascript; charset=utf-8']]);
@@ -61,6 +62,7 @@ const inFlight=new Set(),RESTART_BUSY_MS=Number(process.env.FAMILIEN_RESTART_BUS
 const hostWork=new Set(),publishHostActivity=()=>shoppingHostActivity.publish({runId:shoppingCoordinator.currentRunId(),activeRequests:inFlight.size+hostWork.size});
 function trackHostWork(kind,work){const entry={at:Date.now(),kind};hostWork.add(entry);publishHostActivity();const finish=()=>{hostWork.delete(entry);shoppingHostActivity.slow({kind,startedAt:entry.at});publishHostActivity();};try{const result=work();if(result?.then)return result.finally(finish);finish();return result;}catch(error){finish();throw error;}}
 const servers=[];
+const clarificationRoutes=clarificationHandler({store,send,json,onQueued:()=>dispatchTick()});
 const dispatchTick=()=>{if(!restarting&&!process.env.FAMILIEN_NO_DISPATCH)trackHostWork('dispatcher-poll',()=>{ingestionDispatcher.poll();phoneDispatcher.tick();});};
 const host = "127.0.0.1";
 const port = Number(process.env.FAMILIEN_PORT ?? 4318);
@@ -107,6 +109,7 @@ async function handle(req, res) {
     const path = new URL(req.url, `http://${host}:${port}`).pathname;
     const method = req.method;
     if(requestEntry)requestEntry.kind=method+' '+path.split('/').slice(0,4).join('/');
+    if(await clarificationRoutes(req,res))return;
     if(path.startsWith('/api/shopping/sesum/')){
       const extension=path==='/api/shopping/sesum/work'||path==='/api/shopping/sesum/receive';
       if(!sesumSenderAllowed(req.headers,{extension,write:method==='POST'}))return send(res,403,{error:'Ugyldig Sesum-avsender.'});
@@ -352,6 +355,8 @@ async function handle(req, res) {
     }
     if (method === "GET" && path === "/health") return send(res, 200, { ok: true, service: "Familien", time: new Date().toISOString(), dataDir: DATA_DIR, pid: process.pid });
     if (method === "GET" && path === "/") return send(res, 200, readFileSync(join(root, "public", "index.html")), "text/html; charset=utf-8");
+    if(method==='GET'&&path==='/clarifications-view.mjs')return send(res,200,readFileSync(join(root,'public','clarifications-view.mjs')),'text/javascript; charset=utf-8');
+    if(method==='GET'&&path==='/clarifications.css')return send(res,200,readFileSync(join(root,'public','clarifications.css')),'text/css; charset=utf-8');
     if (method === "GET" && path === "/app.css") return send(res, 200, readFileSync(join(root, "public", "app.css")), "text/css; charset=utf-8");
     if (method === "GET" && path === "/app.js") return send(res, 200, readFileSync(join(root, "public", "app.js")), "text/javascript; charset=utf-8");
     if(method==='GET'&&path==='/home-view.mjs')return send(res,200,readFileSync(join(root,'public','home-view.mjs')),'text/javascript; charset=utf-8');
@@ -415,6 +420,9 @@ async function handle(req, res) {
     if (method === "GET" && path === "/api/state") {
       // ?view=dashboard: bare det stueskjermen trenger (uten gjennomgangslogg, dokumentkvitteringer og kjøringshistorikk, og bare råkort som avtaler viser til). ETag gir 304 uten kropp når ingenting er endret.
       const snapshot = store.snapshot();
+      // Dashboard state never carries the private question evidence/history;
+      // public questions and answers use the separate family DTO.
+      delete snapshot.clarifications;
       snapshot.activities=Object.fromEntries(Object.entries(snapshot.activities??{}).filter(([,item])=>!item.mergedInto));
       snapshot.weeklyLetters = weeklyLetters(snapshot);
       const view = new URL(req.url, `http://${host}`).searchParams.get("view");
@@ -543,6 +551,8 @@ servers.at(-1).listen(port, host, () => console.log(`Familien: http://${host}:${
 // Family controls are available on the living-room display; ingestion stays private.
 servers.push(createServer((req,res) => {
   const kioskStock=new URL(req.url,`http://${host}`).pathname;
+  if(kioskStock.startsWith('/api/clarifications/')&&kioskStock!=='/api/clarifications/answer')return send(res,req.method==='GET'?403:405,{error:'Agentens avklaringsarbeid er bare tilgjengelig på agentporten.'});
+  if(req.method==='POST'&&kioskStock==='/api/clarifications/answer')return handle(req,res);
   if(kioskStock.startsWith('/api/shopping/stock-')){
     if(req.method==='POST'&&/^\/api\/shopping\/(?:stock-action|stock-scan|stock-intake(?:\/[a-f0-9-]{36}\/(?:submit|files\/[0-7]))?)$/.test(kioskStock))return handle(req,res);
     return send(res,req.method==='GET'?403:405,{error:'Gjennomgang og bildeoriginaler er bare tilgjengelige på agentporten.'});

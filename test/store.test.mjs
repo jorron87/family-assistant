@@ -20,7 +20,7 @@ test('the lightweight current lease read is detached and follows renewal and rel
 }));
 
 test('source scheduling preserves the full source basis without evaluating shopping completion',()=>fixture(dir=>{
- const store=createStore(dir),full=store.completionReport(),expected=Object.fromEntries(Object.entries(full).filter(([key])=>!['complete','shopping','counts','cutoffAt'].includes(key))),counts=Object.fromEntries(Object.entries(full.counts).filter(([key])=>!key.startsWith('shopping')));
+ const store=createStore(dir),full=store.completionReport(),expected=Object.fromEntries(Object.entries(full).filter(([key])=>!['complete','shopping','clarifications','counts','cutoffAt'].includes(key))),counts=Object.fromEntries(Object.entries(full.counts).filter(([key])=>!key.startsWith('shopping')));
  store.shopping.completion=()=>{throw Error('Shopping must remain independent of source scheduling');};
  const {sourceComplete,cutoffAt,...source}=store.sourceCompletionReport();assert.equal(typeof sourceComplete,'boolean');assert.ok(!('complete'in source));assert.deepEqual(source,{...expected,counts});assert.ok(Date.parse(cutoffAt)>=Date.parse(full.cutoffAt));
  assert.doesNotThrow(()=>store.changeCompletion());assert.throws(()=>store.completionReport(),/Shopping must remain/);

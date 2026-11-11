@@ -57,11 +57,12 @@ export function collectorSummary(collector, now = Date.now()) {
   return out;
 }
 
-export function buildNext({ phone, calendarActions, completion, queue, activities, collector, feed, shopping = [], now = Date.now() }) {
+export function buildNext({ phone, calendarActions, completion, queue, activities, collector, feed, shopping = [], clarificationAnswers = [], now = Date.now() }) {
   const work = [];
   const phoneItems = (Array.isArray(phone) ? phone : phone?.items ?? []).filter((item) => ["queued", "processing", "blocked"].includes(item.status));
   for (const item of phoneItems) work.push({ do: "phone", id: item.id, title: item.title, status: item.status, note: item.note ?? undefined });
   for (const action of calendarActions ?? []) work.push({ do: "calendar-action", eventId: action.eventId ?? action.id, action: action.action ?? action.type, title: action.title });
+  for(const item of clarificationAnswers)work.push({do:'clarification-answer',id:item.id,answerFingerprint:item.answerFingerprint,subject:item.subject,question:item.question});
   const soon = now + 14 * 86400000;
   const queueItems = [...(queue?.items ?? [])].sort((a, b) => String(a.reason).localeCompare(String(b.reason)));
   for (const item of queueItems) work.push({ do: "review", source: item.source, surface: item.surface, externalId: item.externalId, title: item.title, reason: item.reason, rawId: item.rawId });

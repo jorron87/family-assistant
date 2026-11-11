@@ -28,6 +28,8 @@ let houseLoading=false;
 let profileEditor;
 let profileLoading=false;
 let state;
+let clarificationView;
+import('./clarifications-view.mjs').then(({installClarifications})=>{clarificationView=installClarifications({summary:$('#clarifications-summary'),dialog:$('#clarifications-dialog')});if(state)render();}).catch(()=>{});
 const shoppingView=installShoppingView({panel:document.querySelector('#shopping'),banner:document.querySelector('#shopping-banner'),onOpen:()=>setTab('shopping'),onExplore:id=>{setTab('explore');if(id)explorerInstance().then(view=>view.openFamily(id));}});
 let explorerReady=null;
 const explorerInstance=()=>explorerReady??=import("./library-explorer.mjs?v="+Date.now()).then(({installLibraryExplorer})=>installLibraryExplorer({panel:document.querySelector("#explore")}));
@@ -458,7 +460,7 @@ function kioskContext(events) {
   return { events, node, dots, displayDay, eventsOnDay, eventStartDay, addDays, osloDay, openEvent, setTab, upcomingTasks, activityChoices,
     allTasks: () => Object.values(state.events).filter((event) => event.task && !event.visibility?.hidden && !event.cancelled && (selectedMember === 'all' || event.members.includes(selectedMember))),
     children: () => state.profile.members.filter((member) => member.role === 'child' && (selectedMember === 'all' || member.id === selectedMember)),
-    toggleTask: toggleTaskItem };
+    toggleTask: toggleTaskItem,clarificationsSummary:clarificationView?.element };
 }
 function renderOverview(events) {
   if (kiosk) return kioskHome.render(kioskContext(events));

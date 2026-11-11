@@ -9,6 +9,7 @@ import {planShoppingWorkers,workerManifest,applyWorkerProposal,proposalHash} fro
 import {shoppingWorkerArgs} from '../src/shopping-worker-runtime.mjs';
 import {agentContextPages} from '../src/shopping-agent-context.mjs';
 import {expandedFamilies,expandedCorpus} from '../scripts/fixtures/shopping-agent-corpus.mjs';
+import {createClarifications} from '../src/clarifications.mjs';
 
 function fixture(count=60,{large=false,chains=false}={}){
  const dir=mkdtempSync(join(tmpdir(),'family-coordinator-test-')),time={at:Date.parse('2026-11-10T12:00:00Z')},state={runLease:{token:'owner-test-lease'}},launches=[],yielding={value:false},corpus=expandedCorpus().slice(0,count);
@@ -175,6 +176,16 @@ test('a failed final domain check cannot crash the coordinator or certify comple
 
 test('required negative family questions are delivered even without preserved research checkpoints',async()=>{
  const f=fixture(20);try{f.start();const header=await f.call(0,'shopping_context',{});assert.equal(header.researchAvailable,0);assert.ok(header.plausibleFamiliesToAssess.length>0);assert.ok(header.plausibleFamiliesToAssess.every(r=>r.hints.length>0&&r.hints.every(h=>Number.isInteger(h.familyIndex)&&h.authority.includes('not an approval'))));assert.ok(f.launches[0].prompt.includes('input-format rejection alone is not missing product evidence'));}finally{f.close();}
+});
+
+test('scoped preference questions require an assigned researched family and share one dashboard decision across products',async()=>{
+ const f=fixture(20);try{
+  f.store.clarifications=createClarifications({});f.start();let packet=f.packet(0);const proposed=f.decisions(packet),first=proposed.decisions.find(d=>d.targets.some(t=>proposed.decisions.some(other=>other!==d&&other.targets.some(x=>x.familyIndex===t.familyIndex)))),familyIndex=first.targets.find(t=>proposed.decisions.some(other=>other!==first&&other.targets.some(x=>x.familyIndex===t.familyIndex))).familyIndex,second=proposed.decisions.find(d=>d.sourceKey!==first.sourceKey&&d.targets.some(t=>t.familyIndex===familyIndex));assert.ok(second);
+  await f.call(0,'shopping_propose',{proposalId:'researched-household-question-basis',contextFingerprint:packet.contextFingerprint,operation:'placement',input:{...proposed,decisions:[first,second]}});await readAll(f,0,{refresh:true});packet=f.packet(0);
+  const familyId=packet.families[familyIndex].familyId,clarification={familyId,key:'variant',question:'Hvilken gjennomgått variant foretrekker familien?',reason:'Et faktisk familievalg mangler; spørsmålet gjelder preferanse og godkjenner ingen ukjent produktinformasjon.',options:[{id:'current',label:'Behold dagens variant'},{id:'equivalent',label:'Sammenlign dokumentert like varianter'}]},input={sourceKey:first.sourceKey,evidence:'Preserved actual complete label; a household preference is separate from source facts.',clarification};
+  const one=await f.call(0,'shopping_checkpoint',input),two=await f.call(0,'shopping_checkpoint',{...input,sourceKey:second.sourceKey});assert.equal(one.clarification.id,two.clarification.id);assert.equal(f.store.clarifications.list().total,1);assert.equal(f.store.clarifications.ready().length,0);
+  const unrelated=packet.families.find(f=>f.familyId!==familyId).familyId;await assert.rejects(f.call(0,'shopping_checkpoint',{...input,clarification:{...clarification,familyId:unrelated}}),/current researched family/);await assert.rejects(f.call(0,'shopping_checkpoint',{...input,sourceKey:'sesum-product:999999'}),/outside/);assert.equal(f.store.clarifications.list().total,1);
+ }finally{f.close();}
 });
 
 test('different worker assignments share stable instructions without losing complete family or source context',()=>{

@@ -11,6 +11,8 @@
 
 ## Handel (valgfritt)
 
+Hjemmeskjermen og den tilknyttede mobilvisningen har «Avklaringer» med korte svaralternativer. Agenten samler nødvendige familievalg der; samme spørsmål deles på tvers av varer. Velg avsender når du svarer. Svarene lagres også når agenten er pauset, og behandles med den allerede godkjente agentkonfigurasjonen når den kan kjøre. Ubesvarte spørsmål starter ingen agentkjøring. Se runbookens avklaringskontrakt; ingen ny modell- eller verktøytilgang er nødvendig.
+
 Egne eller ennå uavklarte familiebeslutninger går til vanlig familiegjennomgang. De parallelle varearbeiderne kan utvide en allerede valgt bred familie innen gjeldende krav, men kan ikke erstatte et slikt familievalg. Arbeidet beholdes i kø og fullføring; denne rutingen krever ingen ny innstilling.
 
 Når handel, Oda-tilkobling og `collector.dispatch` er aktivert, oppfrisker tjenesten kjente gjennomgåtte Oda-priser med kode uten agentstart. Se runbookens «Varejobber og automatisk rutinearbeid» for avgrensning, pauser og status. Automatisk prislesing gir ingen kurv- eller variantgodkjenning.

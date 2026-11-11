@@ -3,6 +3,7 @@ import {join} from 'node:path';
 import {loginProblems,loginSummary} from '../public/login-status.mjs';
 import {weeklyLetters} from './weekly-letters.mjs';
 import {sendExplorerBundle} from './library-explorer.mjs';
+import {familyClarifications,answerClarification} from './clarification-routes.mjs';
 
 export function phoneHandler({odaCart=null,productImages=null,oda=null,store,root,send,body,json,onQueued=()=>{},weather=null,sessionMaintenance=null}) {
   const attempts=[];
@@ -17,6 +18,8 @@ export function phoneHandler({odaCart=null,productImages=null,oda=null,store,roo
         assets['/send/member-colors.mjs']=['member-colors.mjs','text/javascript; charset=utf-8'];
         assets['/send/celebrate.mjs']=['celebrate.mjs','text/javascript; charset=utf-8'];
         assets['/send/home-tasks.mjs']=['home-tasks.mjs','text/javascript; charset=utf-8'];
+        assets['/send/clarifications-view.mjs']=['clarifications-view.mjs','text/javascript; charset=utf-8'];
+        assets['/send/clarifications.css']=['clarifications.css','text/css; charset=utf-8'];
         assets['/send/shopping-view.mjs']=['shopping-view.mjs','text/javascript; charset=utf-8'];
         assets['/send/pantry-groups.mjs']=['pantry-groups.mjs','text/javascript; charset=utf-8'];
         assets['/send/barcode.mjs']=['barcode.mjs','text/javascript; charset=utf-8'];
@@ -44,6 +47,8 @@ export function phoneHandler({odaCart=null,productImages=null,oda=null,store,roo
       const token=String(req.headers.cookie??'').split(';').map(item=>item.trim()).find(item=>item.startsWith('familien_phone='))?.slice(15);
       const device=store.phone.authenticate(token);
       if(!device)return send(res,401,{error:'Åpne familielenken for å knytte denne telefonen til familien.'});
+      if(path==='/send/api/clarifications'&&req.method==='GET')return send(res,200,familyClarifications(store,new URL(req.url,'http://localhost').searchParams));
+      if(path==='/send/api/clarifications/answer'&&req.method==='POST'){const result=answerClarification(store,await json(req));send(res,200,result);if(!result.replayed)queueMicrotask(onQueued);return;}
       if(path==='/send/api/family'&&req.method==='GET') {
         const snapshot=store.snapshot();
         const letters=weeklyLetters(snapshot).map(letter=>({...letter,url:letter.attachmentId?`/send/api/documents/${letter.rawId}/${letter.attachmentId}`:null}));

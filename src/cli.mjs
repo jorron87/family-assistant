@@ -148,11 +148,16 @@ async function execute(command, args, flags) {
     case 'kassal-ean': result=await request('/api/shopping/kassal/ean','POST',json(args[0]));break;
     case 'kassal-history': result=await request('/api/shopping/kassal/history','POST',json(args[0]));break;
     case 'kassal-stores': result=await request('/api/shopping/kassal/stores','POST',json(args[0]));break;
+    case 'clarifications': result=await request('/api/clarifications/agent');break;
+    case 'clarification': result=await request('/api/clarifications/agent/'+encodeURIComponent(args[0]));break;
+    case 'clarification-request': result=await request('/api/clarifications/request','POST',json(args[0]));break;
+    case 'clarification-close': result=await request('/api/clarifications/close','POST',json(args[0]));break;
+    case 'clarification-review': result=await request('/api/clarifications/review','POST',json(args[0]));break;
     case 'next': {
-      const [phone, calendarActions, completion, queue, activities, collector, feed, shopping] = await Promise.all([
-        request('/api/phone/inbox'), request('/api/calendar-actions'), request('/api/completion'), request('/api/review-queue'), activityState(), request('/api/collector/status'), request('/api/activity-feed'), request('/api/shopping/queue')
+      const [phone, calendarActions, completion, queue, activities, collector, feed, shopping, clarificationState] = await Promise.all([
+        request('/api/phone/inbox'), request('/api/calendar-actions'), request('/api/completion'), request('/api/review-queue'), activityState(), request('/api/collector/status'), request('/api/activity-feed'), request('/api/shopping/queue'), request('/api/clarifications/agent')
       ]);
-      result = buildNext({ phone, calendarActions, completion, queue, activities, collector, feed, shopping });
+      result = buildNext({ phone, calendarActions, completion, queue, activities, collector, feed, shopping, clarificationAnswers:clarificationState.work });
       Object.assign(result, shoppingOverview(shopping, { full: flags.has('--full') }));
       break;
     }

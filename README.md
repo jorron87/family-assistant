@@ -10,6 +10,8 @@ Designet rundt en **vakker 24-tommers touchskjerm, 16:9 i Full HD**, på et sent
 
 En ukeplan med «turdag tirsdag — husk kakao» blir en kalenderoppføring med pakkeliste og lenke til ukeplanen. Søsken kan ha samme lekseplan og likevel krysse av oppgavene hver for seg.
 
+Nødvendige familievalg samles under **Avklaringer** på hjemmeskjermen og mobilen, med korte svaralternativer. Samme spørsmål deles mellom varer som trenger samme valg. Svarene lagres og følges opp uten at familien må finne igjen en agentchat.
+
 ## Slik fungerer det
 
 ![Arkitekturen: maskinen hjemme, innsamling, review og familiens visninger](docs/images/system-map.svg)

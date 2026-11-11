@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { decrypt, encrypt, loadKey } from "./crypto.mjs";
 import { initialProfile } from "./profile.mjs";
 import { normalizeProfile, validateFact, learnFact, profileView } from "./profile-facts.mjs";
+import {createClarifications} from './clarifications.mjs';
 import { mergeTask } from "./tasks.mjs";
 import { phoneStore } from './phone.mjs';
 import { shoppingStore } from './shopping.mjs';
@@ -711,8 +712,8 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
   }
 
   function completionReport() {
-    const {sourceComplete,...source}=sourceCompletionReport(),shoppingStatus=shopping.completion();
-    return {...source,complete:sourceComplete&&shoppingStatus.complete,
+    const {sourceComplete,...source}=sourceCompletionReport(),shoppingStatus=shopping.completion(),clarificationStatus=clarifications.summary();
+    return {...source,complete:sourceComplete&&shoppingStatus.complete&&clarificationStatus.complete,clarifications:clarificationStatus,
       counts:{...source.counts,shoppingPending:shoppingStatus.work.length,shoppingBlocked:shoppingStatus.blockedStores.length+shoppingStatus.blockedRoutes.length+(shoppingStatus.blockedCampaigns?.length??0)+(shoppingStatus.blockedFamilies?.length??0)+(shoppingStatus.blockedPlacements?.length??0)+(shoppingStatus.blockedCatalogue?.length??0)+(shoppingStatus.blockedOda?.length??0)+(shoppingStatus.collection?.blocked?1:0),...(shoppingStatus.collection?.enabled?{shoppingCollectionPending:shoppingStatus.collection.pending?1:0,shoppingCollectionBlocked:shoppingStatus.collection.blocked?1:0}:{})},shopping:shoppingStatus};
   }
 
@@ -747,7 +748,7 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
       if(input.scope==='alle')continuation.sourcePhase=sourcePhaseCheckpoint=reviewedSourcePhase(input,report);
     } else if (input.outcome === "ok") {
       const report = completionReport();
-      if (input.scope==='lager'?shopping.stockIntake.work().length||shopping.stockIntake.blocked().length:input.scope==='handel' ? !report.shopping.complete : input.scope==='kildeendringer' ? !changeCompletion().complete : ['telefon','familiehandlinger'].includes(input.scope) ? report.phonePending.length || calendarActions().length : !report.complete) throw new Error(`Kjøringen kan ikke rapporteres ok med restanser: ${JSON.stringify(report.counts)}.`);
+      if (input.scope==='lager'?shopping.stockIntake.work().length||shopping.stockIntake.blocked().length:input.scope==='handel' ? !report.shopping.complete : input.scope==='kildeendringer' ? !changeCompletion().complete : ['telefon','familiehandlinger'].includes(input.scope) ? report.phonePending.length || calendarActions().length || clarifications.summary().pendingAnswers : !report.complete) throw new Error(`Kjøringen kan ikke rapporteres ok med restanser: ${JSON.stringify(report.counts)}.`);
     } else if (["partial", "needs_login", "error"].includes(input.outcome)) {
       if (!Array.isArray(input.blockers) || !input.blockers.length || !input.blockers.every((blocker) => words(blocker, 500).length >= 12)) {
         throw new Error("Ufullstendig kjøring krever konkrete blockers. Arbeidsmengde eller planlagt sluttid er ikke en blokkering.");
@@ -1649,9 +1650,10 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
     for (const event of currentEvents()) event.fingerprint = eventFingerprint(event);
     save();
   }
+  const clarifications=createClarifications(state.clarifications??={},{save,members:()=>state.profile.members,subjectExists:subject=>subject.type!=='shopping-family'||Object.hasOwn(state.shopping?.watches??{},subject.id)});
   const phone=phoneStore(state,{save,upsertRaw,addAttachment});
   const shopping=shoppingStore(state,{save,libraryPrices,sesumCollectionStatus,sesumResearchTerms,sesumResearchMaxPriceAgeHours,odaConnected,files:{write:(id,bytes)=>writeFileSync(join(dataDir,'attachments',`${id}.enc`),encrypt(bytes,key)),read:id=>decrypt(readFileSync(join(dataDir,'attachments',`${id}.enc`)),key)}});
   if(reconcileSourceReviews(state.sourceStatus,state.runs))save();
-  return { runLease:()=>structuredClone(state.runLease), shopping, repairText, backupArchive, eventHistory, event, mergeEvents, splitHomework, activityFacebook, changeCompletion, collectedItems, collectedList, sourceItems, editProfile, phone, calendarActions, calendarAction, setEventVisibility, upsertActivity, activityReaction, activityPlan, activitySource, snapshot, runHistory, profile: () => profileView(state.profile), profileFact, reviewProfile, documentStatus, reviewDocument, checkTask, upsertRaw, upsertFinding, updateSource, observeListing, markReviewed, updateSurface, reviewQueue, completionReport, sourceCompletionReport, addAttachment, getAttachment, linkDrive, linkCalendar, updateProfile, recordRun, beginRun, renewRun, endRun, collectorIngest, collectorConfig, collectorStatus, collectorRefresh, collectorFacebookSweep, collectedItem, activityFeedHsia, activityFeedCandidates, activityFeedNeedsDetail, activityFeedDetail, activityFeedPage, activityFeedError, activityFeedPageText, activityFeedStatus };
+  return { runLease:()=>structuredClone(state.runLease), shopping, clarifications, repairText, backupArchive, eventHistory, event, mergeEvents, splitHomework, activityFacebook, changeCompletion, collectedItems, collectedList, sourceItems, editProfile, phone, calendarActions, calendarAction, setEventVisibility, upsertActivity, activityReaction, activityPlan, activitySource, snapshot, runHistory, profile: () => profileView(state.profile), profileFact, reviewProfile, documentStatus, reviewDocument, checkTask, upsertRaw, upsertFinding, updateSource, observeListing, markReviewed, updateSurface, reviewQueue, completionReport, sourceCompletionReport, addAttachment, getAttachment, linkDrive, linkCalendar, updateProfile, recordRun, beginRun, renewRun, endRun, collectorIngest, collectorConfig, collectorStatus, collectorRefresh, collectorFacebookSweep, collectedItem, activityFeedHsia, activityFeedCandidates, activityFeedNeedsDetail, activityFeedDetail, activityFeedPage, activityFeedError, activityFeedPageText, activityFeedStatus };
 }
 
