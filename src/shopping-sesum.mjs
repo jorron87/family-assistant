@@ -1,4 +1,5 @@
 import {researchScope} from './sesum-research-scope.mjs';
+import {sesumDiscoveryTrace} from './sesum-discovery-trace.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {existsSync,mkdirSync,readFileSync,renameSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -550,5 +551,6 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,r
     });
     return {enabled:true,runId:state.run?.id??null,items:structuredClone(items),coverageNote:'Registrerte kildeobservasjoner, inkludert uavklarte priser og separate tilsvarende-forslag. Ingen produktgodkjenning, ny prisdato eller lokal lagerstatus følger av innhentingen.'};
   }
-  return {work,receive,refresh,retry,status,catalog,replayPending,replayMetadata};
+  const discoveryTrace=input=>{if(!enabled)return {enabled:false,...sesumDiscoveryTrace(null,input)};load();return {enabled,...sesumDiscoveryTrace(state.run,input)};};
+  return {work,receive,refresh,retry,status,catalog,replayPending,replayMetadata,discoveryTrace};
 }

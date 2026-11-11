@@ -120,6 +120,7 @@ async function handle(req, res) {
         return send(res,200,sesum.work({peek}));
       }
       if(path==='/api/shopping/sesum/status'&&method==='GET')return send(res,200,sesumStatus());
+      if(path==='/api/shopping/sesum/discovery-trace'&&method==='GET'){const q=new URL(req.url,`http://${host}`).searchParams;return send(res,200,sesum.discoveryTrace({familyId:q.get('familyId'),productId:q.get('productId')}));}
       if(path==='/api/shopping/sesum/candidates'&&method==='GET'){
         const query=new URL(req.url,`http://${host}`).searchParams;
         return send(res,200,store.shopping.sesumCandidates(query.get('familyId')??undefined,query.get('sourceKey')??undefined));

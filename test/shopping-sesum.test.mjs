@@ -18,6 +18,12 @@ const search=(job,{products=[],next=[],end=true}={})=>({ok:true,kind:'search',so
 const product=(job,{observedAt='2026-11-09T10:00:00Z',price=7.9}={})=>({ok:true,kind:'product',sourceUrl:job.url,product:{id:'123',name:'Synthetic tomatoes 390 g',ean:'12345678',weight:390,weightUnit:'g'},prices:[{storeCode:'EXTRA',price,observedAt,source:'receipt'}]});
 const saved=f=>JSON.parse(decrypt(readFileSync(join(f.dataDir,'sesum-collector.json.enc')),f.options.encryptionKey));
 const persist=(f,state)=>writeFileSync(join(f.dataDir,'sesum-collector.json.enc'),encrypt(Buffer.from(JSON.stringify(state)),f.options.encryptionKey));
+
+test('focused discovery provenance is restartable and never replays observations or starts collection',async t=>{
+ const f=fixture(t);assert.deepEqual(f.client.discoveryTrace({productId:'123'}).products,[]);let work=f.client.work(),seed=work.jobs[0];await f.client.receive(response(work,seed,search(seed,{products:[productUrl]})));work=f.client.work();await f.client.receive(response(work,work.jobs[0],product(work.jobs[0])));
+ const before=saved(f),callbacks=f.received.length,trace=f.client.discoveryTrace({familyId:'family-0'});assert.equal(trace.total,1);assert.equal(trace.searches[0].productEdgesKnown,true);assert.deepEqual(trace.products[0].directSearchJobIds,[seed.id]);assert.equal(trace.products[0].observationFetchedAt,when);assert.deepEqual(saved(f),before);assert.equal(f.received.length,callbacks);
+ const restored=createSesumCollector(f.options);assert.equal(restored.discoveryTrace({productId:'123'}).products[0].productId,'123');assert.deepEqual(saved(f),before);assert.equal(f.received.length,callbacks);
+});
 const DIRECT_BUILD='sesum-collector-build-1.7.1-1';
 const variableProduct=(job,{basis=true,price=109,observedAt='2026-11-09T10:00:00.000000+00:00',proofChanges={}}={})=>{
   const result=product(job,{price,observedAt});Object.assign(result.product,{name:'Synthetic whole ginger root',weight:null,weightUnit:null,soldByWeight:true,ean:null});

@@ -78,6 +78,7 @@ async function execute(command, args, flags) {
     case 'shopping-sesum-offers': result=await request('/api/shopping/sesum/offers'+(args[0]?'?familyId='+encodeURIComponent(args[0]):''));break;
     case 'shopping-sesum-offer-review': result=await request('/api/shopping/sesum/offer-review','POST',json(args[0]));break;
     case 'shopping-sesum-catalog': result=await request('/api/shopping/sesum/catalog'+(args[0]?'?familyId='+encodeURIComponent(args[0]):''));break;
+    case 'shopping-sesum-trace': {const q=new URLSearchParams();if(args[0]==='family')q.set('familyId',args[1]??'');else if(args[0]==='product')q.set('productId',args[1]??'');else throw Error('Bruk shopping-sesum-trace family ID eller product ID.');result=await request('/api/shopping/sesum/discovery-trace?'+q);break;}
     case 'shopping-sesum-review': result=await request('/api/shopping/sesum/review','POST',json(args[0]));break;
     case 'shopping-sesum-register': result=await request('/api/shopping/sesum/register','POST',json(args[0]));break;
     case 'shopping-agent-guide': result={instructions:shoppingProtocol(args)};break;
