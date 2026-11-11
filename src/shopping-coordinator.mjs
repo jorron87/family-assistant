@@ -3,13 +3,14 @@ import {existsSync,readFileSync,writeFileSync,renameSync,mkdirSync,mkdtempSync} 
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {encrypt,decrypt,loadKey} from './crypto.mjs';
-import {agentContextPages,agentStartupContext,agentContextSummary} from './shopping-agent-context.mjs';
+import {agentStartupContext,agentContextSummary} from './shopping-agent-context.mjs';
 import {shoppingProtocol} from './shopping-agent-protocol.mjs';
 import {workerManifest,workerBatch,workerEligible,applyWorkerProposal,proposalHash,workerTaskSignature,workerOperationGuide} from './shopping-worker-contract.mjs';
 import {shoppingAgentJobs} from './shopping-agent-jobs.mjs';
 import {launchShoppingWorker} from './shopping-worker-runtime.mjs';
 import {placementRecallHints,guardNegativePlacement} from './shopping-placement-recall.mjs';
 
+import {workerContextPages,planWorkerContextDelivery} from './shopping-context-delivery.mjs';
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const terminal=s=>!['starting','running'].includes(s.status);
 const text=(s,min=10,max=60000)=>{if(typeof s!=='string'||s.trim().length<min||s.length>max)throw Error('Concrete bounded evidence is required.');return s.trim();};
@@ -29,15 +30,14 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
  if(state.active)for(const slot of state.active.slots)if(!terminal(slot))slot.lastHeartbeat=clock();
  const frameFile=id=>join(framesDir,id+'.enc');
  const allKeys=slot=>new Set(slot.assignment.jobs.flatMap(j=>j.sourceKeys));
- const loadFrame=slot=>{if(!frames.has(slot.id)){const frame=read(frameFile(slot.id));frame.served=[];if(frame.providedContextFingerprint===frame.packet.contextFingerprint)frame.served=Object.entries(agentContextPages(frame.packet)).flatMap(([s,p])=>p.map((_,i)=>s+':'+i));frames.set(slot.id,frame);}return frames.get(slot.id);};
+ const loadFrame=slot=>{if(!frames.has(slot.id)){const frame=read(frameFile(slot.id));frame.served=[];if(frame.providedContextFingerprint===frame.packet.contextFingerprint)frame.served=Object.entries(workerContextPages(frame)).flatMap(([s,p])=>p.map((_,i)=>s+':'+i));frames.set(slot.id,frame);}return frames.get(slot.id);};
  const researchFile=(sourceKey,fp)=>join(researchDir,hash(sourceKey+'\0'+fp)+'.enc');
  const researchFor=packet=>packet.sources.flatMap((s,sourceIndex)=>{const file=researchFile(s.sourceKey,s.observation.sourceFingerprint);return existsSync(file)?[{sourceIndex,sourceKey:s.sourceKey,sourceFingerprint:s.observation.sourceFingerprint,authority:'Unapproved research only. Verify identity, current family rules and actual primary receipts before registration. No prices, stock or demand are approved.',notes:read(file)}]:[];});
  const groupReads=frame=>new Map(Object.entries(frame.groupReads??{}));
  function makeFrame(slot,packet,{provided=false,familyProvided=null,assignment=slot.assignment,previous=null,protocolsProvided=true}={}){
   const frame={packet,assignment,served:[],groupReads:previous?.groupReads??{},reads:previous?.reads??{},deliveredProtocols:previous?.deliveredProtocols??(protocolsProvided?[...new Set(packet.jobs.flatMap(j=>j.items.map(i=>i.do)))]:[]),providedContextFingerprint:provided?packet.contextFingerprint:null,familyBasisFingerprint:familyProvided};
-  if(provided)frame.served=Object.entries(agentContextPages(packet)).flatMap(([s,p])=>p.map((_,i)=>s+':'+i));
-  else if(typeof familyProvided==='string'&&familyProvided===agentStartupContext(packet,'coordinator').familyBasisFingerprint)frame.served=agentContextPages(packet).families.map((_,i)=>'families:'+i);
-  if(previous){const old=agentContextPages(previous.packet),current=agentContextPages(packet);for(const [section,pages]of Object.entries(current)){const delivered=new Set((old[section]??[]).filter((_,i)=>previous.served.includes(section+':'+i)).map(p=>proposalHash(p)));for(const [i,page]of pages.entries())if(delivered.has(proposalHash(page)))frame.served.push(section+':'+i);}frame.served=[...new Set(frame.served)];}
+  const familyDelivered=typeof familyProvided==='string'&&familyProvided===agentStartupContext(packet,'coordinator').familyBasisFingerprint;
+  const delivery=planWorkerContextDelivery(packet,{previous,provided,familyProvided:familyDelivered});frame.sourceRowsSeparate=delivery.sourceRowsSeparate;frame.served=delivery.served;
   frames.set(slot.id,frame);write(frameFile(slot.id),frame);return frame;
  }
  function authenticate(workerId,token){
@@ -45,12 +45,12 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
   if(!slot||terminal(slot)||!ownsLease()||state.safetyStop||shouldYield()||!timingSafeEqual(Buffer.from(digest),Buffer.from(slot.tokenHash)))throw Error('Worker capability is unavailable or revoked.');
   return slot;
  }
- function missingFramePages(frame){return Object.fromEntries(Object.entries(agentContextPages(frame.packet)).map(([section,pages])=>[section,pages.map((_,i)=>i).filter(i=>!frame.served.includes(section+':'+i))]).filter(([,pages])=>pages.length));}
+ function missingFramePages(frame){return Object.fromEntries(Object.entries(workerContextPages(frame)).map(([section,pages])=>[section,pages.map((_,i)=>i).filter(i=>!frame.served.includes(section+':'+i))]).filter(([,pages])=>pages.length));}
  function refresh(slot,input={}){
   const previous=loadFrame(slot);let assignment=previous.assignment;
   if(input.focus==='all')assignment=slot.assignment;
   else if(input.sourceKey||input.productKey){const jobs=slot.assignment.jobs.filter(j=>input.sourceKey?j.sourceKeys.includes(input.sourceKey):j.productKey===input.productKey);if(jobs.length!==1)throw Error('Focus must select one assigned product job.');assignment={...slot.assignment,jobs};}
-  const packet=store.shopping.agentContext(assignment),sameFamily=proposalHash(previous.packet.families)===proposalHash(packet.families)&&agentContextPages(previous.packet).families.every((_,i)=>previous.served.includes('families:'+i));
+  const packet=store.shopping.agentContext(assignment),sameFamily=proposalHash(previous.packet.families)===proposalHash(packet.families)&&workerContextPages(previous).families.every((_,i)=>previous.served.includes('families:'+i));
   if(input.reread===true)return makeFrame(slot,packet,{assignment,protocolsProvided:false});
   return makeFrame(slot,packet,{assignment,previous,provided:previous.providedContextFingerprint===packet.contextFingerprint,familyProvided:sameFamily?agentStartupContext(packet,'coordinator').familyBasisFingerprint:null});
  }
@@ -212,10 +212,10 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
   if(call==='shopping_read')return readWorker(slot,input);
   if(call==='shopping_propose')return propose(slot,input);
   if(call!=='shopping_context')throw Error('Unknown coordinator capability.');
-  const frame=input.refresh||!input.section?refresh(slot,input):loadFrame(slot),pages=agentContextPages(frame.packet);
+  const frame=input.refresh||!input.section?refresh(slot,input):loadFrame(slot),pages=workerContextPages(frame);
   if(input.section){const index=input.page??0;if(!pages[input.section]||!Number.isInteger(index)||!pages[input.section][index])throw Error('Unknown zero-based context page.');frame.served=[...new Set([...frame.served,input.section+':'+index])];return {section:input.section,page:index,totalPages:pages[input.section].length,...pages[input.section][index]};}
   const types=[...new Set(frame.packet.jobs.flatMap(j=>j.items.map(i=>i.do)))],newTypes=types.filter(t=>!frame.deliveredProtocols.includes(t));frame.deliveredProtocols.push(...newTypes);
-  return {currentTime:clockISO(clock),contextFingerprint:frame.packet.contextFingerprint,assignmentChanges:frame.packet.assignmentChanges,activeStagesEmpty:frame.packet.activeStagesEmpty,completionAuthority:frame.packet.completionAuthority,serialRequiredJobs:frame.packet.jobs.filter(job=>!workerEligible(job)).map(job=>({id:job.id,reason:'ordinary-agent-required',sourceKeys:job.sourceKeys,productKey:job.productKey})),remaining:{productJobs:frame.packet.jobs.length,byType:Object.fromEntries(types.map(t=>[t,frame.packet.jobs.flatMap(j=>j.items).filter(i=>i.do===t).length]))},...agentContextSummary(frame.packet,frame.familyBasisFingerprint,frame.providedContextFingerprint),requiredPages:Object.fromEntries(Object.entries(pages).map(([section,pages])=>[section,pages.map((_,i)=>i).filter(i=>!frame.served.includes(section+':'+i))])),readInstruction:'Read each listed requiredPages index once before proposing. Other pages were actually delivered with byte-identical contents; no approval is inferred. A header alone is enough only to report remaining work.',researchAvailable:researchFor(frame.packet).length,plausibleFamiliesToAssess:placementRecallHints(frame.packet,researchFor(frame.packet)).filter(r=>r.hints.length),...(newTypes.length?{protocol:shoppingProtocol(newTypes)+'\n'+workerOperationGuide(newTypes)}:{protocol:'Current stage contracts already supplied.'})};
+  return {currentTime:clockISO(clock),contextFingerprint:frame.packet.contextFingerprint,assignmentChanges:frame.packet.assignmentChanges,activeStagesEmpty:frame.packet.activeStagesEmpty,completionAuthority:frame.packet.completionAuthority,serialRequiredJobs:frame.packet.jobs.filter(job=>!workerEligible(job)).map(job=>({id:job.id,reason:'ordinary-agent-required',sourceKeys:job.sourceKeys,productKey:job.productKey})),remaining:{productJobs:frame.packet.jobs.length,byType:Object.fromEntries(types.map(t=>[t,frame.packet.jobs.flatMap(j=>j.items).filter(i=>i.do===t).length]))},...agentContextSummary(frame.packet,frame.familyBasisFingerprint,frame.providedContextFingerprint,pages),requiredPages:Object.fromEntries(Object.entries(pages).map(([section,pages])=>[section,pages.map((_,i)=>i).filter(i=>!frame.served.includes(section+':'+i))])),readInstruction:'Read each listed requiredPages index once before proposing. Other pages or their complete source rows were actually delivered with identical contents. Page packing can change; no approval is inferred. A header alone is enough only to report remaining work.',researchAvailable:researchFor(frame.packet).length,plausibleFamiliesToAssess:placementRecallHints(frame.packet,researchFor(frame.packet)).filter(r=>r.hints.length),...(newTypes.length?{protocol:shoppingProtocol(newTypes)+'\n'+workerOperationGuide(newTypes)}:{protocol:'Current stage contracts already supplied.'})};
  }
  function preferSerial(queue){
   const index=new Map();for(const item of queue)for(const key of [item.sourceKey,item.productKey,...(item.relatedSources??[]).map(r=>r.sourceKey)].filter(Boolean)){const rows=index.get(key)??[];rows.push(item);index.set(key,rows);}const keys=new Set(index.keys()),selected=new Set();

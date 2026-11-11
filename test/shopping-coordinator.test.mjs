@@ -27,6 +27,21 @@ function fixture(count=60,{large=false,chains=false}={}){
 }
 async function readAll(f,index=0,options={}){const h=await f.call(index,'shopping_context',options);for(const [section,count]of Object.entries(h.pages))for(let page=0;page<count;page++)await f.call(index,'shopping_context',{section,page});return h;}
 const startPool=(f,options={})=>f.coordinator.start({token:f.state.runLease.token,batches:f.plan.batches,pool:{capacity:3,batchSize:20,...options}});
+
+test('one actual source decision does not force delivered neighbouring products to be read again',async()=>{
+ const f=fixture(20);try{
+  f.start();const before=f.packet(0),decision=f.decisions(before).decisions.find(d=>d.status==='reviewed');
+  await f.call(0,'shopping_propose',{proposalId:'one-actual-source-decision',contextFingerprint:before.contextFingerprint,operation:'placement',input:{...f.decisions(before),decisions:[decision]}});
+  const after=f.packet(0),h=await f.call(0,'shopping_context',{refresh:true});
+  const previous=new Set(agentContextPages(before).sources.map(proposalHash)),packedMissing=agentContextPages(after).sources.filter(p=>!previous.has(proposalHash(p))).length;
+  assert.ok(h.requiredPages.sources.length<packedMissing,`${h.requiredPages.sources.length} changed source pages versus ${packedMissing} repacked pages`);
+  for(const page of h.requiredPages.sources){const p=await f.call(0,'shopping_context',{section:'sources',page});assert.deepEqual(p.items.map(s=>s.sourceKey),[decision.sourceKey]);}
+  assert.ok(h.requiredPages.jobs.length,'the changed current job still must be read');
+  const remaining=f.decisions(after).decisions.filter(d=>d.sourceKey!==decision.sourceKey);await assert.rejects(f.call(0,'shopping_propose',{proposalId:'without-current-job-read',contextFingerprint:after.contextFingerprint,operation:'placement',input:{...f.decisions(after),decisions:remaining}}),/Missing requiredPages/);
+  for(const [section,indexes]of Object.entries(h.requiredPages))for(const page of indexes)await f.call(0,'shopping_context',{section,page});
+  assert.equal((await f.call(0,'shopping_propose',{proposalId:'after-current-change-read',contextFingerprint:after.contextFingerprint,operation:'placement',input:{...f.decisions(after),decisions:remaining}})).saved,true);
+ }finally{f.close();}
+});
 function finish(f,index,outcome='deferred'){writeFileSync(join(f.launches[index].directory,'result.json'),JSON.stringify({outcome,summary:'Scoped current product work checked.',reason:'Downstream source registration requires a separate actual primary label review.'}));f.launches[index].onExit(0);}
 
 test('idle recovery requires a real lease receipt before startup and after acknowledged release',()=>{
