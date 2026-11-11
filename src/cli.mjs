@@ -307,6 +307,11 @@ const print = (value) => console.log(flags.has('--pretty') ? JSON.stringify(valu
 // batch: flere kommandoer i ett kall (hver runde til modellen koster hele konteksten på nytt). Kjøres i rekkefølge og stopper ved første feil.
 // Eksempel: batch '[{"cmd":"drive","args":["RAW","-","URL"]},{"cmd":"calendar","args":["EVENT"],"input":{...}}]'
 async function main() {
+  if(command==='help'||flags.has('--help')||!command){
+    const source=readFileSync(new URL(import.meta.url),'utf8');
+    const commands=[...new Set([...source.matchAll(/case\s+["']([a-z][a-z0-9-]*)["']\s*:/g)].map(m=>m[1]).concat(['batch','help']))].sort();
+    print({usage:'node src/cli.mjs COMMAND [ARGS] [--pretty]',commands,shoppingCommands:commands.filter(c=>c.startsWith('shopping')),shoppingStart:'Shopping commands are installed. For a dispatched batch use shopping-agent-context, read shopping-agent-page FILE SECTION PAGE, and shopping-agent-guide TYPE for its actual stages. shopping-queue --full shows the entire queue; a batch assignment never proves completion.',examples:['shopping-queue','shopping-jobs','shopping-agent-context','shopping-agent-guide shopping-product-review','shopping-catalog-review FILE','completion']});return;
+  }
   if (command === 'batch') {
     const steps = json(args[0]);
     if (!Array.isArray(steps) || !steps.length) throw new Error('batch krever en liste med {cmd, args, input?}.');
