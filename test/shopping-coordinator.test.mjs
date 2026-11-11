@@ -62,6 +62,17 @@ test('rolling claims and lane generations survive coordinator recovery without r
  const f=fixture(80);try{startPool(f);finish(f,0);const recovered=createShoppingCoordinator(f.options);recovered.tick();recovered.refill({queue:f.shop.queue()});assert.equal(f.launches.length,4);assert.equal(recovered.status().pool.activeWorkers,3);assert.equal(recovered.status().workers[0].generation,2);recovered.refill({queue:f.shop.queue()});assert.equal(f.launches.length,4);assert.equal(f.state.runLease.token,'owner-test-lease');}finally{f.close();}
 });
 
+test('out-of-order finishes refill several generations without duplicate claims or a fourth active worker',()=>{
+ const f=fixture(140),assignments=[],prepare=f.shop.agentContexts;f.shop.agentContexts=values=>{assignments.push(...values);return prepare(values);};try{
+  startPool(f);for(const index of [0,1,3,2]){finish(f,index);f.coordinator.refill({queue:f.shop.queue()});assert.equal(f.coordinator.status().pool.activeWorkers,3);}
+  const ids=assignments.flatMap(a=>a.jobs.map(j=>j.id));assert.equal(ids.length,140);assert.equal(new Set(ids).size,140);assert.equal(f.coordinator.status().pool.assignedJobs,140);assert.equal(f.coordinator.status().pool.refills,4);assert.deepEqual(f.coordinator.status().workers.map(w=>w.generation),[3,2,2]);assert.equal(f.state.runLease.token,'owner-test-lease');
+ }finally{f.close();}
+});
+
+test('a session job limit smaller than a full replacement keeps later work queued',()=>{
+ const f=fixture(80);try{startPool(f,{maxJobs:75});finish(f,0);f.coordinator.refill({queue:f.shop.queue()});assert.equal(f.coordinator.status().workers[0].jobs,15);assert.equal(f.coordinator.status().pool.assignedJobs,75);f.coordinator.tick();assert.equal(f.coordinator.status().pool.draining,true);assert.equal(f.coordinator.status().pool.stopReason,'session-job-limit');assert.equal(f.shop.queue().filter(i=>i.do==='shopping-sesum-placement-review').length,80);assert.equal(f.launches.length,4);}finally{f.close();}
+});
+
 test('session time, job budget and source handoff stop refill and let existing workers drain',()=>{
  for(const reason of ['time','jobs','source']){const f=fixture(80);try{
   startPool(f,reason==='time'?{durationMs:1000}:reason==='jobs'?{maxJobs:60}:{});finish(f,0);
