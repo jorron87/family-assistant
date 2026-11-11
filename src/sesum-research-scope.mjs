@@ -21,13 +21,14 @@ export function groupPlacementWork(rows,identity){
  return [...groups.values()].map(row=>row.relatedSources.length?{...row,sourceCount:row.relatedSources.length+1}:row);
 }
 
-// A review is reusable only on the exact same source, registration and whole
-// family basis. Newer holds and explicit reopen tombstones always win.
+// Reuse needs the same source/registration and current family semantics.
+// Equivalent fingerprints come only from current, explicitly reviewed subgroup
+// containment. Newer holds and explicit reopen tombstones always win.
 export function placementDelta(source,registrationFingerprint,latest,families){
  const valid=latest&&latest.sourceKey===source.sourceKey&&['reviewed','no-active-family'].includes(latest.status)&&latest.reviewedAllFamilies===true&&latest.sourceFingerprint===source.sourceFingerprint&&latest.registrationFingerprint===registrationFingerprint&&latest.familyProofVersion===1&&Array.isArray(latest.reviewedFamilies);
  const prior=new Map(valid?latest.reviewedFamilies.map(f=>[f.familyId,f.familyFingerprint]):[]);
- const retained=families.filter(f=>prior.get(f.familyId)===f.familyFingerprint),ids=new Set(retained.map(f=>f.familyId));
- return {familiesToReview:families.filter(f=>!ids.has(f.familyId)).map(f=>f.familyId),retainedFamilyIds:[...ids],retainedTargets:valid?(latest.targets??[]).filter(t=>ids.has(t.familyId)):[]};
+ const retained=families.filter(f=>[f.familyFingerprint,...(f.equivalentFamilyFingerprints??[])].includes(prior.get(f.familyId))),ids=new Set(retained.map(f=>f.familyId)),current=new Map(retained.map(f=>[f.familyId,f.familyFingerprint]));
+ return {familiesToReview:families.filter(f=>!ids.has(f.familyId)).map(f=>f.familyId),retainedFamilyIds:[...ids],retainedTargets:valid?(latest.targets??[]).filter(t=>ids.has(t.familyId)).map(t=>({...t,familyFingerprint:current.get(t.familyId)})):[]};
 }
 export function placementProof(source,familySetFingerprint,registrationFingerprint,latest,history=[],families=null){
  const same=r=>r?.sourceKey===source.sourceKey&&r.sourceFingerprint===source.sourceFingerprint&&r.registrationFingerprint===registrationFingerprint&&r.familySetFingerprint===familySetFingerprint;

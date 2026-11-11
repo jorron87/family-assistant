@@ -1,4 +1,5 @@
 import {createHash,randomUUID} from 'node:crypto';
+import {scopeCoverageCurrent,effectiveScopeVariants} from './shopping-family-scope.mjs';
 import {validateNutrition,purchaseNutrition} from './shopping-nutrition.mjs';
 import {calibrateMarket} from './shopping-market.mjs';
 import {createMarketCatalog} from './shopping-catalog.mjs';
@@ -1333,8 +1334,9 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       if(g.unit!==w.unit)throw Error('Bibliotekgruppens enhet stemmer ikke med varegruppen.');
       const requires=link.requires??[],brands=link.brands??[],excludeProductKeys=link.excludeProductKeys??[];
       if(!Array.isArray(requires)||requires.some(x=>!LINK_REQUIREMENTS.has(x))||!Array.isArray(brands)||brands.some(x=>!text(x))||!Array.isArray(excludeProductKeys)||excludeProductKeys.some(x=>!reader.product(x)))throw Error('Ugyldige krav i bibliotekkoblingen.');
-      return {groupId:link.groupId,groupFingerprint:g.fingerprint,evidence:required(link.evidence,'Gruppebelegg'),requires,brands,excludeProductKeys,reviewedAt:at};
+      return {groupId:link.groupId,groupFingerprint:g.fingerprint,evidence:required(link.evidence,'Gruppebelegg'),requires,brands,excludeProductKeys,reviewedAt:at,...(link.scopeCoverage!==undefined?{scopeCoverage:structuredClone(link.scopeCoverage)}:{})};
     });
+    for(const link of links)if(link.scopeCoverage!==undefined&&!scopeCoverageCurrent(link,links,id=>reader.group(id)))throw Error('Scope coverage requires an explicitly reviewed current parent/child definition and cannot weaken brand, attribute or exclusion requirements.');
     return update(()=>{w.variants=links;w.family={kind:links.length?'library':'own',evidence,at};return {watchId:w.id,familyId:w.id,decision:w.family,links};});
   }
   // Sends own, narrow families back to be built. The earlier reasoning stays with
@@ -1511,18 +1513,20 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   function buildSesumPlacementFamilies(){
     const reader=libReader();
     const families=Object.values(s.watches).filter(w=>w.enabled!==false).map(w=>{
-      const variants=(w.variants??[]).map(link=>{const group=reader?.group(link.groupId);return {groupId:link.groupId,groupFingerprint:group?.fingerprint??null,reviewedGroupFingerprint:link.groupFingerprint,requires:[...(link.requires??[])].sort(),brands:[...(link.brands??[])].map(normalized).sort(),excludeProductKeys:[...(link.excludeProductKeys??[])].sort(),group:group?{name:group.name,unit:group.unit,inclusion:group.inclusion,exclusions:group.exclusions,comparisonBasis:group.comparisonBasis}:null};}).sort((a,b)=>a.groupId.localeCompare(b.groupId));
+      const variants=(w.variants??[]).map(link=>{const group=reader?.group(link.groupId);return {groupId:link.groupId,groupFingerprint:group?.fingerprint??null,reviewedGroupFingerprint:link.groupFingerprint,requires:[...(link.requires??[])].sort(),brands:[...(link.brands??[])].map(normalized).sort(),excludeProductKeys:[...(link.excludeProductKeys??[])].sort(),group:group?{name:group.name,unit:group.unit,inclusion:group.inclusion,exclusions:group.exclusions,comparisonBasis:group.comparisonBasis}:null,...(link.scopeCoverage?{scopeCoverage:structuredClone(link.scopeCoverage)}:{})};}).sort((a,b)=>a.groupId.localeCompare(b.groupId));
       const decision=w.family?{kind:w.family.kind,...(w.family.kind==='own'?{evidence:w.family.evidence}:{} )}:null;
+      for(const variant of variants)if(variant.scopeCoverage)variant.scopeCoverageCurrent=scopeCoverageCurrent(variant,variants,id=>reader?.group(id));
       const criteria={familyId:w.id,name:w.name,unit:w.unit,note:w.note??'',decision,variants};
-      return {...criteria,familyFingerprint:hash(JSON.stringify(criteria))};
+      const familyFingerprint=hash(JSON.stringify({...criteria,variants:effectiveScopeVariants(variants,id=>reader?.group(id))})),fullFingerprint=hash(JSON.stringify({...criteria,variants:variants.map(({scopeCoverage,scopeCoverageCurrent,...v})=>v)}));
+      return {...criteria,familyFingerprint,...(familyFingerprint!==fullFingerprint?{equivalentFamilyFingerprints:[fullFingerprint]}:{})};
     }).sort((a,b)=>a.familyId.localeCompare(b.familyId));
     return {families,familySetFingerprint:hash(JSON.stringify(families.map(f=>[f.familyId,f.familyFingerprint])))};
   }
   function sesumResearchedFamilyIds(source,families=sesumPlacementFamilies().families){
-    const current=new Map(families.map(f=>[f.familyId,f.familyFingerprint]));
+    const current=new Map(families.map(f=>[f.familyId,new Set([f.familyFingerprint,...(f.equivalentFamilyFingerprints??[])])]));
     const own=s.sesumPlacementTargets[source.sourceKey],record=source.sourceKey.startsWith('sesum-product:')?null:sesumPrices.sourceRecord(source.sourceKey),neutral=record?sesumCatalogue.record('sesum-product:'+record.source.id):null;
     const reviews=[...(own?.sourceFingerprint===source.sourceFingerprint?[own]:[]),...(neutral&&sesumCatalogue.current(record.source)&&s.sesumPlacementTargets[neutral.sourceKey]?.sourceFingerprint===neutral.sourceFingerprint?[s.sesumPlacementTargets[neutral.sourceKey]]:[])];
-    return [...new Set(reviews.flatMap(review=>review.targets.filter(target=>current.get(target.familyId)===target.familyFingerprint).map(target=>target.familyId)))];
+    return [...new Set(reviews.flatMap(review=>review.targets.filter(target=>current.get(target.familyId)?.has(target.familyFingerprint)).map(target=>target.familyId)))];
   }
   function sesumEffectiveFamilyIds(source,families){const prior=Object.entries(s.sesumFamilyReviews[source.sourceKey]??{}).filter(([id,row])=>s.watches[id]?.enabled!==false&&s.watches[id]&&(row.status==='excluded'||row.holdExcluded===true)).map(([id])=>id);return [...new Set([...source.familyIds,...sesumResearchedFamilyIds(source,families),...prior])];}
   function currentSesumPlacement(source,semantic,registrationFingerprint){

@@ -2,6 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {researchScope,createResearchScope,groupPlacementWork,placementProof,placementDelta} from '../src/sesum-research-scope.mjs';
 
+test('current explicit scope equivalence reuses the latest positive without reviving an older negative or changing its read time',()=>{
+ const source={sourceKey:'sesum:KIWI:1',sourceFingerprint:'source'},families=[{familyId:'vegetable',familyFingerprint:'parent-scope',equivalentFamilyFingerprints:['parent-with-covered-child']}],latest={sourceKey:source.sourceKey,sourceFingerprint:'source',registrationFingerprint:'registered',familySetFingerprint:'old-expanded-set',status:'reviewed',reviewedAllFamilies:true,familyProofVersion:1,reviewedFamilies:[{familyId:'vegetable',familyFingerprint:'parent-with-covered-child'}],targets:[{familyId:'vegetable',familyFingerprint:'parent-with-covered-child',equivalenceEvidence:'Actual current positive ingredient and form assessment.'}],reviewedAt:'2026-11-10T12:00:00Z'},older={...latest,status:'no-active-family',targets:[],familySetFingerprint:'current-parent-set',historyProofVersion:2};
+ const proof=placementProof(source,'current-parent-set','registered',latest,[older],families);assert.equal(proof.status,'reviewed');assert.equal(proof.targets[0].familyFingerprint,'parent-scope');assert.equal(proof.reviewedAt,latest.reviewedAt);assert.equal(latest.targets[0].familyFingerprint,'parent-with-covered-child');assert.deepEqual(placementDelta(source,'registered',latest,families).familiesToReview,[]);
+ assert.equal(placementProof({...source,sourceFingerprint:'changed'},'current-parent-set','registered',latest,[],families),null);
+ assert.equal(placementProof(source,'changed-set','registered',latest,[],[{familyId:'vegetable',familyFingerprint:'new-actual-requirements'}]),null);
+ assert.equal(placementProof(source,'current-parent-set','registered',{...latest,status:'blocked'},[older],families),null);
+});
+
 test('compiled routing preserves all results and a later read recompiles changed terms',()=>{
  const families=[{familyId:'milk'},{familyId:'salt'},{familyId:'cheese'},{familyId:'beans'}],terms={milk:['melk','mjølk'],salt:['salt'],cheese:['ost','gulost',null,'ab'],beans:['kaffebønner']};
  const original=(source,f,t)=>{
