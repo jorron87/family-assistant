@@ -116,3 +116,9 @@ test('native source shelves keep their exact names and broad root categories do 
 test('a disabled native-category example never replaces the existing explorer or enables native worker jobs',()=>{
  const shop=shoppingStore({},{save(){},now:()=>new Date(at),assortmentConfig:{enabled:false,familySource:'sesum'}});assert.equal(shop.taxonomy,null);assert.deepEqual(shop.assortment.work(),[]);assert.equal(shop.assortment.status().enabled,false);
 });
+
+test('complete Sesum snapshots retire removed categories while partial receipts preserve unrelated definitions and history',()=>{
+ const f=fixture();f.catalogue.receiveOda({products:[oda()],observedAt:at});const row=f.taxonomy.dossier('oda:ODA_NO:10');f.taxonomy.place({productKey:row.productKey,sourceFingerprint:row.sourceFingerprint,categoryId:'284',categoryFingerprint:f.taxonomy.definition('284').fingerprint,reviewed:true,evidence:'Actual raw duck product and the native source category And were read.'});
+ f.taxonomy.receive({categories:[categories[0]],fetchedAt:at});assert.equal(f.taxonomy.status().categories,4);f.taxonomy.receive({categories:[categories[0]],completeTree:true,fetchedAt:at});assert.equal(f.taxonomy.status().categories,1);assert.equal(f.taxonomy.definition('284'),null);assert.equal(f.taxonomy.work().length,1);assert.equal(f.taxonomy.reader().group('sesum-category:284'),null);assert.ok(f.state.categories['284'].retiredAt);assert.ok(f.state.categoryPlacements['oda:ODA_NO:10']);
+ assert.throws(()=>f.taxonomy.receive({categories:[categories[2]],completeTree:true,fetchedAt:at}),/Incomplete/);f.taxonomy.receive({categories,completeTree:true,fetchedAt:at});assert.equal(f.taxonomy.status().categories,4);assert.equal(f.taxonomy.work().length,0);
+});

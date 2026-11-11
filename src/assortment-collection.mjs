@@ -105,7 +105,7 @@ export function createAssortmentCollection({dataDir,config={},kassal,receiveSesu
      job.pendingMemberships={productIds:products.map(u=>new URL(u).pathname.match(/^\/produkt\/(\d+)/)[1]),category:{id:job.category,name:result.categoryName??null,url:job.url},observedAt:input.fetchedAt};save(job);
      await replayMemberships(job);
     }
-    if(result.categories?.length){if(job.category==='index'&&result.categories.length!==result.total)throw Error('Incomplete native category tree.');job.pendingCategories={categories:result.categories,fetchedAt:input.fetchedAt,sourceUrl:job.url};save(job);await receiveCategories(job.pendingCategories);delete job.pendingCategories;job.categoryTreeReceipt=true;}
+    if(result.categories?.length){if(job.category==='index'&&result.categories.length!==result.total)throw Error('Incomplete native category tree.');job.pendingCategories={categories:result.categories,completeTree:job.category==='index',fetchedAt:input.fetchedAt,sourceUrl:job.url};save(job);await receiveCategories(job.pendingCategories);delete job.pendingCategories;job.categoryTreeReceipt=true;}
    }else{
     const product=productResult(result,job,chains,new Date(clock()));
     // Save the complete validated source receipt before callback. On failure

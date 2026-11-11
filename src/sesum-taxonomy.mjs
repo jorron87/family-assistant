@@ -13,7 +13,7 @@ export function createSesumTaxonomy(state,{persist=null,save=()=>{},now=()=>new 
  let cachedRevision=-1,cachedBase=null,cached=null,cachedOdaIndex=null,cachedOdaRows=[];
  const clock=()=>new Date(now()).getTime();
  const commit=patch=>{state.revision++;if(persist)persist({revision:state.revision,...patch});else save();};
- const definition=id=>Object.hasOwn(state.categories,id)?state.categories[id]:null;
+ const definition=id=>Object.hasOwn(state.categories,id)&&!state.categories[id].retiredAt?state.categories[id]:null;
  function path(id){const seen=new Set(),out=[];while(id){if(seen.has(id))throw Error('Sesum category hierarchy contains a cycle.');seen.add(id);const row=definition(id);if(!row)break;out.unshift(row);id=row.parentId;}return out;}
  function receive(input){
   if(!Array.isArray(input.categories)||input.categories.length>20000||!current(input.fetchedAt,clock()+60000,36500))throw Error('Invalid native category receipt.');
@@ -21,14 +21,14 @@ export function createSesumTaxonomy(state,{persist=null,save=()=>{},now=()=>new 
   for(const raw of input.categories){const id=native(raw.id),parentId=raw.parentId==null?null:native(raw.parentId);if(id===parentId||seen.has(id)||typeof raw.name!=='string'||!raw.name.trim()||raw.name.length>1000)throw Error('Invalid/duplicate native category.');seen.add(id);
    const row={id,name:raw.name,parentId,sourceUrl:raw.sourceUrl??definition(id)?.sourceUrl??null};row.fingerprint=hash([id,row.name,parentId]);next.set(id,{...row,observedAt:input.fetchedAt});
   }
-  const combined={...state.categories,...Object.fromEntries(next)};
+  const combined=input.completeTree===true?Object.fromEntries(next):{...state.categories,...Object.fromEntries(next)};
   for(const row of next.values()){const seen=new Set([row.id]);let parent=row.parentId;while(parent){if(seen.has(parent)||!Object.hasOwn(combined,parent))throw Error('Incomplete/cyclic native category tree.');seen.add(parent);parent=combined[parent].parentId;}}
-  const changed=[...next].filter(([id,row])=>definition(id)?.fingerprint!==row.fingerprint||definition(id)?.sourceUrl!==row.sourceUrl);if(changed.length){for(const [id,row]of changed)state.categories[id]=row;commit({categories:changed});}
+  const changed=[...next].filter(([id,row])=>definition(id)?.fingerprint!==row.fingerprint||definition(id)?.sourceUrl!==row.sourceUrl);if(input.completeTree===true)for(const [id,row]of Object.entries(state.categories))if(!next.has(id)&&!row.retiredAt)changed.push([id,{...row,retiredAt:input.fetchedAt}]);if(changed.length){for(const [id,row]of changed)state.categories[id]=row;commit({categories:changed});}
   return {observed:next.size,changed:changed.length};
  }
  function sourceCategory(row){
   const own=row.raw?.categoryPathIds??[];
-  if(own.length){if(own.some(id=>!definition(id))||new Set(own.map(String)).size!==own.length)return null;return String(own.at(-1));}
+  if(own.length&&own.every(id=>definition(id))&&new Set(own.map(String)).size===own.length)return String(own.at(-1));
   const observed=(row.sourceCategories??row.raw?.sourceCategories??[]).map(c=>String(c.id)).filter(id=>definition(id));
   const deepest=observed.filter(id=>!observed.some(other=>other!==id&&path(other).some(c=>c.id===id)));
   return deepest.length===1?deepest[0]:null;
@@ -54,7 +54,7 @@ export function createSesumTaxonomy(state,{persist=null,save=()=>{},now=()=>new 
   state.categoryPlacements[row.productKey]=record;commit({categoryPlacements:[[row.productKey,record]],categoryPlacementHistory:prior?[prior]:[]});return structuredClone(record);
  }
  const scopedOda=()=>{const scope=odaScope();return odaRows().filter(row=>!scope||scope.has(Number(row.nativeId))||scope.has(String(row.nativeId)));};
- function work(){if(!Object.keys(state.categories).length)return [];return scopedOda().filter(row=>!placement(row)).map(row=>({do:'shopping-oda-category',productKey:row.productKey,name:row.product.name,assortmentFingerprint:row.sourceFingerprint,fingerprint:row.sourceFingerprint,reason:'place-unassigned-oda-in-native-sesum-category'}));}
+ function work(){if(!Object.values(state.categories).some(c=>!c.retiredAt))return [];return scopedOda().filter(row=>!placement(row)).map(row=>({do:'shopping-oda-category',productKey:row.productKey,name:row.product.name,assortmentFingerprint:row.sourceFingerprint,fingerprint:row.sourceFingerprint,reason:'place-unassigned-oda-in-native-sesum-category'}));}
  function linkWatch(input){
   const family=watchFamilies().find(f=>f.familyId===input.familyId),category=definition(native(input.categoryId));
   if(!family||family.requirementsFingerprint!==input.requirementsFingerprint)throw Error('Read the current household requirements before category association.');
@@ -79,7 +79,7 @@ export function createSesumTaxonomy(state,{persist=null,save=()=>{},now=()=>new 
   const base=baseReader();if(!base)return null;const index=base.index();
   if(cachedRevision!==state.revision||cachedBase!==index){
    const out={familySource:'sesum',groups:{},members:{},products:{},qualityNotes:{}},placements=new Map();
-   for(const category of Object.values(state.categories)){const ancestors=path(category.id);out.groups[key(category.id)]={name:category.name,category:ancestors[0]?.name??category.name,unit:null,fingerprint:category.fingerprint,sourceCategory:true,nativeCategoryId:category.id,parentId:category.parentId?key(category.parentId):null,path:ancestors.map(c=>c.name),inclusion:'Varer i Sesums kategori «'+category.name+'». Kategorien kan inneholde forskjellige varianter.',exclusions:[],qualityBasis:'Råvare- og næringsfakta vises når de er dokumentert.',comparisonBasis:'Pakningspriser og dokumenterte kg/l/stk-priser. Ulike enheter sammenlignes hver for seg.'};out.members[key(category.id)]=[];}
+   for(const category of Object.values(state.categories).filter(c=>!c.retiredAt)){const ancestors=path(category.id);out.groups[key(category.id)]={name:category.name,category:ancestors[0]?.name??category.name,unit:null,fingerprint:category.fingerprint,sourceCategory:true,nativeCategoryId:category.id,parentId:category.parentId?key(category.parentId):null,path:ancestors.map(c=>c.name),inclusion:'Varer i Sesums kategori «'+category.name+'». Kategorien kan inneholde forskjellige varianter.',exclusions:[],qualityBasis:'Råvare- og næringsfakta vises når de er dokumentert.',comparisonBasis:'Pakningspriser og dokumenterte kg/l/stk-priser. Ulike enheter sammenlignes hver for seg.'};out.members[key(category.id)]=[];}
    for(const row of rows())if(row.metadata.source==='sesum'){const categoryId=sourceCategory(row);if(categoryId)for(const receipt of row.prices)placements.set(`sesum:${receipt.store}:${row.metadata.id}`,{categoryId,row,receipt});}
    for(const row of odaRows(base)){const p=placement(row);if(p)placements.set(row.libraryKey,{categoryId:p.categoryId});}
    for(const [productKey,{categoryId,row,receipt}]of placements){const original=index.products[productKey];if(!original)continue;const product={...original,quote:{...original.quote,reasons:[...original.quote.reasons]},assortmentPriceHorizonDays:priceHorizonDays};
@@ -98,9 +98,9 @@ export function createSesumTaxonomy(state,{persist=null,save=()=>{},now=()=>new 
  }
  function search(query,{offset=0,limit=20,expectedFingerprint=null}={}){
   if(typeof query!=='string'||query.trim().length<2||query.length>200||!Number.isSafeInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>100)throw Error('Use a category query and bounded pagination.');
-  const terms=query.toLocaleLowerCase('nb-NO').split(/\s+/u),matches=Object.values(state.categories).map(c=>({...c,groupId:key(c.id),groupFingerprint:c.fingerprint,path:path(c.id).map(p=>({id:p.id,name:p.name})),score:terms.reduce((n,t)=>n+(c.name.toLocaleLowerCase('nb-NO').includes(t)?10:0),0)})).filter(c=>c.score).sort((a,b)=>b.score-a.score||a.id.localeCompare(b.id));
+  const terms=query.toLocaleLowerCase('nb-NO').split(/\s+/u),matches=Object.values(state.categories).filter(c=>!c.retiredAt).map(c=>({...c,groupId:key(c.id),groupFingerprint:c.fingerprint,path:path(c.id).map(p=>({id:p.id,name:p.name})),score:terms.reduce((n,t)=>n+(c.name.toLocaleLowerCase('nb-NO').includes(t)?10:0),0)})).filter(c=>c.score).sort((a,b)=>b.score-a.score||a.id.localeCompare(b.id));
   const fingerprint=hash(matches);if(expectedFingerprint&&expectedFingerprint!==fingerprint)throw Error('Category search changed; read a new result.');const items=matches.slice(offset,offset+limit),hasMore=offset+items.length<matches.length;return {items,total:matches.length,offset,limit,hasMore,nextOffset:hasMore?offset+items.length:null,fingerprint,authority:'Exact native Sesum taxonomy. Same names at different levels keep their different source IDs.'};
  }
- const status=()=>{const families=watchFamilies(),links=watchLinks(families),scope=odaScope(),owned=new Map(rows().filter(r=>r.metadata.source==='oda').map(r=>[String(r.metadata.id),r])),missing=scope?[...scope].filter(id=>!owned.has(String(id))):[];const source=rows().filter(r=>r.metadata.source==='sesum'),oda=odaRows(),scoped=scopedOda(),unplaced=scoped.filter(r=>!placement(r));return {familySource:'sesum',householdFamilies:families.length,householdCategoriesLinked:links.filter(l=>l.status==='linked').length,odaImportMissingProducts:missing.length,odaImportMissingIds:missing.map(String),odaUnavailableProducts:[...owned.values()].filter(r=>scope&&(scope.has(Number(r.metadata.id))||scope.has(String(r.metadata.id)))&&!r.available).length,categories:Object.keys(state.categories).length,sesumProducts:source.length,sesumCategorized:source.filter(r=>sourceCategory(r)).length,odaCurrentProducts:oda.length,odaPlacedProducts:oda.filter(r=>placement(r)).length,odaProductsInCurrentScope:scoped.length,remainingProducts:unplaced.length,queuedProducts:unplaced.length,complete:Object.keys(state.categories).length>0&&!unplaced.length&&!missing.length&&links.every(l=>l.status==='linked')};};
+ const status=()=>{const families=watchFamilies(),links=watchLinks(families),scope=odaScope(),owned=new Map(rows().filter(r=>r.metadata.source==='oda').map(r=>[String(r.metadata.id),r])),missing=scope?[...scope].filter(id=>!owned.has(String(id))):[];const source=rows().filter(r=>r.metadata.source==='sesum'),oda=odaRows(),scoped=scopedOda(),unplaced=scoped.filter(r=>!placement(r));return {familySource:'sesum',householdFamilies:families.length,householdCategoriesLinked:links.filter(l=>l.status==='linked').length,odaImportMissingProducts:missing.length,odaImportMissingIds:missing.map(String),odaUnavailableProducts:[...owned.values()].filter(r=>scope&&(scope.has(Number(r.metadata.id))||scope.has(String(r.metadata.id)))&&!r.available).length,categories:Object.values(state.categories).filter(c=>!c.retiredAt).length,sesumProducts:source.length,sesumCategorized:source.filter(r=>sourceCategory(r)).length,odaCurrentProducts:oda.length,odaPlacedProducts:oda.filter(r=>placement(r)).length,odaProductsInCurrentScope:scoped.length,remainingProducts:unplaced.length,queuedProducts:unplaced.length,complete:Object.values(state.categories).some(c=>!c.retiredAt)&&!unplaced.length&&!missing.length&&links.every(l=>l.status==='linked')};};
  return {receive,place,linkWatch,work,dossier,search,reader,watchLinks,status,definition,sourceCategory};
 }
