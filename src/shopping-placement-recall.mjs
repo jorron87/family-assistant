@@ -15,6 +15,7 @@ export function guardNegativePlacement(packet,input,recall){
  const hints=new Map(recall.map(r=>[r.sourceKey,r.hints]));
  const decisions=rows.map(row=>{
   if(row.status!=='no-active-family')return row;
+  if(typeof row.evidence!=='string'||row.evidence.trim().length<10)throw Error('no-active-family decisions[].evidence requires the explicit actual negative assessment (at least 10 characters). Recall hints cannot supply missing evidence.');
   const keys=row.sourceKeys??[row.sourceKey],required=new Map(keys.flatMap(k=>(hints.get(k)??[]).map(h=>[h.familyIndex,h]))),assessed=row.negativeFamilyAssessments??[];
   for(const [index,hint]of required){const a=assessed.find(a=>a.familyIndex===index);if(typeof a?.evidence!=='string'||a.evidence.trim().length<20)throw Error('Before no-active-family, explicitly assess the plausible family '+JSON.stringify(hint)+' using negativeFamilyAssessments:[{familyIndex,evidence}]. A misleading name or exclusion from one family does not exclude the actual product from another. Unknown facts must remain blocked.');}
   if(!required.size)return row;

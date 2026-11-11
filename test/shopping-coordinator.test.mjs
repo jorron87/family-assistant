@@ -42,6 +42,17 @@ test('finished lease ownership survives restart privately and never authorizes r
  }finally{f.close();}
 });
 
+test('negative placement reuses an explicit assessment for an omitted display reason, never repairs explicit invalid reasons or missing evidence',async()=>{
+ const f=fixture(20);try{f.start();await readAll(f);const packet=f.packet(0),all=f.decisions(packet),negative=all.decisions.find(d=>d.status==='no-active-family');assert.ok(negative);
+  const propose=decision=>f.call(0,'shopping_propose',{proposalId:'negative-'+Math.random().toString(36).slice(2),contextFingerprint:packet.contextFingerprint,operation:'placement',input:{...all,decisions:[decision]}});
+  for(const reason of [null,'short'])await assert.rejects(propose({...negative,reason}),/input.reason/);
+  const {reason,...withoutReason}=negative;await assert.rejects(propose({...withoutReason,evidence:undefined}),/decisions\[\]\.evidence/);
+  assert.equal(f.shop.sesumPlacement(negative.sourceKey).items[0].review??null,null);
+  await propose(withoutReason);const review=f.shop.sesumPlacement(negative.sourceKey).items[0].review;
+  assert.equal(review.status,'no-active-family');assert.equal(review.reason,review.evidence);assert.ok(review.reason.includes(negative.evidence));assert.equal(review.reviewedFamilies.length,91);
+ }finally{f.close();}
+});
+
 test('one batched dataprep is exactly equivalent to three current packets and is not reused across requests',()=>{
  const f=fixture();try{const manifests=f.plan.batches.map(workerManifest),packets=f.shop.agentContexts(manifests);assert.deepEqual(packets,manifests.map(a=>f.shop.agentContext(a)));f.shop.watch({...f.state.shopping.watches['synthetic-beef-strips'],note:'New exact reviewed family criteria exclude all previous forms.'});const changed=f.shop.agentContexts(manifests);assert.notEqual(changed[0].contextFingerprint,packets[0].contextFingerprint);assert.deepEqual(changed,manifests.map(a=>f.shop.agentContext(a)));}finally{f.close();}
 });

@@ -136,7 +136,11 @@ export function bindPlacementDecisions(packet,decisions){
   if(!p||!packet.jobs.some(j=>j.items.some(i=>i.do==='shopping-sesum-placement-review'&&(i.sourceKey===source.sourceKey||i.relatedSources?.some(r=>r.sourceKey===source.sourceKey)))))throw Error('Source has no assigned current placement stage.');
   if(!Array.isArray(d.targets))throw Error('Explicit target decisions required.');
   const targets=d.targets.map(t=>{const f=Number.isInteger(t.familyIndex)?packet.families[t.familyIndex]:null;if(!f)throw Error('Invalid family index.');return {familyId:f.familyId,familyFingerprint:f.familyFingerprint,equivalenceEvidence:t.equivalenceEvidence};});
-  const input={kind:'placement',sourceKey:source.sourceKey,sourceFingerprint:p.sourceFingerprint,registrationFingerprint:p.registrationFingerprint,familySetFingerprint:p.familySetFingerprint,status:d.status,evidence:d.evidence,scopeEvidence:d.scopeEvidence,reviewedAllFamilies:d.reviewedAllFamilies,noActiveFamilyVerified:d.noActiveFamilyVerified,reason:d.reason,retryAt:d.retryAt,targets};
+  // An explicit negative assessment already supplied as evidence can fill the
+  // redundant display reason. Copy it exactly; never repair an explicit null,
+  // invalid reason, unknown product fact or another placement status.
+  const reason=d.reason===undefined&&d.status==='no-active-family'?d.evidence:d.reason;
+  const input={kind:'placement',sourceKey:source.sourceKey,sourceFingerprint:p.sourceFingerprint,registrationFingerprint:p.registrationFingerprint,familySetFingerprint:p.familySetFingerprint,status:d.status,evidence:d.evidence,scopeEvidence:d.scopeEvidence,reviewedAllFamilies:d.reviewedAllFamilies,noActiveFamilyVerified:d.noActiveFamilyVerified,reason,retryAt:d.retryAt,targets};
   if(['reviewed','no-active-family'].includes(d.status))input.reviewedFamilyIds=p.reviewDelta.familiesToReview;
   return input;
  });
