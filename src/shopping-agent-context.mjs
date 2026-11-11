@@ -134,7 +134,7 @@ export function bindPlacementDecisions(packet,decisions){
   const source=packet.sources[d.sourceIndex],p=source.placement;
   if(!['reviewed','no-active-family','blocked'].includes(d.status))throw Error('Invalid agent placement decision.');
   if(!p||!packet.jobs.some(j=>j.items.some(i=>i.do==='shopping-sesum-placement-review'&&(i.sourceKey===source.sourceKey||i.relatedSources?.some(r=>r.sourceKey===source.sourceKey)))))throw Error('Source has no assigned current placement stage.');
-  if(!Array.isArray(d.targets))throw Error('Explicit target decisions required.');
+  if(!Array.isArray(d.targets))throw Error('Placement decisions[].targets must be an explicit array for source '+source.sourceKey+'. Use targets:[] for a genuinely blocked or no-active-family decision, or explicit reviewed family targets for reviewed. A top-level targets field does not supply a decision field. No decision was saved.');
   const targets=d.targets.map(t=>{const f=Number.isInteger(t.familyIndex)?packet.families[t.familyIndex]:null;if(!f)throw Error('Invalid family index.');return {familyId:f.familyId,familyFingerprint:f.familyFingerprint,equivalenceEvidence:t.equivalenceEvidence};});
   // An explicit negative assessment already supplied as evidence can fill the
   // redundant display reason. Copy it exactly; never repair an explicit null,
