@@ -30,6 +30,7 @@ import {createKassal} from './kassal.mjs';
 import {createSesumCollector,sesumSenderAllowed} from './shopping-sesum.mjs';
 import {createShoppingCoordinator} from './shopping-coordinator.mjs';
 import {createShoppingWorkerScheduler} from './shopping-worker-scheduler.mjs';
+import {createShoppingHostActivity} from './shopping-worker-liveness.mjs';
 const shoppingWorkerRequests=createShoppingWorkerScheduler();
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -47,7 +48,8 @@ const feedRunner=createFeedRunner({store,root});
 const weatherConfig=readConfig('weather.json');
 const weather=createWeather({config:weatherConfig,dataDir:DATA_DIR});
 const phoneDispatcher=createPhoneDispatcher({store,root});
-const shoppingCoordinator=createShoppingCoordinator({store,root,dataDir:DATA_DIR,endpoint:`http://127.0.0.1:${Number(process.env.FAMILIEN_PORT??4318)}/api/shopping/agent-worker`,shouldYield:()=>process.env.FAMILIEN_NO_DISPATCH||readConfig('agent.json').enabled!==true||readConfig('collector.json').dispatch?.enabled!==true||store.phone.list().some(i=>['queued','processing'].includes(i.status))||store.calendarActions().length>0||store.shopping.stockIntake.work().some(i=>!i.retryAt||Date.parse(i.retryAt)<=Date.now())});
+const shoppingHostActivity=createShoppingHostActivity({dataDir:DATA_DIR});
+const shoppingCoordinator=createShoppingCoordinator({store,root,dataDir:DATA_DIR,workerActivityPath:shoppingHostActivity.file,endpoint:`http://127.0.0.1:${Number(process.env.FAMILIEN_PORT??4318)}/api/shopping/agent-worker`,shouldYield:()=>process.env.FAMILIEN_NO_DISPATCH||readConfig('agent.json').enabled!==true||readConfig('collector.json').dispatch?.enabled!==true||store.phone.list().some(i=>['queued','processing'].includes(i.status))||store.calendarActions().length>0||store.shopping.stockIntake.work().some(i=>!i.retryAt||Date.parse(i.retryAt)<=Date.now())});
 const ingestionDispatcher=createIngestionDispatcher({store,resources,root,dataDir:DATA_DIR,shoppingCoordinator,automaticShopping:true,automaticMarketPlan:()=>shoppingMaintenance.marketPlan()});
 // Nye visningsfiler serveres fra public/ etter navn (ingen stier fra klienten).
 const PUBLIC_FILES=new Map([['kiosk.css','text/css; charset=utf-8'],['kiosk-home.mjs','text/javascript; charset=utf-8'],['event-display.mjs','text/javascript; charset=utf-8'],['weather-widget.mjs','text/javascript; charset=utf-8'],['login-status.mjs','text/javascript; charset=utf-8'],['sun.mjs','text/javascript; charset=utf-8'],['dtf.mjs','text/javascript; charset=utf-8'],['home-tasks.mjs','text/javascript; charset=utf-8'],['celebrate.mjs','text/javascript; charset=utf-8']]);
@@ -56,8 +58,10 @@ PUBLIC_FILES.set('member-colors.mjs','text/javascript; charset=utf-8');
 let wasteRefresh;
 let restarting=false;
 const inFlight=new Set(),RESTART_BUSY_MS=Number(process.env.FAMILIEN_RESTART_BUSY_MS??3000),RESTART_DRAIN_MS=Number(process.env.FAMILIEN_RESTART_DRAIN_MS??45000);
+const hostWork=new Set(),publishHostActivity=()=>shoppingHostActivity.publish({runId:shoppingCoordinator.currentRunId(),activeRequests:inFlight.size+hostWork.size});
+function trackHostWork(kind,work){const entry={at:Date.now(),kind};hostWork.add(entry);publishHostActivity();const finish=()=>{hostWork.delete(entry);shoppingHostActivity.slow({kind,startedAt:entry.at});publishHostActivity();};try{const result=work();if(result?.then)return result.finally(finish);finish();return result;}catch(error){finish();throw error;}}
 const servers=[];
-const dispatchTick=()=>{if(!restarting&&!process.env.FAMILIEN_NO_DISPATCH){ingestionDispatcher.poll();phoneDispatcher.tick();}};
+const dispatchTick=()=>{if(!restarting&&!process.env.FAMILIEN_NO_DISPATCH)trackHostWork('dispatcher-poll',()=>{ingestionDispatcher.poll();phoneDispatcher.tick();});};
 const host = "127.0.0.1";
 const port = Number(process.env.FAMILIEN_PORT ?? 4318);
 oda=createOda({dataDir:DATA_DIR,shopping:store.shopping,redirectUrl:`http://127.0.0.1:${port}/api/shopping/oda/callback`});
@@ -97,10 +101,12 @@ async function json(req) {
 }
 
 async function handle(req, res) {
-  if(!req.url.startsWith('/api/doorbell/events')){const entry={at:Date.now()};inFlight.add(entry);res.once('close',()=>inFlight.delete(entry));}
+  let requestEntry;
+  if(!req.url.startsWith('/api/doorbell/events')){requestEntry={at:Date.now(),kind:'http-request'};inFlight.add(requestEntry);publishHostActivity();res.once('close',()=>{inFlight.delete(requestEntry);shoppingHostActivity.slow({kind:requestEntry.kind,startedAt:requestEntry.at});publishHostActivity();});}
   try {
     const path = new URL(req.url, `http://${host}:${port}`).pathname;
     const method = req.method;
+    if(requestEntry)requestEntry.kind=method+' '+path.split('/').slice(0,4).join('/');
     if(path.startsWith('/api/shopping/sesum/')){
       const extension=path==='/api/shopping/sesum/work'||path==='/api/shopping/sesum/receive';
       if(!sesumSenderAllowed(req.headers,{extension,write:method==='POST'}))return send(res,403,{error:'Ugyldig Sesum-avsender.'});
@@ -131,10 +137,11 @@ async function handle(req, res) {
     if(path==='/api/shopping/agent-worker'&&method==='POST'){
       if(!String(req.headers['content-type']??'').startsWith('application/json'))return send(res,403,{error:'Worker requires JSON.'});
       const input=await json(req);try{
+        if(requestEntry)requestEntry.kind='worker/'+String(input.call??'unknown').replace(/[^a-z_]/g,'').slice(0,40)+(input.input?.operation?'/'+String(input.input.operation).replace(/[^a-z-]/g,'').slice(0,40):'');
         // Authenticate immediately and again at execution, so a queued request
         // cannot survive a revoked capability or run after its client leaves.
         const pulse=await shoppingCoordinator.handle(input.workerId,req.headers['x-family-worker'],'heartbeat',{});
-        const result=input.call==='heartbeat'?pulse:await shoppingWorkerRequests.run({isConnected:()=>!req.aborted&&!res.destroyed,execute:()=>shoppingCoordinator.handle(input.workerId,req.headers['x-family-worker'],input.call,input.input)});
+        const result=input.call==='heartbeat'?{...pulse,hostPid:process.pid,runId:shoppingCoordinator.currentRunId()}:await shoppingWorkerRequests.run({isConnected:()=>!req.aborted&&!res.destroyed,execute:()=>trackHostWork('execute:'+requestEntry.kind,()=>shoppingCoordinator.handle(input.workerId,req.headers['x-family-worker'],input.call,input.input))});
         return send(res,200,result);
       }catch(error){return send(res,/capability.*revoked/.test(error.message)?403:409,{error:error.message});}
     }
@@ -301,7 +308,7 @@ async function handle(req, res) {
       store.phone.submit(item.id,'family-chat');send(res,200,item);queueMicrotask(dispatchTick);return;
     }
     if(path==='/api/phone/dispatcher'&&method==='GET')return send(res,200,phoneDispatcher.status());
-    if(path==='/api/ingestion/dispatcher'&&method==='GET')return send(res,200,{...ingestionDispatcher.status(),shoppingCoordinator:shoppingCoordinator.status(),automaticShopping:shoppingMaintenance.status()});
+    if(path==='/api/ingestion/dispatcher'&&method==='GET')return send(res,200,{...ingestionDispatcher.status(),shoppingCoordinator:shoppingCoordinator.status(),automaticShopping:shoppingMaintenance.status(),workerHostActivity:shoppingHostActivity.status()});
     if(path==='/api/ingestion/dispatcher/shopping'&&method==='POST'){
       if(req.headers['x-family-request']!=='1'||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host))return send(res,403,{error:'Ugyldig avsender.'});
       const bytes=await body(req,1024),input=bytes.length?JSON.parse(bytes.toString('utf8')):{};
@@ -517,10 +524,10 @@ const mobileHandle=phoneHandler({odaCart,productImages,oda,store,root,send,body,
 setInterval(dispatchTick,5000).unref();
 // Aktivitetskilder hentes direkte over HTTP med jevne mellomrom (kildene har egne intervaller i config/activity-feeds.json).
 if(!process.env.FAMILIEN_NO_DISPATCH&&!process.env.FAMILIEN_NO_FEED){setInterval(()=>feedRunner.run().catch(()=>{}),20*60000).unref();setTimeout(()=>feedRunner.run().catch(()=>{}),90000).unref();}
-if(!process.env.FAMILIEN_NO_DISPATCH){setInterval(()=>{if(!restarting)resources.tick().catch(()=>{});},15000).unref();}
+if(!process.env.FAMILIEN_NO_DISPATCH){setInterval(()=>{if(!restarting)trackHostWork('resource-maintenance',()=>resources.tick()).catch(()=>{});},15000).unref();}
 setInterval(()=>phoneDispatcher.renew(),15*60000).unref();
 setInterval(()=>ingestionDispatcher.renew(),15*60000).unref();
-if(!process.env.FAMILIEN_NO_DISPATCH)setInterval(()=>{if(!restarting){shoppingMaintenance.tick().catch(()=>{});ingestionDispatcher.tick();}},60000).unref();
+if(!process.env.FAMILIEN_NO_DISPATCH)setInterval(()=>{if(!restarting){trackHostWork('automatic-price-maintenance',()=>shoppingMaintenance.tick()).catch(()=>{});trackHostWork('ingestion-dispatch',()=>ingestionDispatcher.tick());}},60000).unref();
 setTimeout(dispatchTick,1000).unref();
 servers.push(createServer(mobileHandle));
 servers.at(-1).listen(port+2,process.env.FAMILIEN_PHONE_HOST??'127.0.0.1',()=>console.log(`Familien mobil: port ${port+2}`));

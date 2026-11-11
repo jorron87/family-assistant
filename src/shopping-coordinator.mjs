@@ -15,12 +15,12 @@ const terminal=s=>!['starting','running'].includes(s.status);
 const text=(s,min=10,max=60000)=>{if(typeof s!=='string'||s.trim().length<min||s.length>max)throw Error('Concrete bounded evidence is required.');return s.trim();};
 const clockISO=clock=>new Date(clock()).toISOString();
 const jobClaims=job=>[...new Set(['job:'+job.id,...job.sourceKeys.map(k=>'source:'+k),...(job.productKey?['product:'+job.productKey]:[]),...(job.items??[]).map(i=>i.researchProductKey?'metadata:'+i.researchProductKey:null).filter(Boolean)])];
-export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=launchShoppingWorker,clock=Date.now,alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}},shouldYield=()=>false,workerDeadlineMs=15*60000,inlineResearch=false}){
+export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=launchShoppingWorker,clock=Date.now,alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}},shouldYield=()=>false,workerDeadlineMs=15*60000,inlineResearch=false,workerActivityPath=null}){
  const key=loadKey(dataDir),file=join(dataDir,'shopping-coordinator.enc'),framesDir=join(dataDir,'shopping-worker-frames'),researchDir=join(dataDir,'shopping-worker-research');
  mkdirSync(framesDir,{recursive:true});mkdirSync(researchDir,{recursive:true});
  const read=file=>JSON.parse(decrypt(readFileSync(file),key).toString('utf8'));
  const write=(file,value)=>{writeFileSync(file+'.tmp',encrypt(Buffer.from(JSON.stringify(value),'utf8'),key));renameSync(file+'.tmp',file);};
- let state=existsSync(file)?read(file):{version:1,deferred:[]},frames=new Map();
+ let state=existsSync(file)?read(file):{version:1,deferred:[]},frames=new Map(),lastTickAt=clock(),hostResumeGraceUntil=0;
  state.deferred??=[];const currentLease=()=>typeof store.runLease==='function'?store.runLease():store.snapshot().runLease;
  const save=()=>write(file,state),ownsLease=()=>state.active&&currentLease()?.token===state.active.leaseToken;
  // Only the original supervisor owns its child handle, including on recovery.
@@ -134,10 +134,11 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
   const run=state.active;state.last={id:run.id,finishedAt:clock(),startedAt:run.startedAt,code:run.slots.some(s=>['error','safety-stop','stale','abandoned'].includes(s.status))?1:0,positiveProgress:run.positiveProgress,applied:run.applied,preempted:run.preempted===true,...(run.pool?{pool:run.pool}:{}),slots:run.slots.map(({tokenHash,assignment,proposals,...s})=>s)};state.active=null;frames.clear();save();
  }
  function tick(){
+  const at=clock();if(at-lastTickAt>30000)hostResumeGraceUntil=at+10000;lastTickAt=at;
   if(!state.active)return;
   if(!ownsLease()||shouldYield()){state.active.preempted=true;for(const slot of state.active.slots)if(!terminal(slot))slot.status='cancelled';save();finishIfIdle();return;}
   const pool=state.active.pool;if(pool&&!pool.draining&&(clock()>=pool.deadlineAt||pool.assignedJobs>=pool.maxJobs)){pool.draining=true;pool.stopReason=clock()>=pool.deadlineAt?'session-time-limit':'session-job-limit';save();}
-  for(const slot of [...state.active.slots]){if(terminal(slot))continue;if(slot.pid&&!alive(slot.pid)){let code=1;try{code=JSON.parse(readFileSync(join(slot.directory,'exit.json'),'utf8')).code;}catch{}completeSlot(slot,code);}else if(clock()>slot.deadlineAt||clock()-(slot.lastHeartbeat??slot.startedAt)>45000){slot.status='abandoned';slot.reason='Worker heartbeat or deadline expired; capability revoked and work retained.';frames.delete(slot.id);if(state.active.pool){state.active.pool.draining=true;state.active.pool.stopReason='worker-heartbeat-or-deadline';}save();}}
+  for(const slot of [...state.active.slots]){if(terminal(slot))continue;if(slot.pid&&!alive(slot.pid)){let code=1;try{code=JSON.parse(readFileSync(join(slot.directory,'exit.json'),'utf8')).code;}catch{}completeSlot(slot,code);}else if(clock()>slot.deadlineAt||clock()>=hostResumeGraceUntil&&clock()-(slot.lastHeartbeat??slot.startedAt)>45000){slot.status='abandoned';slot.reason='Worker heartbeat or deadline expired; capability revoked and work retained.';frames.delete(slot.id);if(state.active.pool){state.active.pool.draining=true;state.active.pool.stopReason='worker-heartbeat-or-deadline';}save();}}
   finishIfIdle();
  }
  function start({token,batches,pool=null}){
@@ -167,7 +168,7 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
    launches.push({slot,token,prompt:prompt+'\nPlausible family questions requiring explicit negativeFamilyAssessments before no-active-family, even when no research checkpoint exists: '+recallText+'. These are questions, never approvals; review all actual family criteria. Repair a missing-field or unread-page rejection before retrying. An input-format rejection alone is not missing product evidence and must not be recorded as a source-information blocker.'});
   }
   save();
-  for(const {slot,token,prompt}of launches){if(!state.active||state.safetyStop)break;try{const child=launch({root,directory:slot.directory,workerId:slot.id,token,endpoint,prompt,deadlineMs:workerDeadlineMs,onExit:code=>{if(state.active?.slots.includes(slot))completeSlot(slot,code);}});if(!terminal(slot)){slot.pid=child?.pid;slot.status='running';save();}}catch{completeSlot(slot,-1);}}
+  for(const {slot,token,prompt}of launches){if(!state.active||state.safetyStop)break;try{const child=launch({root,directory:slot.directory,workerId:slot.id,token,endpoint,prompt,deadlineMs:workerDeadlineMs,activityPath:workerActivityPath,runId:state.active.id,hostPid:process.pid,onExit:code=>{if(state.active?.slots.includes(slot))completeSlot(slot,code);}});if(!terminal(slot)){slot.pid=child?.pid;slot.status='running';save();}}catch{completeSlot(slot,-1);}}
  }
  function drain(reason='handoff'){
   if(state.active?.pool){state.active.pool.draining=true;state.active.pool.stopReason=reason;save();}
@@ -212,5 +213,5 @@ export function createShoppingCoordinator({store,root,dataDir,endpoint,launch=la
   const run=state.active,pool=run?.pool,latest=pool?[...new Map(run.slots.map(s=>[s.lane,s])).values()]:run?.slots??[],active=run?.slots.filter(s=>!terminal(s)).length??0;
   return {running:!!run,runId:run?.id??null,workers:latest.map(s=>({id:s.id,lane:s.lane,generation:s.generation,status:s.status,pid:s.pid??null,jobs:s.assignment.jobs.length,jobIds:s.assignment.jobs.map(j=>j.id),sourceCount:allKeys(s).size,startedAt:s.startedAt,lastHeartbeat:s.lastHeartbeat??null,appliedProposals:Object.values(s.proposals).filter(p=>p.status==='applied').length})),...(pool?{pool:{...pool,activeWorkers:active,finishedWorkers:run.slots.length-active,needsRefill:canRefill()&&active<pool.capacity&&(!active||clock()>=(pool.nextRefillAt??0))}}:{}),applied:run?.applied??0,last:state.last??null,attention:state.safetyStop??null};
  }
- return {start,tick,handle,status,refill,drain,preferSerial,researchFor};
+ return {start,tick,handle,status,refill,drain,preferSerial,researchFor,currentRunId:()=>state.active?.id??null};
 }

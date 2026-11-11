@@ -87,6 +87,13 @@ test('pause, foreign lease and a safety stop also prevent rolling replacements',
  for(const reason of ['pause','lease','safety']){const f=fixture(80);try{startPool(f);if(reason==='safety')finish(f,0,'safety-stop');else{finish(f,0);if(reason==='pause')f.yielding.value=true;else f.state.runLease={token:'foreign'};}f.coordinator.refill({queue:f.shop.queue()});assert.equal(f.launches.length,3);assert.equal(f.coordinator.status().running,false);assert.equal(f.state.runLease.token,reason==='lease'?'foreign':'owner-test-lease');}finally{f.close();}}
 });
 
+test('a stalled host gets one brief recovery turn without inventing worker heartbeats or extending deadlines',async()=>{
+ const f=fixture(80);try{startPool(f);f.time.at+=46000;f.coordinator.tick();assert.equal(f.coordinator.status().pool.activeWorkers,3);await Promise.all([0,1,2].map(i=>f.call(i,'heartbeat')));f.time.at+=10001;f.coordinator.tick();assert.equal(f.coordinator.status().pool.activeWorkers,3);
+ }finally{f.close();}
+ const silent=fixture(80);try{startPool(silent);silent.time.at+=46000;silent.coordinator.tick();silent.time.at+=10001;silent.coordinator.tick();assert.equal(silent.coordinator.status().running,false);assert.ok(silent.coordinator.status().last.slots.every(s=>s.status==='abandoned'));}finally{silent.close();}
+ const expired=fixture(80);try{startPool(expired);expired.time.at+=15*60000+1;expired.coordinator.tick();assert.equal(expired.coordinator.status().running,false);assert.ok(expired.coordinator.status().last.slots.every(s=>s.status==='abandoned'));}finally{expired.close();}
+});
+
 test('a runtime failure drains the pool instead of repeatedly launching new failing workers',()=>{
  const f=fixture(80);try{startPool(f);f.launches[0].onExit(1);assert.equal(f.coordinator.status().pool.stopReason,'worker-runtime-error');f.coordinator.refill({queue:f.shop.queue()});assert.equal(f.launches.length,3);assert.equal(f.coordinator.status().pool.stopReason,'worker-runtime-error');assert.equal(f.coordinator.status().pool.activeWorkers,2);finish(f,1);finish(f,2);assert.equal(f.coordinator.status().last.code,1);}finally{f.close();}
 });

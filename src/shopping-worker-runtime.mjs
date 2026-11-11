@@ -16,14 +16,14 @@ export function shoppingWorkerArgs(config,{directory,schemaFile,resultFile,mcpSc
  args.push('-');return args;
 }
 export function createShoppingWorkerLauncher({readAgentConfig=()=>readConfig('agent.json'),spawnProcess=spawn,executable=findCodex}={}){
- return ({root,directory,workerId,token,endpoint,prompt,deadlineMs,onExit})=>{
+ return ({root,directory,workerId,token,endpoint,prompt,deadlineMs,onExit,activityPath=null,runId=null,hostPid=process.pid})=>{
   const config=readAgentConfig();if(config.enabled!==true)throw Error('The owner has paused the agent.');
   const cli=executable();if(!cli)throw Error('Configured Codex runtime unavailable.');
   mkdirSync(directory,{recursive:true});
   const schemaFile=join(directory,'result.schema.json'),resultFile=join(directory,'result.json'),specFile=join(directory,'worker.json');
   writeFileSync(schemaFile,JSON.stringify(workerFinalSchema),'utf8');
   const args=shoppingWorkerArgs(config,{directory,schemaFile,resultFile,mcpScript:resolve(root,'src/shopping-worker-mcp.mjs')});
-  writeFileSync(specFile,JSON.stringify({executable:cli,args,prompt,resultFile,deadlineMs,model:config.model,reasoningEffort:config.reasoningEffort??'high'}),'utf8');
+  writeFileSync(specFile,JSON.stringify({executable:cli,args,prompt,resultFile,deadlineMs,model:config.model,reasoningEffort:config.reasoningEffort??'high',activityPath,runId,hostPid}),'utf8');
   // The supervisor owns the Codex child even if the web service restarts. It
   // cancels its own child on capability revocation or lost heartbeats.
   const child=spawnProcess(process.execPath,[resolve(root,'src/shopping-worker-supervisor.mjs'),specFile],{cwd:directory,windowsHide:true,stdio:'ignore',env:{...process.env,FAMILIEN_WORKER_ENDPOINT:endpoint,FAMILIEN_WORKER_ID:workerId,FAMILIEN_WORKER_TOKEN:token}});
