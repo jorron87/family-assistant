@@ -21,6 +21,10 @@ function shoppingCohortSignal(store,items){
 }
 
 export function changeSignal(store,resources,{shoppingOnly=false,sourceOnly=false}={}) {
+  if(shoppingOnly){
+    const rows=shoppingSignalRows(store,store.shopping?.queue()??[]).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    return {signature:rows.length?createHash('sha256').update(JSON.stringify(rows)).digest('hex'):null,count:rows.length,items:rows.map(row=>JSON.stringify(row)),shoppingOnly:rows.length>0,originalsOnly:false};
+  }
   const report=store.completionReport(), queue=store.reviewQueue(), feed=store.activityFeedStatus(),state=store.snapshot();
   const waiting=[...queue.items,...report.missingDrive.map(item=>state.rawItems[item.rawId]).filter(Boolean)];
   const originals=resources?.list({status:'ready'}).filter(item=>waiting.some(raw=>raw.source===item.source &&
@@ -36,7 +40,7 @@ export function changeSignal(store,resources,{shoppingOnly=false,sourceOnly=fals
     ...activitySourcePhaseRows(state).filter(row=>row.health!=='ok'||row.unresolvedItems.length).map(row=>['activity-source',row.sourceId,row.health,row.details,row.scanTo,row.nextPageHint,row.unresolvedItems]),
     ...(feed.changedPages ?? []).map(id=>['activity-page',id,feed.pages?.find(page=>page.id===id)?.hash]),
     ...(feed.hsia?.candidates?store.activityFeedCandidates({limit:10000}).items.map(item=>['activity-candidate',item.url,item.hash]):[]),
-    ...shoppingSignalRows(store,store.shopping?.queue()??[])
+    ...(sourceOnly?[]:shoppingSignalRows(store,store.shopping?.queue()??[]))
   ].sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
   const rows=allRows.filter(row=>shoppingOnly?row[0]==='shopping':sourceOnly?row[0]!=='shopping':true);
   return {signature:rows.length?createHash('sha256').update(JSON.stringify(rows)).digest('hex'):null,count:rows.length,items:rows.map(row=>JSON.stringify(row)),
@@ -90,13 +94,19 @@ export function createIngestionDispatcher({store,resources,root,dataDir,shopping
   const scheduleContinuation=()=>{const cfg=config();if(clock!==Date.now||!state.shoppingContinuation||cfg.enabled!==true)return;const seconds=cfg.shoppingProgressGapSeconds;if(!Number.isInteger(seconds)||seconds<10||seconds>900)return;clearTimeout(continuationTimer);continuationTimer=setTimeout(()=>tick(),seconds*1000);continuationTimer.unref();};
   function poll(){
     if(state.worker?.mode!=='shopping-coordinator')return;
-    shoppingCoordinator?.tick();const pool=shoppingCoordinator?.status();if(pool?.running)return;
+    shoppingCoordinator?.tick();let pool=shoppingCoordinator?.status();
+    if(pool?.running&&pool.pool?.needsRefill&&shoppingCoordinator.refill){
+      const cfg=config(),source=changeSignal(store,resources,{sourceOnly:true});
+      const newSource=source.signature&&source.signature!==state.worker.sourceSignatureAtStart&&!knownBlockedOriginalsOnly(source)&&!resourceWait(source);
+      pool=shoppingCoordinator.refill({queue:cfg.enabled===true&&!newSource?agentQueue():[],stopReason:cfg.enabled!==true?'owner-pause':newSource?'new-source-work':null});
+    }
+    if(pool?.running)return;
     const worker=state.worker,result=pool?.last,owned=store.snapshot().runLease?.token===worker.token;
     state.lastFinishedAt=clock();state.lastError=pool?.attention?'Handelsarbeideren meldte en eksplisitt sikkerhetsstopp.':!result||result.id!==worker.coordinatorId||result.code!==0?'En handelsarbeider ble avbrutt; alle uavklarte varer er bevart.':null;
     state.shoppingContinuation=owned&&!result?.preempted&&!state.lastError&&result?.positiveProgress===true;
-    state.lastMetrics={scope:'handel',assignedJobs:worker.shoppingBatch.jobs.length,workers:result?.slots?.map(s=>s.metrics)??[],applied:result?.applied??0};
+    state.lastMetrics={scope:'handel',assignedJobs:result?.pool?.assignedJobs??worker.shoppingBatch.jobs.length,workers:result?.slots?.map(s=>s.metrics)??[],applied:result?.applied??0,...(result?.pool?{refills:result.pool.refills}:{} )};
     const actual=new Set(shoppingCohortSignal(store,agentQueue()).items),progress=worker.assignedSignals.some(i=>!actual.has(i));
-    if(progress){state.attempts=0;state.shoppingCohort=null;state.lastSignature=null;}
+    if(progress||state.shoppingContinuation){state.attempts=0;state.shoppingCohort=null;state.lastSignature=null;}
     state.retryAt=actual.size&&(state.attempts??0)<3?clock()+[0,30,120][state.attempts??0]*60000:null;
     if(owned){
       try{
@@ -218,8 +228,8 @@ export function createIngestionDispatcher({store,resources,root,dataDir,shopping
     if(shoppingOnly)state.shoppingCohort={items:structuredClone(shoppingBatch.items),jobs:structuredClone(shoppingBatch.jobs),signals:assignedSignal.items,shown:shoppingBatch.summary.shown,jobCount:shoppingBatch.summary.agentJobs.shown};
     state.lastStartedAt=clock();save();
     if(scope==='handel'&&poolPlan){
-      state.worker={mode:'shopping-coordinator',token,scope,startedAt:clock(),shoppingBatch,assignedSignals:assignedSignal.items};save();
-      try{const pool=shoppingCoordinator.start({token,batches:poolPlan.batches});state.worker.coordinatorId=pool.runId??pool.last?.id;save();poll();}
+      state.worker={mode:'shopping-coordinator',token,scope,startedAt:clock(),shoppingBatch,assignedSignals:assignedSignal.items,sourceSignatureAtStart:changeSignal(store,resources,{sourceOnly:true}).signature};save();
+      try{const pool=shoppingCoordinator.start({token,batches:poolPlan.batches,pool:{capacity:cfg.shoppingWorkers,batchSize:cfg.shoppingWorkerBatchSize??20,maxJobs:300,durationMs:15*60000}});state.worker.coordinatorId=pool.runId??pool.last?.id;state.lastError=null;save();poll();}
       catch(error){state.lastError=error.message;state.worker=null;running=false;state.retryAt=clock()+30*60000;release(token);save();}
       return;
     }

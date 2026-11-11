@@ -25,6 +25,7 @@ function fixture(count=60,{large=false,chains=false}={}){
  return {dir,time,state,shop,store,coordinator,options,plan,launches,yielding,start,packet,call,decisions,close(){for(const w of launches){assert.ok(w.directory.startsWith(join(tmpdir(),'family-shopping-worker-')));rmSync(w.directory,{recursive:true,force:true});}assert.ok(dir.startsWith(join(tmpdir(),'family-coordinator-test-')));rmSync(dir,{recursive:true,force:true});}};
 }
 async function readAll(f,index=0,options={}){const h=await f.call(index,'shopping_context',options);for(const [section,count]of Object.entries(h.pages))for(let page=0;page<count;page++)await f.call(index,'shopping_context',{section,page});return h;}
+const startPool=(f,options={})=>f.coordinator.start({token:f.state.runLease.token,batches:f.plan.batches,pool:{capacity:3,batchSize:20,...options}});
 function finish(f,index,outcome='deferred'){writeFileSync(join(f.launches[index].directory,'result.json'),JSON.stringify({outcome,summary:'Scoped current product work checked.',reason:'Downstream source registration requires a separate actual primary label review.'}));f.launches[index].onExit(0);}
 
 test('one batched dataprep is exactly equivalent to three current packets and is not reused across requests',()=>{
@@ -32,6 +33,59 @@ test('one batched dataprep is exactly equivalent to three current packets and is
 });
 test('three workers claim sixty whole products with no overlap; all related chain rows stay together',()=>{
  const f=fixture(60,{chains:true});try{f.start();assert.equal(f.launches.length,3);const keys=new Set();for(const b of f.plan.batches){assert.equal(b.jobs.length,20);for(const j of b.jobs){assert.equal(j.sourceKeys.length,3);for(const key of j.sourceKeys){assert.ok(!keys.has(key));keys.add(key);}}}assert.equal(keys.size,180);assert.equal(f.state.runLease.token,'owner-test-lease');}finally{f.close();}
+});
+
+test('a finished or deferred lane gets fresh whole products while the two slower workers keep running',async()=>{
+ const f=fixture(80,{chains:true});try{
+  startPool(f);const before=f.coordinator.status(),slow=before.workers.slice(1).map(w=>w.id),originalKeys=new Set(f.plan.batch.jobs.flatMap(j=>j.sourceKeys)),queueBefore=f.shop.queue();
+  finish(f,0);assert.equal(f.coordinator.status().pool.needsRefill,true);assert.equal(f.coordinator.status().pool.activeWorkers,2);
+  const assignments=[],prepare=f.shop.agentContexts;f.shop.agentContexts=values=>{assignments.push(...values);return prepare(values);};
+  f.coordinator.refill({queue:f.shop.queue()});const status=f.coordinator.status();
+  assert.equal(status.runId,before.runId);assert.equal(status.pool.activeWorkers,3);assert.equal(status.pool.assignedJobs,80);assert.equal(status.pool.refills,1);assert.equal(status.workers[0].generation,2);assert.deepEqual(status.workers.slice(1).map(w=>w.id),slow);
+  assert.ok(assignments.flatMap(a=>a.jobs.flatMap(j=>j.sourceKeys)).every(k=>!originalKeys.has(k)));assert.equal(assignments[0].jobs.length,20);assert.ok(assignments[0].jobs.every(j=>j.sourceKeys.length===3));
+  await assert.rejects(f.call(0,'heartbeat'),/revoked/);assert.equal((await f.call(3,'heartbeat')).active,true);assert.equal(f.state.runLease.token,'owner-test-lease');
+  f.coordinator.refill({queue:f.shop.queue()});assert.equal(f.launches.length,4,'a poll cannot create a fourth active worker');assert.deepEqual(f.shop.queue(),queueBefore,'deferral never removes actual work');
+ }finally{f.close();}
+});
+
+test('refill excludes newly related chains and exact metadata aliases of all previously claimed products',()=>{
+ const f=fixture(80);try{startPool(f);finish(f,0);const rows=f.shop.queue(),original=f.plan.batches[0].jobs[0].items[0],fake={...original,sourceKey:'sesum:KIWI:999999',relatedSources:[]},linked={...original,sourceKey:'sesum:REMA_1000:999998',relatedSources:[{sourceKey:f.plan.batches[1].jobs[0].sourceKeys[0],sourceFingerprint:'synthetic-link'}]};
+  assert.ok(fake.researchProductKey);f.coordinator.refill({queue:[fake,linked,...rows]});assert.equal(f.launches.length,4);assert.equal(f.launches[3].prompt.includes('sesum:KIWI:999999'),false);assert.equal(f.launches[3].prompt.includes('sesum:REMA_1000:999998'),false);
+ }finally{f.close();}
+});
+
+test('one remaining product can fill a free lane, and an empty pool ends without claiming completion',()=>{
+ const f=fixture(61);try{startPool(f);finish(f,0);f.coordinator.refill({queue:f.shop.queue()});assert.equal(f.coordinator.status().workers[0].jobs,1);assert.equal(f.coordinator.status().pool.assignedJobs,61);finish(f,1);finish(f,2);finish(f,3);assert.equal(f.coordinator.status().running,true);f.coordinator.refill({queue:f.shop.queue()});const status=f.coordinator.status();assert.equal(status.running,false);assert.equal(status.last.pool.stopReason,'no-independent-work');assert.equal(status.last.slots.filter(s=>s.status==='deferred').length,4);assert.equal(f.shop.queue().length,61);assert.equal(f.state.runLease.token,'owner-test-lease');}finally{f.close();}
+});
+
+test('rolling claims and lane generations survive coordinator recovery without relaunching slow workers',()=>{
+ const f=fixture(80);try{startPool(f);finish(f,0);const recovered=createShoppingCoordinator(f.options);recovered.tick();recovered.refill({queue:f.shop.queue()});assert.equal(f.launches.length,4);assert.equal(recovered.status().pool.activeWorkers,3);assert.equal(recovered.status().workers[0].generation,2);recovered.refill({queue:f.shop.queue()});assert.equal(f.launches.length,4);assert.equal(f.state.runLease.token,'owner-test-lease');}finally{f.close();}
+});
+
+test('session time, job budget and source handoff stop refill and let existing workers drain',()=>{
+ for(const reason of ['time','jobs','source']){const f=fixture(80);try{
+  startPool(f,reason==='time'?{durationMs:1000}:reason==='jobs'?{maxJobs:60}:{});finish(f,0);
+  if(reason==='time')f.time.at+=1001;
+  if(reason==='source')f.coordinator.refill({queue:f.shop.queue(),stopReason:'new-source-work'});else f.coordinator.tick();
+  const status=f.coordinator.status();assert.equal(status.pool.needsRefill,false);assert.equal(status.pool.draining,true);assert.equal(status.pool.activeWorkers,2);assert.equal(f.launches.length,3);assert.equal(f.state.runLease.token,'owner-test-lease');
+  finish(f,1);finish(f,2);assert.equal(f.coordinator.status().running,false);
+ }finally{f.close();}}
+});
+
+test('pause, foreign lease and a safety stop also prevent rolling replacements',()=>{
+ for(const reason of ['pause','lease','safety']){const f=fixture(80);try{startPool(f);if(reason==='safety')finish(f,0,'safety-stop');else{finish(f,0);if(reason==='pause')f.yielding.value=true;else f.state.runLease={token:'foreign'};}f.coordinator.refill({queue:f.shop.queue()});assert.equal(f.launches.length,3);assert.equal(f.coordinator.status().running,false);assert.equal(f.state.runLease.token,reason==='lease'?'foreign':'owner-test-lease');}finally{f.close();}}
+});
+
+test('a runtime failure drains the pool instead of repeatedly launching new failing workers',()=>{
+ const f=fixture(80);try{startPool(f);f.launches[0].onExit(1);assert.equal(f.coordinator.status().pool.stopReason,'worker-runtime-error');f.coordinator.refill({queue:f.shop.queue()});assert.equal(f.launches.length,3);assert.equal(f.coordinator.status().pool.stopReason,'worker-runtime-error');assert.equal(f.coordinator.status().pool.activeWorkers,2);finish(f,1);finish(f,2);assert.equal(f.coordinator.status().last.code,1);}finally{f.close();}
+});
+
+test('a failed final domain check cannot crash the coordinator or certify completed work',()=>{
+ const f=fixture(80);try{startPool(f);f.shop.agentContext=()=>{throw Error('Synthetic source-state read failure');};assert.doesNotThrow(()=>finish(f,0));assert.equal(f.coordinator.status().workers[0].status,'error');assert.equal(f.coordinator.status().pool.draining,true);assert.equal(f.coordinator.status().pool.stopReason,'worker-runtime-error');assert.equal(f.coordinator.status().pool.activeWorkers,2);assert.equal(f.state.runLease.token,'owner-test-lease');}finally{f.close();}
+});
+
+test('required negative family questions are delivered even without preserved research checkpoints',async()=>{
+ const f=fixture(20);try{f.start();const header=await f.call(0,'shopping_context',{});assert.equal(header.researchAvailable,0);assert.ok(header.plausibleFamiliesToAssess.length>0);assert.ok(header.plausibleFamiliesToAssess.every(r=>r.hints.length>0&&r.hints.every(h=>Number.isInteger(h.familyIndex)&&h.authority.includes('not an approval'))));assert.ok(f.launches[0].prompt.includes('input-format rejection alone is not missing product evidence'));}finally{f.close();}
 });
 test('unsupported first job keeps its place and is never hidden by parallel routing',()=>{
  assert.equal(planShoppingWorkers([{do:'shopping-review',storeId:'urgent-flyer'},{do:'shopping-sesum-placement-review',sourceKey:'sesum-product:1'}],3),null);assert.throws(()=>planShoppingWorkers([],4),/three/);

@@ -40,6 +40,28 @@ test('configured live batch size bounds workers while all later jobs remain coun
  try{f.dispatcher.tick();assert.equal(f.dispatcher.status().shoppingBatch.summary.agentJobs.total,60);assert.equal(f.dispatcher.status().shoppingBatch.jobs.length,15);assert.equal(f.queue.rows.length,60);}finally{f.close();}
 });
 
+test('rolling dispatcher fills a free lane under its existing lease and reports cumulative assignments',()=>{
+ let active=false,need=false,last=null,refills=0;const rows=Array.from({length:60},(_,i)=>({do:'shopping-sesum-placement-review',sourceKey:'sesum-product:'+i,sourceFingerprint:'same-'+i}));
+ const pool={status:()=>({running:active,runId:'rolling-run',last,...(active?{pool:{needsRefill:need}}:{})}),tick(){},preferSerial:()=>[],start(input){assert.deepEqual(input.pool,{capacity:3,batchSize:5,maxJobs:300,durationMs:15*60000});active=true;return this.status();},refill(input){refills++;assert.equal(input.stopReason,null);assert.deepEqual(input.queue,rows);need=false;return this.status();}};
+ const f=shoppingDispatchFixture(rows,{shoppingWorkers:3,shoppingWorkerBatchSize:5},undefined,false,pool);try{f.dispatcher.tick();need=true;f.dispatcher.poll();assert.equal(refills,1);assert.equal(f.store.snapshot().runLease.token,'owned-test-batch');assert.equal(f.launches.length,0);
+ active=false;last={id:'rolling-run',code:0,positiveProgress:true,applied:10,pool:{assignedJobs:75,refills:12},slots:[]};f.dispatcher.poll();assert.equal(f.dispatcher.status().lastMetrics.assignedJobs,75);assert.equal(f.dispatcher.status().lastMetrics.refills,12);assert.equal(f.dispatcher.status().shoppingContinuation,true);assert.equal(f.store.snapshot().runLease,null);
+ }finally{f.close();}
+});
+
+test('a manually prioritized shopping session only drains for source changes after its own start',()=>{
+ let active=false,need=false;const sources=[{source:'spond',externalId:'known',listingHash:'same',reason:'Known pending source'}],refills=[],rows=Array.from({length:3},(_,i)=>({do:'shopping-product-review',productKey:'kassal:ODA_NO:'+i,watchId:'family',fingerprint:'same-'+i}));
+ const pool={status:()=>({running:active,runId:'owner-priority',...(active?{pool:{needsRefill:need}}:{})}),tick(){},preferSerial:()=>[],start(){active=true;return this.status();},refill(input){refills.push(input);need=false;return this.status();}},f=shoppingDispatchFixture(rows,{shoppingWorkers:3},undefined,false,pool);f.store.reviewQueue=()=>({items:sources});
+ try{f.dispatcher.requestShopping();need=true;f.dispatcher.poll();assert.equal(refills[0].stopReason,null,'already known sources do not immediately undo owner prioritization');sources.push({source:'vigilo',externalId:'new',listingHash:'changed',reason:'Actual new source item'});need=true;f.dispatcher.poll();assert.equal(refills[1].stopReason,'new-source-work');assert.deepEqual(refills[1].queue,[]);assert.equal(f.store.snapshot().runLease.token,'owned-test-batch');assert.equal(f.launches.length,0,'active workers drain before handing the lease back');}finally{f.close();}
+});
+
+test('scoped shopping and source signals avoid constructing the unrelated queue',()=>{
+ const f=shoppingDispatchFixture([{do:'shopping-product-review',productKey:'kassal:ODA_NO:1',watchId:'family',fingerprint:'same'}]);try{
+ const full=changeSignal(f.store),shopping=changeSignal(f.store,undefined,{shoppingOnly:true});assert.deepEqual(shopping.items,full.items.filter(row=>JSON.parse(row)[0]==='shopping'));
+ f.store.completionReport=()=>{throw Error('Shopping-only signal must not construct source completion');};assert.equal(changeSignal(f.store,undefined,{shoppingOnly:true}).count,1);
+ f.store.completionReport=()=>({profileReviews:[],missingDrive:[],unsyncedCalendar:[]});f.store.shopping.queue=()=>{throw Error('Source signal must not construct shopping queue');};assert.equal(changeSignal(f.store,undefined,{sourceOnly:true}).count,0);
+ }finally{f.close();}
+});
+
 test('coordinator safety stop also prevents the legacy full-tool fallback',()=>{
  const pool={status:()=>({running:false,attention:{reason:'An explicit runtime safety stop.'}})},f=shoppingDispatchFixture([{do:'shopping-review',storeId:'one'}],{shoppingWorkers:3},undefined,false,pool);try{f.dispatcher.tick();assert.equal(f.launches.length,0);assert.equal(f.store.snapshot().runLease,null);}finally{f.close();}
 });
