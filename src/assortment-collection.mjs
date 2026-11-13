@@ -87,7 +87,7 @@ export function createAssortmentCollection({dataDir,config={},kassal,receiveSesu
   if(jobs.some(j=>Date.parse(j.deliveredUntil)>at))return {enabled:true,runId:state.runId,jobs:[],reason:'active-source-batch'};
   if(Date.parse(state.sesum.pauseUntil)>at)return {enabled:true,runId:state.runId,jobs:[],pauseUntil:state.sesum.pauseUntil};
   const bootstrapKeys=state.bootstrap?new Set(state.bootstrap.jobIds):null;
-  const ready=jobs.filter(j=>(!bootstrapKeys||bootstrapKeys.has(j.id))&&j.status!=='complete'&&j.attempts<3&&!(Date.parse(j.retryAt)>at));
+  const ready=jobs.filter(j=>(!bootstrapKeys||bootstrapKeys.has(j.id))&&j.status!=='complete'&&j.attempts<3&&!(Date.parse(j.retryAt)>at)).sort((a,b)=>a.attempts-b.attempts);
   // Enumerate and consume products together, rather than allowing either a
   // huge listing frontier or a product backlog to starve the other.
   const selected=[];if(bootstrapKeys)selected.push(...ready.filter(j=>j.kind==='catalogue'),...ready.filter(j=>j.kind==='product'));else for(const kind of ['catalogue','product'])selected.push(...ready.filter(j=>j.kind===kind).slice(0,2));selected.splice(state.validationRemaining??(bootstrapKeys?8:4));

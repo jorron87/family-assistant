@@ -734,6 +734,8 @@ Selected catalogue pages must agree on their reported category total and the uni
 
 Source denials also reduce subsequent request frequency: the server raises spacing from 1.5 seconds to 6 seconds after the first authentication/rate-limit failure, then 12, 24 and at most 30 seconds. This survives restart through the durable failure receipts. The full reported retry-after delay is honored, with a minimum 30-minute source pause and a one-day maximum; spacing never shortens that pause. A denial remains unfinished source work.
 
+After the global source pause has elapsed, untouched products precede failed-product retries within the selected scope. Failed jobs remain in the same totals and retain their retry limits and source receipts. Listing jobs retain pagination priority. This prevents a repeatedly failing product from heading every new batch without clearing the provider pause or declaring that product complete.
+
 ## Optional independent reviewed-library compatibility mode
 
 The following generic grouping contract applies only when familySource is explicitly configured to the independent reviewed-library mode. It does not apply to the Sesum-master mode above.
