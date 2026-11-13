@@ -29,8 +29,8 @@ test('all followed families resume across bounded ticks without a pilot or produ
   for(let i=1;i<h.calls.length;i++)assert.ok(h.calls[i].at-h.calls[i-1].at>=2000,'server spacing applies across faster page ticks');
   for(const {options} of h.calls){assert.equal(options.method,'GET');assert.equal(options.credentials,'same-origin');assert.equal(options.redirect,'error');assert.deepEqual(Object.keys(options.headers),['Accept']);}
   assert.ok(h.receipts.every(r=>r.status==='ok'&&r.result.endReached===true));
-  assert.ok(h.receipts.every(r=>r.collectorVersion==='sesum-collector-1.9.0'),'successful browser work identifies its actual installed collector');
-  assert.ok(h.receipts.every(r=>r.collectorBuild==='sesum-collector-build-1.9.0-1'));
+  assert.ok(h.receipts.every(r=>r.collectorVersion==='sesum-collector-1.9.1'),'successful browser work identifies its actual installed collector');
+  assert.ok(h.receipts.every(r=>r.collectorBuild==='sesum-collector-build-1.9.1-1'));
   assert.equal(JSON.stringify(h.receipts).includes('synthetic source only'),false,'raw HTML is never relayed');
 });
 test('only exact Sesum product and ordinary search routes are fetched',async()=>{
@@ -39,8 +39,8 @@ test('only exact Sesum product and ordinary search routes are fetched',async()=>
   assert.equal(collector.allowedUrl(ORIGIN+'/sok?q=x&side=2','search'),true);assert.equal(collector.allowedUrl(ORIGIN+'/produkt/0-invalid','product'),false);assert.equal(collector.allowedUrl(product.url+'?private=1','product'),false);
   const h=harness({jobs:[{...product,url:'https://evil.example/produkt/123-secret'}]});await h.run();
   assert.equal(h.calls.length,0);assert.equal(h.receipts[0].error.code,'invalid_job');
-  assert.equal(h.receipts[0].collectorVersion,'sesum-collector-1.9.0');
-  assert.equal(h.receipts[0].collectorBuild,'sesum-collector-build-1.9.0-1');
+  assert.equal(h.receipts[0].collectorVersion,'sesum-collector-1.9.1');
+  assert.equal(h.receipts[0].collectorBuild,'sesum-collector-build-1.9.1-1');
 });
 test('authentication rejection stops the cycle and pauses ordinary reads',async()=>{
   const h=harness({jobs:[product,search(2)],fetchPage:async()=>htmlResponse({ok:false,status:403})});

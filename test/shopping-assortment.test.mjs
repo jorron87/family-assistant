@@ -185,3 +185,21 @@ test('native catalogue navigation preserves the explicit all-category name in a 
  const html='<h1>Alle kategorier</h1><p>2 kategorier med varer</p><a href="/kategori/1-frukt-gront">Frukt &amp; grønt</a><a href="/kategori/2-frukt">Frukt</a>'+flight({categories:[{id:1,name:'Mer frukt & grønt',alle:'Frukt & grønt',children:[{id:2,name:'Frukt',children:[]}]}]});
  const result=core.parseCatalogue(html,'https://www.sesum.no/kategori');assert.equal(result.ok,true);assert.equal(result.categories.find(c=>c.id==='1').name,'Frukt & grønt');assert.equal(result.categories.find(c=>c.id==='2').parentId,'1');
 });
+
+test('native leaf URLs are canonical while parent categories explicitly select the full list',async t=>{
+ let leafKnown=false;const f=collectionFixture(t,{config:{...config,familySource:'sesum'},categoryIsLeaf:id=>leafKnown&&id==='545'});f.api.bootstrap({categoryUrls:['https://www.sesum.no/kategori/545-beans','https://www.sesum.no/kategori/107-coffee']});const initial=f.api.work(),leaf=initial.jobs.find(j=>j.url.includes('/545-'));assert.equal(new URL(leaf.url).search,'?visning=alle');
+ for(const job of initial.jobs)await f.api.receive({runId:initial.runId,jobId:job.id,status:job.id===leaf.id?'error':'ok',fetchedAt:at,collectorVersion:'sesum-collector-1.9.0',...(job.id===leaf.id?{error:{code:'network_error'}}:{result:{ok:true,kind:'catalogue',sourceUrl:job.url,categoryUrls:[],productUrls:[],nextUrls:[],endReached:true,filtersVerified:true,total:job.url.endsWith('/kategori')?2:0,categories:[{id:'107',name:'Coffee',parentId:null},{id:'545',name:'Beans',parentId:'107'}]}})});
+ leafKnown=true;const restored=createAssortmentCollection(f.settings),work=restored.work();assert.equal(work.runId,initial.runId);assert.equal(work.jobs.length,1);assert.equal(work.jobs[0].url,'https://www.sesum.no/kategori/545-beans');assert.equal(restored.status().bootstrap.retainedOutsideScope,0);assert.equal(restored.status().sesum.implementationReceipt.collectorVersion,'sesum-collector-1.9.0');
+});
+
+test('the one-product native category spelling proves a complete source end',()=>{
+ const html='<h1>Synthetic sugar</h1><p>1 vare i ditt utvalg</p><a href="/produkt/1-sugar">Synthetic sugar</a>'+flight({query:'',categoryId:9204,chains:[],filter:{onlyPromo:false}});const result=core.parseCatalogue(html,'https://www.sesum.no/kategori/9204-sugar');assert.equal(result.ok,true);assert.equal(result.total,1);assert.equal(result.endReached,true);
+});
+
+test('explicit later source pages omit the first-page full-view parameter to avoid canonical redirects',t=>{
+ const f=collectionFixture(t);f.api.bootstrap({categoryUrls:['https://www.sesum.no/kategori/107-coffee?side=2&visning=alle']});const job=f.api.work().jobs.find(j=>j.url.includes('/107-'));assert.equal(job.url,'https://www.sesum.no/kategori/107-coffee?side=2');
+});
+
+test('unchanged bootstrap membership is not rewritten into every encrypted progress transaction',t=>{
+ const f=collectionFixture(t),urls=Array.from({length:500},(_,i)=>'https://www.sesum.no/produkt/'+(i+1)+'-synthetic');f.api.bootstrap({productUrls:urls});const file=join(f.settings.dataDir,'assortment-collection.transactions.enc.jsonl'),before=readFileSync(file).length;for(let i=0;i<100;i++){f.api.pause();f.api.resume();}const growth=readFileSync(file).length-before;assert.ok(growth<300000,'progress transactions must not grow with all 501 selected IDs');const restored=createAssortmentCollection(f.settings);assert.equal(restored.status().bootstrap.jobs,501);assert.equal(restored.work().jobs.length,8);
+});

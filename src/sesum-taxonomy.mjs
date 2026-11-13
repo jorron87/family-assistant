@@ -10,7 +10,7 @@ const current=(receipt,at,days)=>Number.isFinite(Date.parse(receipt??''))&&at>=D
  * every product in a broad category substitutes for a specific household SKU. */
 export function createSesumTaxonomy(state,{persist=null,save=()=>{},now=()=>new Date(),rows=()=>[],baseReader=()=>null,priceHorizonDays=14,odaScope=()=>null,watchFamilies=()=>[]}={}){
  state.categories??={};state.categoryPlacements??={};state.categoryWatchLinks??={};state.revision??=0;
- let cachedRevision=-1,cachedBase=null,cached=null,cachedOdaIndex=null,cachedOdaRows=[];
+ let cachedRevision=-1,cachedBase=null,cached=null,cachedOdaIndex=null,cachedOdaRows=[],leafRevision=-1,parentIds=new Set();
  const clock=()=>new Date(now()).getTime();
  const commit=patch=>{state.revision++;if(persist)persist({revision:state.revision,...patch});else save();};
  const definition=id=>Object.hasOwn(state.categories,id)&&!state.categories[id].retiredAt?state.categories[id]:null;
@@ -26,6 +26,7 @@ export function createSesumTaxonomy(state,{persist=null,save=()=>{},now=()=>new 
   const changed=[...next].filter(([id,row])=>definition(id)?.fingerprint!==row.fingerprint||definition(id)?.sourceUrl!==row.sourceUrl);if(input.completeTree===true)for(const [id,row]of Object.entries(state.categories))if(!next.has(id)&&!row.retiredAt)changed.push([id,{...row,retiredAt:input.fetchedAt}]);if(changed.length){for(const [id,row]of changed)state.categories[id]=row;commit({categories:changed});}
   return {observed:next.size,changed:changed.length};
  }
+ function isLeaf(id){if(leafRevision!==state.revision){parentIds=new Set(Object.values(state.categories).filter(c=>!c.retiredAt&&c.parentId).map(c=>c.parentId));leafRevision=state.revision;}return !!definition(id)&&!parentIds.has(String(id));}
  function sourceCategory(row){
   const own=row.raw?.categoryPathIds??[];
   if(own.length&&own.every(id=>definition(id))&&new Set(own.map(String)).size===own.length)return String(own.at(-1));
@@ -102,5 +103,5 @@ export function createSesumTaxonomy(state,{persist=null,save=()=>{},now=()=>new 
   const fingerprint=hash(matches);if(expectedFingerprint&&expectedFingerprint!==fingerprint)throw Error('Category search changed; read a new result.');const items=matches.slice(offset,offset+limit),hasMore=offset+items.length<matches.length;return {items,total:matches.length,offset,limit,hasMore,nextOffset:hasMore?offset+items.length:null,fingerprint,authority:'Exact native Sesum taxonomy. Same names at different levels keep their different source IDs.'};
  }
  const status=()=>{const families=watchFamilies(),links=watchLinks(families),scope=odaScope(),owned=new Map(rows().filter(r=>r.metadata.source==='oda').map(r=>[String(r.metadata.id),r])),missing=scope?[...scope].filter(id=>!owned.has(String(id))):[];const source=rows().filter(r=>r.metadata.source==='sesum'),oda=odaRows(),scoped=scopedOda(),unplaced=scoped.filter(r=>!placement(r));return {familySource:'sesum',householdFamilies:families.length,householdCategoriesLinked:links.filter(l=>l.status==='linked').length,odaImportMissingProducts:missing.length,odaImportMissingIds:missing.map(String),odaUnavailableProducts:[...owned.values()].filter(r=>scope&&(scope.has(Number(r.metadata.id))||scope.has(String(r.metadata.id)))&&!r.available).length,categories:Object.values(state.categories).filter(c=>!c.retiredAt).length,sesumProducts:source.length,sesumCategorized:source.filter(r=>sourceCategory(r)).length,odaCurrentProducts:oda.length,odaPlacedProducts:oda.filter(r=>placement(r)).length,odaProductsInCurrentScope:scoped.length,remainingProducts:unplaced.length,queuedProducts:unplaced.length,complete:Object.values(state.categories).some(c=>!c.retiredAt)&&!unplaced.length&&!missing.length&&links.every(l=>l.status==='linked')};};
- return {receive,place,linkWatch,work,dossier,search,reader,watchLinks,status,definition,sourceCategory};
+ return {receive,place,linkWatch,work,dossier,search,reader,watchLinks,status,definition,isLeaf,sourceCategory};
 }

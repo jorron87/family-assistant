@@ -76,7 +76,7 @@ const kassal=createKassal({dataDir:DATA_DIR});
 let sesumConfig={enabled:false};
 try{sesumConfig=readConfig('shopping-sesum.json');}catch(error){if(error.code!=='ENOENT')throw error;}
 sesum=createSesumCollector({dataDir:DATA_DIR,config:sesumConfig,families:()=>store.shopping.sesumFamilies(),receivePrices:input=>store.shopping.sesumReceivePrices(input),receiveMetadata:input=>store.shopping.sesumReceiveMetadata(input)});
-assortmentCollection=createAssortmentCollection({dataDir:DATA_DIR,config:assortmentConfig,kassal,receiveSesum:input=>store.shopping.assortment.receiveSesum(input),receiveKassal:input=>store.shopping.assortment.receiveKassal(input),receiveCategories:input=>store.shopping.taxonomy?.receive(input),reuseSesum:input=>store.shopping.assortment.attachSesumCategories(input)});
+assortmentCollection=createAssortmentCollection({dataDir:DATA_DIR,config:assortmentConfig,kassal,receiveSesum:input=>store.shopping.assortment.receiveSesum(input),receiveKassal:input=>store.shopping.assortment.receiveKassal(input),receiveCategories:input=>store.shopping.taxonomy?.receive(input),reuseSesum:input=>store.shopping.assortment.attachSesumCategories(input),categoryIsLeaf:id=>store.shopping.taxonomy?.isLeaf(id)===true});
 const sesumStatus=()=>({...sesum.status(),priceIntegration:store.shopping.sesumPriceStatus(),assortmentCollection:assortmentCollection.status()});
 PUBLIC_FILES.set('shopping-view.mjs','text/javascript; charset=utf-8');PUBLIC_FILES.set('barcode.mjs','text/javascript; charset=utf-8');
 PUBLIC_FILES.set('shopping.css','text/css; charset=utf-8');
@@ -158,7 +158,7 @@ async function handle(req, res) {
       if(method==='POST'&&!String(req.headers['content-type']??'').toLowerCase().startsWith('application/json'))return send(res,403,{error:'Sesum krever JSON.'});
       if(path==='/api/shopping/sesum/work'&&method==='GET'){
         const peek=new URL(req.url,`http://${host}`).searchParams.get('peek')==='1';
-        if(assortmentConfig.enabled){if(assortmentConfig.familySource==='sesum'&&!peek&&req.headers['x-family-collector-version']!=='1.9.0'&&req.headers['x-family-request']!=='1')return send(res,200,{enabled:false,jobs:[],reason:'collector-update-required',minimumVersion:'1.9.0'});return send(res,200,assortmentCollection.work({peek}));}
+        if(assortmentConfig.enabled){if(assortmentConfig.familySource==='sesum'&&!peek&&req.headers['x-family-collector-version']!=='1.9.1'&&req.headers['x-family-request']!=='1')return send(res,200,{enabled:false,jobs:[],reason:'collector-update-required',minimumVersion:'1.9.1'});return send(res,200,assortmentCollection.work({peek}));}
         if(!peek)await sesum.replayPending();
         return send(res,200,sesum.work({peek}));
       }
@@ -580,7 +580,7 @@ async function handle(req, res) {
 }
 const mobileHandle=phoneHandler({odaCart,productImages,oda,store,root,send,body,json,onQueued:dispatchTick,weather,sessionMaintenance});
 setInterval(dispatchTick,5000).unref();
-setInterval(()=>{if(!restarting&&!process.env.FAMILIEN_NO_DISPATCH&&readConfig('collector.json').dispatch?.enabled===true&&assortmentConfig.collectionEnabled)trackHostWork('assortment-collection',()=>assortmentCollection.step()).catch(()=>{});},5000).unref();
+setInterval(()=>{if(!restarting&&!process.env.FAMILIEN_NO_DISPATCH&&assortmentConfig.collectionEnabled&&(assortmentConfig.familySource==='sesum'||readConfig('collector.json').dispatch?.enabled===true))trackHostWork('assortment-collection',()=>assortmentCollection.step()).catch(()=>{});},5000).unref();
 // Aktivitetskilder hentes direkte over HTTP med jevne mellomrom (kildene har egne intervaller i config/activity-feeds.json).
 if(!process.env.FAMILIEN_NO_DISPATCH&&!process.env.FAMILIEN_NO_FEED){setInterval(()=>feedRunner.run().catch(()=>{}),20*60000).unref();setTimeout(()=>feedRunner.run().catch(()=>{}),90000).unref();}
 if(!process.env.FAMILIEN_NO_DISPATCH){setInterval(()=>{if(!restarting)trackHostWork('resource-maintenance',()=>resources.tick()).catch(()=>{});},15000).unref();}

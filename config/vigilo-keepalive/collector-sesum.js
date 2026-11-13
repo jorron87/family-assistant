@@ -10,8 +10,8 @@
   'use strict';
   const ORIGIN = 'https://www.sesum.no';
   const WORK = '/api/shopping/sesum/work', RECEIVE = '/api/shopping/sesum/receive';
-  const VERSION = 'sesum-collector-1.9.0';
-  const BUILD = 'sesum-collector-build-1.9.0-1';
+  const VERSION = 'sesum-collector-1.9.1';
+  const BUILD = 'sesum-collector-build-1.9.1-1';
   // The background alarm repairs the bridge every minute. Page ticks advance
   // the bounded durable queue more often; the server still controls spacing
   // and each batch has at most eight reads. Running/Locks prevent overlaps.
@@ -149,16 +149,17 @@
     const tick = async () => {
       if (running || stopped || root.navigator?.onLine === false) return;
       if (!owner) {claimOwnership();return;}
-      running = true;
+      running = true;let advance=false;
       try {
         const run = async () => {
           if (stopped) return;
           const outcome = await runCycle({core:root.FamilienSesumCore,server,fetchPage,state});
+          advance=outcome.reason==='collected'&&outcome.calls>0;
           root.__familienSesumLast = {at:new Date().toISOString(),implementation:VERSION,build:BUILD,...outcome};
         };
         await run();
       } catch { root.__familienSesumLast = {at:new Date().toISOString(),implementation:VERSION,build:BUILD,reason:'local_unavailable'}; }
-      finally { running = false; }
+      finally { running = false;if(advance&&!stopped)root.setTimeout(tick,0); }
     };
     const wake = event => {if(event.source === root && event.data?.familienCollectorWake) void tick();};
     root.addEventListener('message',reply); root.addEventListener('message',wake);

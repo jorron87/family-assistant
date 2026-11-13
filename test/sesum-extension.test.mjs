@@ -7,7 +7,7 @@ function harness({tabs=[],enabled=true,paused=false}={}) {
   const messages=[],injected=[],created=[],reloaded=[],requests=[],listeners=[];
   const chrome={
     alarms:{get:async()=>({periodInMinutes:1}),create:async()=>{},onAlarm:{addListener(){}}},
-    runtime:{getManifest:()=>({version:'1.9.0'}),onInstalled:{addListener(){}},onStartup:{addListener(){}},onMessage:{addListener:fn=>listeners.push(fn)}},
+    runtime:{getManifest:()=>({version:'1.9.1'}),onInstalled:{addListener(){}},onStartup:{addListener(){}},onMessage:{addListener:fn=>listeners.push(fn)}},
     action:{onClicked:{addListener(){}}},
     tabs:{query:async()=>tabs,create:async value=>{created.push(value);},reload:async id=>reloaded.push(id),sendMessage:async(id,message)=>{messages.push({id,...message});return {ok:true};}},
     scripting:{executeScript:async input=>{injected.push(input);return [{result:false}];}},
@@ -35,14 +35,14 @@ test('Sesum relay and school relay cannot cross their exact source/route boundar
 test('an existing Sesum tab is reused without navigating or touching Vigilo',async()=>{
   const h=harness({tabs:[{id:1,url:'https://web-parent.prod.vigilo-oas.no/news'},{id:8,url:'https://www.sesum.no/produkt/123-synthetic',status:'complete'}]});
   await h.sesumTick();assert.equal(h.created.length,0);assert.equal(h.reloaded.length,0);assert.ok(h.messages.every(m=>m.id===8));
-  assert.equal(h.requests[0].headers['X-Family-Collector-Version'],'1.9.0');assert.ok(h.requests[0].url.endsWith('/work?peek=1'),'preflight does not reserve jobs before the page asks for them');
+  assert.equal(h.requests[0].headers['X-Family-Collector-Version'],'1.9.1');assert.ok(h.requests[0].url.endsWith('/work?peek=1'),'preflight does not reserve jobs before the page asks for them');
   assert.ok(h.injected.some(i=>JSON.stringify(i.files)===JSON.stringify(['sesum-core.js','collector-sesum.js'])));
   assert.ok(h.injected.every(i=>i.target.tabId===8));
   const probe=h.injected.find(i=>i.func).func.toString();
   assert.equal(runInNewContext('('+probe+')()',{__familienSesumCollector:'sesum-collector-1.7.0'}),false,'the earlier same-version build is repaired');
   assert.equal(runInNewContext('('+probe+')()',{__familienSesumCollector:'sesum-collector-1.7.0',__familienSesumCollectorBuild:'sesum-collector-build-1.7.0-2'}),false,'the previous receipt build is replaced by the faster bounded scheduler');
   assert.equal(runInNewContext('('+probe+')()',{__familienSesumCollector:'sesum-collector-1.7.0',__familienSesumCollectorBuild:'sesum-collector-build-1.7.0-4'}),false,'the previous parser without explicit own unit labels is replaced');
-  assert.equal(runInNewContext('('+probe+')()',{__familienSesumCollector:'sesum-collector-1.9.0',__familienSesumCollectorBuild:'sesum-collector-build-1.9.0-1'}),true);
+  assert.equal(runInNewContext('('+probe+')()',{__familienSesumCollector:'sesum-collector-1.9.1',__familienSesumCollectorBuild:'sesum-collector-build-1.9.1-1'}),true);
 });
 test('only a missing Sesum tab creates a background Sesum tab',async()=>{
   const h=harness({tabs:[{id:1,url:'https://web-parent.prod.vigilo-oas.no/news'}]});await h.sesumTick();

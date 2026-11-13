@@ -419,7 +419,7 @@
         else if (!linked.search && linked.pathname !== current.pathname && !/^\/kategori\/?$/.test(linked.pathname)) categories.set(linked.pathname.match(/^\/kategori\/(\d+)/)[1], c);
       }
       const visible = entities(input.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '').replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, '').replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ');
-      const countPattern = indexPage ? /(\d[\d\s]{0,15})\s+kategorier med varer/i : /(\d[\d\s]{0,15})\s+varer\s+i ditt utvalg/i;
+      const countPattern = indexPage ? /(\d[\d\s]{0,15})\s+kategorier med varer/i : /(\d[\d\s]{0,15})\s+varer?\s+i ditt utvalg/i;
       const match = visible.match(countPattern), total = match ? Number(match[1].replace(/\s/g, '')) : null;
       if (filtered || !indexPage && !filterSeen) throw Error('unverified_or_filtered_catalogue');
       if (indexPage) {
