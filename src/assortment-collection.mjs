@@ -59,28 +59,33 @@ export function createAssortmentCollection({dataDir,config={},kassal,receiveSesu
  const paused=()=>!config.enabled||!config.collectionEnabled||!state.runId||state.paused===true||state.validationRemaining===0;
  function bootstrap({productUrls=[],categoryUrls=[]}={}){
   load();if(!config.enabled||!Array.isArray(productUrls)||productUrls.length>500||!Array.isArray(categoryUrls)||categoryUrls.length>100)throw Error('Select at most 500 exact known Sesum product URLs.');
+  if(state.bootstrap?.status==='collecting')throw Error('Existing selected catalogue collection is unfinished; resume it instead.');
   const urls=unique(productUrls.map(url=>sesumUrl(url,'product')));if(!state.runId)start({validationReads:1});
   const root=add('catalogue','https://www.sesum.no/kategori'),jobs=[root,...urls.map(url=>add('product',url)),...unique(categoryUrls.map(sesumCatalogueUrl)).map(url=>add('catalogue',url))];
-  for(const job of jobs)if(job.kind==='catalogue'?job.category==='index'?true:job.status!=='complete':!job.categoryReceipt){(job.receiptHistory??=[]).push({status:job.status,fetchedAt:job.fetchedAt??null,error:job.error??null,rescanReason:'native-category-bootstrap'});job.status='pending';job.attempts=0;job.retryAt=null;job.deliveredUntil=null;}
+  for(const job of jobs)if(job.kind==='catalogue'||!job.categoryReceipt)reset(job,'native-category-bootstrap');
   state.bootstrap={mode:categoryUrls.length?'selected-categories':'representatives',jobIds:jobs.map(j=>j.id),startedAt:new Date(clock()).toISOString(),status:'collecting'};state.validationRemaining=null;state.paused=false;state.sesum.pauseUntil=null;finishBootstrap();save(...jobs);return status();
  }
  function pause(){load();state.paused=true;save();return status();}
- function resume(){load();if(!state.runId)throw Error('Start an explicit catalogue sweep first.');state.paused=false;state.validationRemaining=null;save();return status();}
+ function resume(){load();if(!state.runId)throw Error('Start an explicit catalogue sweep first.');if(state.bootstrap&&state.bootstrap.status!=='collecting')throw Error('Selected catalogue collection has ended; start a new explicit selection.');state.paused=false;state.validationRemaining=null;save();return status();}
  function validate({validationReads=1,jobIds=[]}={}){
   load();if(!state.runId||!Number.isInteger(validationReads)||validationReads<1||validationReads>8||!Array.isArray(jobIds)||jobIds.length>8||jobIds.some(id=>!Object.hasOwn(state.sesum.jobs,id)||state.sesum.jobs[id].status==='complete'))throw Error('Select a bounded validation budget and explicit unfinished source jobs.');
   const jobs=jobIds.map(id=>state.sesum.jobs[id]);for(const job of jobs){(job.retryHistory??=[]).push({at:new Date(clock()).toISOString(),error:job.error??null,errors:job.errors??[],attempts:job.attempts});job.status='pending';job.attempts=0;job.retryAt=null;job.deliveredUntil=null;}
   state.validationRemaining=validationReads;state.paused=false;state.sesum.pauseUntil=null;save(...jobs);return status();
  }
  function consumeRead(){if(state.validationRemaining!=null){state.validationRemaining=Math.max(0,state.validationRemaining-1);if(!state.validationRemaining)state.paused=true;}}
- function finishBootstrap(){if(state.bootstrap?.status==='collecting'&&state.bootstrap.jobIds.every(id=>state.sesum.jobs[id]?.status==='complete')){const missing=state.bootstrap.jobIds.filter(id=>{const j=state.sesum.jobs[id];return j.kind==='catalogue'?j.category==='index'&&!j.categoryTreeReceipt:!j.categoryReceipt;});state.bootstrap.status=missing.length?'category-metadata-missing':'complete';state.bootstrap.missingCategoryReceipts=missing;state.bootstrap.finishedAt=new Date(clock()).toISOString();state.paused=true;}}
+ function reset(job,reason){(job.receiptHistory??=[]).push({status:job.status,fetchedAt:job.fetchedAt??null,error:job.error??null,rescanReason:reason,productJobIds:job.kind==='catalogue'?job.productJobIds:undefined,total:job.total});job.status='pending';job.attempts=0;job.retryAt=null;job.deliveredUntil=null;delete job.error;delete job.errors;delete job.reusedObservation;dirtyJobs.add(job.id);}
+ function listingMismatches(jobs){const categories=new Map();for(const job of jobs)if(job.kind==='catalogue'&&job.category!=='index'){const row=categories.get(job.category)??{totals:new Set(),products:new Set(),pending:false};if(Number.isSafeInteger(job.total))row.totals.add(job.total);for(const id of job.productJobIds??[])row.products.add(id);if(job.status!=='complete')row.pending=true;categories.set(job.category,row);}return [...categories].filter(([,r])=>!r.pending&&(r.totals.size!==1||!r.totals.has(r.products.size))).map(([category,r])=>({category,observedProducts:r.products.size,reportedTotals:[...r.totals]}));}
+ function reconcileListings(){if(state.bootstrap?.status!=='collecting'||state.bootstrap.mode!=='selected-categories')return;const jobs=state.bootstrap.jobIds.map(id=>state.sesum.jobs[id]);const mismatches=listingMismatches(jobs);for(const gap of mismatches){state.bootstrap.reconciliationRounds??={};const round=state.bootstrap.reconciliationRounds[gap.category]??0;if(round>=2)continue;state.bootstrap.reconciliationRounds[gap.category]=round+1;for(const job of jobs)if(job.kind==='catalogue'&&job.category===gap.category)reset(job,'listing-count-reconciliation');}state.bootstrap.countMismatches=listingMismatches(jobs);}
+ function finishBootstrap(){reconcileListings();if(state.bootstrap?.status==='collecting'&&state.bootstrap.jobIds.every(id=>state.sesum.jobs[id]?.status==='complete')){const missing=state.bootstrap.jobIds.filter(id=>{const j=state.sesum.jobs[id];return j.kind==='catalogue'?j.category==='index'&&!j.categoryTreeReceipt:!j.categoryReceipt;});state.bootstrap.status=state.bootstrap.countMismatches?.length?'listing-count-mismatch':missing.length?'category-metadata-missing':'complete';state.bootstrap.missingCategoryReceipts=missing;state.bootstrap.finishedAt=new Date(clock()).toISOString();state.paused=true;}}
  function work({peek=false}={}){
   load();if(paused())return {enabled:false,jobs:[],reason:'assortment-collection-paused'};
+  reconcileListings();if(dirtyJobs.size)save();
   const at=clock(),jobs=Object.values(state.sesum.jobs),changed=[];
   for(const job of jobs)if(job.kind==='catalogue'&&!(Date.parse(job.deliveredUntil)>at)){const url=catalogueJobUrl(job.url);if(url!==job.url){(job.retryHistory??=[]).push({at:new Date(at).toISOString(),url:job.url,status:job.status,error:job.error??null,reason:'canonical-native-category-v3'});job.url=url;if(['unrecognized_schema','network_error'].includes(job.error)){job.status='pending';job.attempts=0;job.retryAt=null;}changed.push(job);}}
   if(changed.length)save(...changed);
   if(jobs.some(j=>Date.parse(j.deliveredUntil)>at))return {enabled:true,runId:state.runId,jobs:[],reason:'active-source-batch'};
   if(Date.parse(state.sesum.pauseUntil)>at)return {enabled:true,runId:state.runId,jobs:[],pauseUntil:state.sesum.pauseUntil};
-  const bootstrapKeys=state.bootstrap?.status==='collecting'?new Set(state.bootstrap.jobIds):null;
+  const bootstrapKeys=state.bootstrap?new Set(state.bootstrap.jobIds):null;
   const ready=jobs.filter(j=>(!bootstrapKeys||bootstrapKeys.has(j.id))&&j.status!=='complete'&&j.attempts<3&&!(Date.parse(j.retryAt)>at));
   // Enumerate and consume products together, rather than allowing either a
   // huge listing frontier or a product backlog to starve the other.
@@ -107,7 +112,7 @@ export function createAssortmentCollection({dataDir,config={},kassal,receiveSesu
     // and URL jobs are deduplicated; category links never imply equivalence.
     job.productJobIds=products.map(u=>{const product=add('product',u);if(job.category!=='index'){product.sourceCategories??=[];if(!product.sourceCategories.some(c=>c.id===job.category)){product.sourceCategories.push({id:job.category,name:result.categoryName??null,url:job.url,observedAt:input.fetchedAt});dirtyJobs.add(product.id);}}return product.id;});job.childJobIds=unique([...categories,...next]).filter(u=>u!==job.url).map(u=>add('catalogue',u).id);job.endReached=result.endReached===true;job.total=result.total??null;
     if(state.bootstrap?.status==='collecting'&&state.bootstrap.mode==='selected-categories'&&state.bootstrap.jobIds.includes(job.id)&&job.category!=='index'){
-     const nextIds=next.map(u=>add('catalogue',u).id);state.bootstrap.jobIds=unique([...state.bootstrap.jobIds,...job.productJobIds,...nextIds]);
+     const nextIds=next.map(u=>{const page=add('catalogue',u);if(!state.bootstrap.jobIds.includes(page.id)&&page.status==='complete')reset(page,'new-selected-page-refresh');return page.id;});state.bootstrap.jobIds=unique([...state.bootstrap.jobIds,...job.productJobIds,...nextIds]);
      job.pendingMemberships={productIds:products.map(u=>new URL(u).pathname.match(/^\/produkt\/(\d+)/)[1]),category:{id:job.category,name:result.categoryName??null,url:job.url},observedAt:input.fetchedAt};save(job);
      await replayMemberships(job);
     }
@@ -128,6 +133,7 @@ export function createAssortmentCollection({dataDir,config={},kassal,receiveSesu
  async function replayMemberships(job){
   const receipt=job.pendingMemberships,reused=new Set(await reuseSesum(receipt));
   for(const nativeId of reused){const product=state.sesum.jobs[hash('product'+nativeId)];if(product){product.status='complete';product.categoryReceipt=true;product.categoryObservedAt=receipt.observedAt;product.reusedObservation=true;product.deliveredUntil=null;dirtyJobs.add(product.id);}}
+  for(const nativeId of receipt.productIds)if(!reused.has(nativeId)){const product=state.sesum.jobs[hash('product'+nativeId)];if(product?.status==='complete'&&!(Date.parse(product.fetchedAt??'')>=Date.parse(state.bootstrap?.startedAt??receipt.observedAt)))reset(product,'price-current-observation-not-reusable');}
   delete job.pendingMemberships;save(job);
  }
  async function step(){

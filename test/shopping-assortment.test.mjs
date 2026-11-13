@@ -203,3 +203,26 @@ test('explicit later source pages omit the first-page full-view parameter to avo
 test('unchanged bootstrap membership is not rewritten into every encrypted progress transaction',t=>{
  const f=collectionFixture(t),urls=Array.from({length:500},(_,i)=>'https://www.sesum.no/produkt/'+(i+1)+'-synthetic');f.api.bootstrap({productUrls:urls});const file=join(f.settings.dataDir,'assortment-collection.transactions.enc.jsonl'),before=readFileSync(file).length;for(let i=0;i<100;i++){f.api.pause();f.api.resume();}const growth=readFileSync(file).length-before;assert.ok(growth<300000,'progress transactions must not grow with all 501 selected IDs');const restored=createAssortmentCollection(f.settings);assert.equal(restored.status().bootstrap.jobs,501);assert.equal(restored.work().jobs.length,8);
 });
+
+test('selected listing count drift is reconciled twice, survives restart and never loses discovered products',async t=>{
+ const f=collectionFixture(t,{config:{...config,familySource:'sesum'},reuseSesum:({productIds})=>productIds});f.api.bootstrap({categoryUrls:['https://www.sesum.no/kategori/46-duck']});let api=f.api;
+ const deliver=async(job,total,ids,nextUrls=[])=>api.receive({runId:api.status().runId,jobId:job.id,status:'ok',fetchedAt:at,result:{ok:true,kind:'catalogue',sourceUrl:job.url,categoryUrls:[],productUrls:ids.map(id=>'https://www.sesum.no/produkt/'+id+'-synthetic'),nextUrls,endReached:!nextUrls.length,filtersVerified:true,total,categories:job.url.endsWith('/kategori')?[{id:'46',name:'Duck',parentId:null}]:[]}});
+ for(const job of api.work().jobs)await deliver(job,job.url.endsWith('/kategori')?1:3,job.url.endsWith('/kategori')?[]:[1],job.url.endsWith('/kategori')?[]:['https://www.sesum.no/kategori/46-duck?side=2']);
+ await deliver(api.work().jobs[0],2,[2]);assert.equal(api.status().bootstrap.reconciliationRounds['46'],1);assert.equal(api.status().paused,false);
+ api=createAssortmentCollection(f.settings);assert.equal(api.work({peek:true}).jobs.length,2);
+ // A product removed between reads remains in the durable selection. The
+ // pages must agree on both their total and their actual distinct IDs.
+ for(const job of api.work().jobs)await deliver(job,1,job.url.includes('side=2')?[]:[1]);
+ assert.equal(api.status().bootstrap.status,'complete');assert.equal(api.status().bootstrap.products.jobs,2);assert.equal(api.status().bootstrap.countMismatches.length,0);assert.throws(()=>api.resume(),/ended/);assert.equal(api.work().jobs.length,0);
+ api.bootstrap({categoryUrls:['https://www.sesum.no/kategori/46-duck']});
+ for(let round=0;round<3;round++)for(const job of api.work().jobs)await deliver(job,job.url.endsWith('/kategori')?1:2,job.url.endsWith('/kategori')?[]:[1]);
+ assert.equal(api.status().bootstrap.status,'listing-count-mismatch');assert.equal(api.status().paused,true);assert.equal(api.status().bootstrap.reconciliationRounds['46'],2);assert.equal(api.status().bootstrap.countMismatches.length,1);
+});
+
+test('a new selection refreshes completed pages and stale products while an active selection cannot be overwritten',async t=>{
+ let time=new Date(at),reusable=true;const f=collectionFixture(t,{now:()=>time,config:{...config,familySource:'sesum'},reuseSesum:({productIds})=>reusable?productIds:[]});f.api.bootstrap({categoryUrls:['https://www.sesum.no/kategori/46-duck']});
+ const deliver=async job=>f.api.receive({runId:f.api.status().runId,jobId:job.id,status:'ok',fetchedAt:time.toISOString(),result:{ok:true,kind:'catalogue',sourceUrl:job.url,categoryUrls:[],productUrls:job.url.endsWith('/kategori')?[]:['https://www.sesum.no/produkt/1-synthetic'],nextUrls:[],endReached:true,filtersVerified:true,total:1,categories:[{id:'46',name:'Duck',parentId:null}]}});
+ assert.throws(()=>f.api.bootstrap({productUrls:['https://www.sesum.no/produkt/999-other']}),/unfinished/);for(const job of f.api.work().jobs)await deliver(job);assert.equal(f.api.status().bootstrap.status,'complete');
+ time=new Date(+time+15*86400000);reusable=false;f.api.bootstrap({categoryUrls:['https://www.sesum.no/kategori/46-duck']});for(const job of f.api.work().jobs)await deliver(job);
+ const restored=createAssortmentCollection(f.settings),work=restored.work();assert.equal(work.jobs.length,1);assert.equal(work.jobs[0].kind,'product');assert.equal(restored.status().bootstrap.products.reused,0);assert.equal(restored.status().bootstrap.status,'collecting');
+});
