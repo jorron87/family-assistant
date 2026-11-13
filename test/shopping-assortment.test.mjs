@@ -226,3 +226,9 @@ test('a new selection refreshes completed pages and stale products while an acti
  time=new Date(+time+15*86400000);reusable=false;f.api.bootstrap({categoryUrls:['https://www.sesum.no/kategori/46-duck']});for(const job of f.api.work().jobs)await deliver(job);
  const restored=createAssortmentCollection(f.settings),work=restored.work();assert.equal(work.jobs.length,1);assert.equal(work.jobs[0].kind,'product');assert.equal(restored.status().bootstrap.products.reused,0);assert.equal(restored.status().bootstrap.status,'collecting');
 });
+
+test('source denial keeps the full retry-after pause and reduces subsequent request frequency across restart',async t=>{
+ let time=new Date(at);const f=collectionFixture(t,{now:()=>time});f.api.start();let work=f.api.work();assert.equal(work.limits.minSpacingMs,1500);await f.api.receive({runId:work.runId,jobId:work.jobs[0].id,status:'error',fetchedAt:time.toISOString(),error:{code:'rate_limited',retryAfterMs:2*3600000}});
+ const restored=createAssortmentCollection(f.settings);time=new Date(+time+3600000);assert.equal(restored.work().jobs.length,0);assert.equal(restored.status().sesum.pauseUntil,'2026-11-11T14:00:00.000Z');time=new Date(+time+3600001);work=restored.work();assert.equal(work.jobs.length,1);assert.equal(work.limits.minSpacingMs,6000);
+ await restored.receive({runId:work.runId,jobId:work.jobs[0].id,status:'error',fetchedAt:time.toISOString(),error:{code:'auth_required'}});time=new Date(+time+31*60000);assert.equal(createAssortmentCollection(f.settings).work().limits.minSpacingMs,12000);
+});

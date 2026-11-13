@@ -732,6 +732,8 @@ odaScope:"household" limits the initial Oda placement scope to explicit approved
 
 Selected catalogue pages must agree on their reported category total and the union of native product IDs. Count drift automatically rereads only that category's pages, at most twice per selection, while retaining discovered products and prior page receipts. A persistent discrepancy ends as `listing-count-mismatch`, never complete. An unfinished selection cannot be replaced by another bootstrap, and resuming an ended selection cannot open the retained broader frontier. A new explicit selection refreshes its catalogue pages, reuses only price-current product observations and reopens stale products for their own source receipts. Source authentication/rate-limit pauses remain in force during automatic reconciliation.
 
+Source denials also reduce subsequent request frequency: the server raises spacing from 1.5 seconds to 6 seconds after the first authentication/rate-limit failure, then 12, 24 and at most 30 seconds. This survives restart through the durable failure receipts. The full reported retry-after delay is honored, with a minimum 30-minute source pause and a one-day maximum; spacing never shortens that pause. A denial remains unfinished source work.
+
 ## Optional independent reviewed-library compatibility mode
 
 The following generic grouping contract applies only when familySource is explicitly configured to the independent reviewed-library mode. It does not apply to the Sesum-master mode above.
