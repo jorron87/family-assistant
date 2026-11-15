@@ -167,28 +167,45 @@ async function recoverSpond(tab) {
   const key = 'spondSessionRecovery';
   const saved = (await chrome.storage.local.get(key))[key] ?? {};
   const health = status?.health;
-  if (health?.health === 'ok' && Date.parse(health.at) > (saved.at ?? 0)) {
+  const age = Date.now() - Date.parse(health?.at);
+  const probeAge = Date.now() - Date.parse(status?.probeAt);
+  const staleAfter = Math.max(60, 2 * (status?.maxProbeAgeMinutes ?? 20)) * 60000;
+  const staleProbe = health?.health === 'ok' && Number.isFinite(age) && age >= staleAfter && Number.isFinite(probeAge) && probeAge >= staleAfter;
+  if (health?.health === 'ok' && !staleProbe && Date.parse(health.at) > (saved.at ?? 0)) {
     if (saved.active) await chrome.storage.local.set({[key]:{...saved,active:false}});
     return;
   }
   // One recovery per failure episode, at most once per hour. New error
   // timestamps from repeated rejected retries do not authorize more reloads.
-  const age = Date.now() - Date.parse(health?.at);
-  if (health?.health !== 'unauthorized' || !Number.isFinite(age) || age < 0 || age > 30*60000 || saved.active || Date.now() - (saved.at ?? 0) < 3600000) return;
+  const rejected = health?.health === 'unauthorized' && Number.isFinite(age) && age >= 0 && age <= 30*60000;
+  if ((!rejected && !staleProbe) || saved.active || Date.now() - (saved.at ?? 0) < 3600000) return;
+  if (staleProbe) {
+    // An idle page can retain an obsolete MAIN-world collector after an
+    // extension upgrade. A DOM login alone is not a fresh API receipt.
+    // Never revive collection that the household has explicitly paused.
+    try {
+      const response = await fetch('http://127.0.0.1:4318/api/collector/config', {signal:AbortSignal.timeout(4000)});
+      if (!response.ok || (await response.json()).enabled !== true) return;
+    } catch { return; }
+  }
   const [probe] = await bounded(chrome.scripting.executeScript({target:{tabId:tab.id},func:inspectSpondPage}));
   const page = probe?.result;
   if (!page?.authenticated || !page.ready || !page.online || page.focused || page.drafts || page.dialog) return;
   // Reload the existing idle app once so its normal authenticated startup
   // supplies a current credential. Do not bypass collector backoff or login.
-  await chrome.storage.local.set({[key]:{active:true,at:Date.now(),failureAt:health.at}});
+  await chrome.storage.local.set({[key]:{active:true,at:Date.now(),failureAt:health.at,reason:staleProbe?'stale_probe':'unauthorized'}});
   await chrome.tabs.reload(tab.id);
 }
 
 // Spond-samleren kjører i en spond.com-fane. Hold én festet fane åpen, uten auto-forkasting, og gjenåpne den hvis den er borte.
 async function spondKeeper() {
   const tabs = (await chrome.tabs.query({url: 'https://spond.com/*'})).filter(t => String(t.url).startsWith('https://spond.com/'));
-  const tab = tabs.sort((a, b) => Number(b.pinned) - Number(a.pinned))[0];
-  if (!tab) { await chrome.tabs.create({url: 'https://spond.com/client', active: false, pinned: true}); return; }
+  const tab = tabs.filter(t => {try { return /^\/client(?:\/|$)/.test(new URL(t.url).pathname); } catch { return false; }}).sort((a, b) => Number(b.pinned) - Number(a.pinned))[0];
+  if (!tab) {
+    // A normal login already in progress must finish in its existing tab.
+    if (!tabs.length) await chrome.tabs.create({url: 'https://spond.com/client', active: false, pinned: true});
+    return;
+  }
   if (!tab.pinned || tab.autoDiscardable !== false) await chrome.tabs.update(tab.id, {pinned: true, autoDiscardable: false});
   if (tab.discarded) await chrome.tabs.reload(tab.id);
   else { await wakeCollector(tab.id).catch(() => {}); await recoverSpond(tab); }

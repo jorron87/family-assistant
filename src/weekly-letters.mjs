@@ -34,6 +34,9 @@ export function weeklyLetters(snapshot, today = new Intl.DateTimeFormat('sv-SE',
     if (from > next) continue; // Do not promote a distant plan over this week.
     let attachment = files.find(file => file.id === raw.weeklyLetter?.attachmentId);
     if (!raw.weeklyLetter?.attachmentId) {
+      // A subject worksheet may name the same week and precede the actual
+      // weekly plan in the portal's attachment order.
+      attachment ??= files.find(file => planTitle(file.fileName) && weekOf(file.fileName) === week);
       attachment ??= files.find(file => weekOf(file.fileName) === week && !/meny|foreldremøte|invitasjon/i.test(file.fileName));
       attachment ??= files.find(file => new RegExp(`^_?${week}(?:\\s*\\(\\d+\\))?\\.pdf$`, 'i').test(file.fileName));
       attachment ??= files.find(file => planTitle(file.fileName) && !weekOf(file.fileName));

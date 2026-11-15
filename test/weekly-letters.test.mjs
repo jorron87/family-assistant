@@ -29,3 +29,11 @@ test('explicit metadata supports differently named originals and handles year bo
  const missing=weeklyLetters(snapshot({...item,weeklyLetter:{...item.weeklyLetter,attachmentId:'not-yet-attached'}}),'2027-01-03')[0];
  assert.equal(missing.attachmentId,null,'do not substitute another original for an explicitly selected missing file');
 });
+
+test('main weekly plan outranks subject worksheets for the same week regardless of attachment order',()=>{
+ const files=[{id:'math',fileName:'Mattelekse uke 41.pdf'},{id:'english',fileName:'Engelsklekse uke 41.pdf'},{id:'plan',fileName:'_Lekseplan uke 41.pdf'}];
+ for(const attachments of [files,[...files].reverse(),[files[1],files[2],files[0]]]){
+  const letter=raw('mixed',41,{title:'Lekseplan uke 41',weeklyLetter:normalizeWeeklyLetter({week:41,year:2026}),attachments});
+  assert.equal(weeklyLetters(snapshot(letter),'2026-10-05')[0].attachmentId,'plan');
+ }
+});

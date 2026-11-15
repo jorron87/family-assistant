@@ -366,6 +366,8 @@ Agentkommandoer:
 
 Tjenesten gjør innhenting, originalcache og tekstuttrekk før agenten. Bruk begin-run (eller dispatcherens eksisterende lease), next og telefoninnboksen først. collected ID gir kildeinnhold; resources EKSTERN_ID og resource ID gir originalstatus. resource-export ID tmp/agent/filnavn gir lokal kopi for visuell lesing. Uendrede native fil-ID-er og dokumentkvitteringer gjenbrukes. Les alltid nye sider/vedlegg før mark-reviewed.
 
+Spond-vakten i utvidelse 1.9.2 velger en eksisterende `/client`-fane foran en gammel innloggingsfane. Ved minst én time uten faktisk probe og helsekvittering kan den oppfriske den innloggede appfanen én gang, bare når innhenting er aktivert og siden er ubrukt, ferdiglastet og uten tekstutkast eller dialog. Samme feilperiode gir ikke flere oppfriskninger; en faktisk ny vellykket API-kvittering avslutter perioden. Friske sider og normale innloggingspauser beholdes. DOM-innlogging beviser fortsatt ikke lest innhold eller komplett kildedekning.
+
 Full gjennomgang og kildeendringer er ulike scope. change-completion er kravet for scope kildeendringer; det beviser ikke full kildedekning. Telefon/familievalg bruker scope familiehandlinger og venter ikke på kildehull. En ny innsendt melding har prioritet. Ingen overlapping av agentkjøringer; aldri frigjør en annens lease.
 
 ## Google
