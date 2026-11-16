@@ -144,7 +144,13 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
   function eventFingerprint(event) {
     const evidence = event.sourceRefs.map((id) => {
       const raw = state.rawItems[id];
-      return [id, raw?.revision, raw?.driveUrl, (raw?.attachments ?? []).map((a) => [a.sha256, a.driveUrl])];
+      // This deterministic adapter updates one rolling source card for many
+      // pickup dates. A changed horizon does not change an unchanged pickup's
+      // published content; its actual dates, fractions and cancellation still
+      // participate in the event fingerprint below. Keep ordinary reviewed
+      // sources revision-bound, including unrelated events on a waste card.
+      const rollingWaste = raw?.source === 'renovasjon' && event.canonicalKey?.startsWith(`renovasjon:${raw.externalId}:`);
+      return [id, rollingWaste ? null : raw?.revision, raw?.driveUrl, (raw?.attachments ?? []).map((a) => [a.sha256, a.driveUrl])];
     });
     return hash(JSON.stringify([event.title, event.kind, event.start, event.end, event.allDay, event.provisional, event.members, event.checklist, event.details, event.sourceRefs, event.alternatives, evidence, ...(event.timeNote ? [event.timeNote] : []), ...(event.cancelled ? ["cancelled"] : []), ...(event.task ? [{visibleFrom:event.task.visibleFrom,dueDate:event.task.dueDate,items:event.task.items.map(({key,text})=>({key,text}))}] : [])]));
   }
