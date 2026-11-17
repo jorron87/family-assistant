@@ -6,6 +6,7 @@ import {sesumCatalogueMetadata} from './sesum-catalogue.mjs';
 import {sesumSourceFingerprint} from './sesum-prices.mjs';
 import {sanitizeUnitPriceBasis} from './sesum-unit-basis.mjs';
 import {countedPackage} from './sesum-counted-package.mjs';
+import {sesumUrl} from './shopping-sesum.mjs';
 
 const clone=structuredClone,hash=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const object=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
@@ -79,7 +80,7 @@ export function createShoppingAssortment(state,{save=()=>{},persist=null,now=()=
   // Validate/construct everything before the first mutation.
   const prepared=rows.map(row=>{
    const sourceFingerprint=hash(row.metadata),previous=own(state.products,row.productKey);
-   if(previous&&Date.parse(row.fetchedAt)<Date.parse(previous.fetchedAt))return previous;
+   if(previous&&Date.parse(row.fetchedAt)<Math.max(Date.parse(previous.fetchedAt),Date.parse(previous.availabilityReceipt?.observedAt??'')||0))return previous;
    const same=previous?.sourceFingerprint===sourceFingerprint,prices=new Map();
    if(same)for(const p of previous.prices)prices.set(p.store,p);
    for(const price of row.prices){const prior=prices.get(price.store);if(!prior||!stamp(prior.receiptAt,clock())||stamp(price.receiptAt,clock())&&Date.parse(price.receiptAt)>=Date.parse(prior.receiptAt)){
@@ -88,12 +89,17 @@ export function createShoppingAssortment(state,{save=()=>{},persist=null,now=()=
    }}
    const priceKey=p=>hash([p.store,p.receiptAt,p.grossPackPrice,p.observedPrice,p.grossUnitPrice,p.unit,p.provenance,p.sourceFingerprint]),priceHistory=new Map((previous?.priceHistory??[]).map(p=>[priceKey(p),p]));
    for(const price of [...(previous?.prices??[]),...row.prices]){const observation={...price,sourceFingerprint:previous?.prices.includes(price)?previous.sourceFingerprint:sourceFingerprint};priceHistory.set(priceKey(observation),observation);}
-   return {...row,prices:[...prices.values()],priceHistory:[...priceHistory.values()],sourceFingerprint,firstSeen:previous?.firstSeen??row.fetchedAt,...(previous&&!same?{history:[...(previous.history??[]),{metadata:previous.metadata,sourceFingerprint:previous.sourceFingerprint,fetchedAt:previous.fetchedAt,prices:previous.prices}]}:previous?.history?{history:previous.history}:{})};
+   return {...row,prices:[...prices.values()],priceHistory:[...priceHistory.values()],sourceFingerprint,firstSeen:previous?.firstSeen??row.fetchedAt,...(previous?.availabilityHistory?{availabilityHistory:previous.availabilityHistory}:{}),...(previous&&!same?{history:[...(previous.history??[]),{metadata:previous.metadata,sourceFingerprint:previous.sourceFingerprint,fetchedAt:previous.fetchedAt,prices:previous.prices}]}:previous?.history?{history:previous.history}:{})};
   });
   const changedRows=[];for(const row of prepared)if(JSON.stringify(row)!==JSON.stringify(own(state.products,row.productKey))){state.products[row.productKey]=row;changedRows.push(row);}
   if(changedRows.length){state.revision++;state.catalogueRevision++;if(persist)persist({revision:state.revision,catalogueRevision:state.catalogueRevision,products:changedRows});else save();}return {observed:rows.length,changed:changedRows.length};
  }
  const receiveSesum=input=>ingest(sesumAssortmentRows(input,clock()));
+ function receiveSesumAvailability(receipt){
+  const nativeId=id(receipt?.id),url=sesumUrl(receipt?.sourceUrl,'product');if(!nativeId||new URL(url).pathname.match(/^\/produkt\/(\d+)/)?.[1]!==nativeId||![404,410].includes(receipt.statusCode)||!stamp(receipt.observedAt,clock()+60000))throw Error('Actual same-product Sesum unavailable-page receipt required.');
+  const key='sesum:CATALOGUE:'+nativeId,previous=own(state.products,key);if(!previous)return {observed:1,changed:0};if(Date.parse(receipt.observedAt)<Math.max(Date.parse(previous.fetchedAt),Date.parse(previous.availabilityReceipt?.observedAt??'')||0))return {observed:1,changed:0};if(JSON.stringify(previous.availabilityReceipt)===JSON.stringify(receipt))return {observed:1,changed:0};
+  const row={...previous,available:false,availabilityReceipt:clone(receipt),availabilityHistory:[...(previous.availabilityHistory??[]),clone(receipt)]};state.products[key]=row;state.revision++;state.catalogueRevision++;if(persist)persist({revision:state.revision,catalogueRevision:state.catalogueRevision,products:[row]});else save();return {observed:1,changed:1};
+ }
  const importSesum=observations=>{if(!Array.isArray(observations)||observations.length>500)throw Error('Import at most 500 complete stored observations.');return ingest(observations.flatMap(row=>sesumAssortmentRows({products:[row.product],fetchedAt:row.fetchedAt},clock())));};
  const receiveKassal=input=>ingest(kassalAssortmentRows(input,clock()));
  const receiveOda=input=>ingest(odaAssortmentRows(input,clock()));
@@ -223,5 +229,5 @@ export function createShoppingAssortment(state,{save=()=>{},persist=null,now=()=
   }
   return {...compiled(clock()),cacheKey:`assortment:${base?.cacheKey??''}:${state.catalogueRevision}`};
  }
- return {receiveOdaAvailability,attachSesumCategories,config,receiveSesum,importSesum,receiveKassal,receiveOda,classify,work,dossier,status,overlay};
+ return {receiveSesumAvailability,receiveOdaAvailability,attachSesumCategories,config,receiveSesum,importSesum,receiveKassal,receiveOda,classify,work,dossier,status,overlay};
 }

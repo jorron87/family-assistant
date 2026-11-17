@@ -76,7 +76,7 @@ const kassal=createKassal({dataDir:DATA_DIR});
 let sesumConfig={enabled:false};
 try{sesumConfig=readConfig('shopping-sesum.json');}catch(error){if(error.code!=='ENOENT')throw error;}
 sesum=createSesumCollector({dataDir:DATA_DIR,config:sesumConfig,families:()=>store.shopping.sesumFamilies(),receivePrices:input=>store.shopping.sesumReceivePrices(input),receiveMetadata:input=>store.shopping.sesumReceiveMetadata(input)});
-assortmentCollection=createAssortmentCollection({dataDir:DATA_DIR,config:assortmentConfig,kassal,receiveSesum:input=>store.shopping.assortment.receiveSesum(input),receiveKassal:input=>store.shopping.assortment.receiveKassal(input),receiveCategories:input=>store.shopping.taxonomy?.receive(input),reuseSesum:input=>store.shopping.assortment.attachSesumCategories(input),categoryIsLeaf:id=>store.shopping.taxonomy?.isLeaf(id)===true});
+assortmentCollection=createAssortmentCollection({dataDir:DATA_DIR,config:assortmentConfig,kassal,receiveSesum:input=>store.shopping.assortment.receiveSesum(input),receiveKassal:input=>store.shopping.assortment.receiveKassal(input),receiveUnavailable:input=>store.shopping.assortment.receiveSesumAvailability(input),receiveCategories:input=>store.shopping.taxonomy?.receive(input),reuseSesum:input=>store.shopping.assortment.attachSesumCategories(input),categoryIsLeaf:id=>store.shopping.taxonomy?.isLeaf(id)===true});
 const sesumStatus=()=>({...sesum.status(),priceIntegration:store.shopping.sesumPriceStatus(),assortmentCollection:assortmentCollection.status()});
 PUBLIC_FILES.set('shopping-view.mjs','text/javascript; charset=utf-8');PUBLIC_FILES.set('barcode.mjs','text/javascript; charset=utf-8');
 PUBLIC_FILES.set('shopping.css','text/css; charset=utf-8');
