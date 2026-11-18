@@ -18,6 +18,19 @@ const json = (arg) => readJsonArg(arg);
 const activityConfig = () => readConfig('activity-sources.json');
 const outputPath = (path) => { mkdirSync(dirname(path), { recursive: true }); return path; };
 
+const runHelp = () => ({
+  usage: 'node src/cli.mjs run FILE',
+  reportSaved: false,
+  input: 'UTF-8 JSON file (or stdin with FILE=-). Help never saves a report.',
+  required: ['scope', 'outcome', 'summary', 'sources'],
+  scopes: {alle:'Full source and activity coverage; includes enabled shopping.',kildeendringer:'Actually reviewed source changes; never certifies global source coverage.',familiehandlinger:'Phone submissions and family calendar actions only.',handel:'Shopping only.',lager:'Inventory submissions only.'},
+  outcomes: ['ok', 'partial', 'needs_login', 'error', 'continued', 'skipped'],
+  incomplete: 'partial, needs_login and error require concrete blockers[] and resumeHint. Unread available work or a large queue is not an external blocker.',
+  completion: 'Read completion and activity-queue after actual work. ok needs the completion proof for its scope; continued requires the documented scope-specific checkpoint contract.',
+  lifecycle: 'Save while your own lease is active. Verify the returned report id before releasing only your own lease. Help success is not a saved report or completed work.',
+  example: {scope:'kildeendringer',outcome:'partial',summary:'Describe actual reviewed changes and saved receipts.',sources:[],blockers:['Describe the actual remaining external blocker.'],resumeHint:'Specify the exact unresolved work and next control condition.'}
+});
+
 function datedFinding(finding) {
   if (!finding || !Number.isFinite(Date.parse(finding.start)) || !Number.isFinite(Date.parse(finding.end)) || Date.parse(finding.end) <= Date.parse(finding.start)) {
     throw new Error("Hvert funn må ha gyldig start og end. Bruk en tydelig merket oppfølgingsdato når hendelsesdatoen er ukjent.");
@@ -58,6 +71,7 @@ async function execute(command, args, flags) {
   }
   for(const name of valueOptions)if(flags.has(name)&&!options.has(name))throw Error(name+' requires one value in command args.');
   args=positionals;const option=name=>options.get(name)??null;
+  if(command==='run'&&flags.has('--help'))return runHelp();
   let result;
   switch (command) {
     case 'shopping': result=await request('/api/shopping');break;
@@ -331,6 +345,7 @@ const print = (value) => console.log(flags.has('--pretty') ? JSON.stringify(valu
 // batch: flere kommandoer i ett kall (hver runde til modellen koster hele konteksten på nytt). Kjøres i rekkefølge og stopper ved første feil.
 // Eksempel: batch '[{"cmd":"drive","args":["RAW","-","URL"]},{"cmd":"calendar","args":["EVENT"],"input":{...}}]'
 async function main() {
+  if((command==='run'&&flags.has('--help'))||(command==='help'&&args[0]==='run')){print(runHelp());return;}
   if(command==='help'||flags.has('--help')||!command){
     const source=readFileSync(new URL(import.meta.url),'utf8');
     const commands=[...new Set([...source.matchAll(/case\s+["']([a-z][a-z0-9-]*)["']\s*:/g)].map(m=>m[1]).concat(['batch','help']))].sort();
