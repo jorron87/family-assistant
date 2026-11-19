@@ -165,6 +165,21 @@ export function createResources({dataDir, store, fetcher = fetch, extract = extr
     return found;
   }
   const inflight = new Map();
+  // A post attachment has its own ID, while this native link names the group
+  // file. Reuse only that explicit immutable file identity, never its filename.
+  function cachedSpondFile(item) {
+    if(item.source!=='spond'||item.status==='ready'||!item.url)return null;
+    let fileId;
+    try {
+      const url=new URL(item.url);
+      if(url.origin!=='https://spond.com'||url.search||url.hash||url.username||url.password)return null;
+      fileId=url.pathname.match(/^\/storage\/upload\/group\/([A-Fa-f0-9]{32})$/)?.[1]?.toUpperCase();
+    } catch {return null;}
+    if(!fileId)return null;
+    return Object.values(state.items).find(other=>other.id!==item.id&&other.source==='spond'&&
+      other.nativeId?.toUpperCase()===fileId&&other.refs.some(ref=>ref.toUpperCase()===`SPOND:FILES:${fileId}`)&&
+      other.version===item.version&&other.status==='ready'&&other.sha256&&other.extraction)??null;
+  }
   async function accept(id, bytes, meta={}) {
     const item=get(id);
     if(!Buffer.isBuffer(bytes)||!bytes.length||bytes.length>MAX_BYTES)throw Error('Originalen er tom eller større enn 20 MB; bruk direkte filhenting.');
@@ -195,6 +210,17 @@ export function createResources({dataDir, store, fetcher = fetch, extract = extr
     if(inflight.has(id))return inflight.get(id);
     const item=get(id);
     if(item.status==='ready'&&!force)return summary(item);
+    const cached=!force&&cachedSpondFile(item);
+    if(cached) {
+      const work=(async()=>{
+        const original=bytes(cached.id);
+        if(digest(original)!==cached.sha256)throw Error('Originalcachen stemmer ikke med filens kvittering.');
+        await accept(id,original,{mimeType:cached.mimeType});
+        Object.assign(item,{fetchedAt:cached.fetchedAt,reusedAt:now(),reusedFromResourceId:cached.id});save();
+        return summary(item);
+      })().finally(()=>inflight.delete(id));
+      inflight.set(id,work);return work;
+    }
     if(item.authRequired&&!force)return summary(item);
     if(!item.url) {
       Object.assign(item,{status:'needs_browser',error:missingUrlNote(item),retryAt:null,authRequired:false});
@@ -237,6 +263,6 @@ export function createResources({dataDir, store, fetcher = fetch, extract = extr
   });}
   function list({externalId,status}={}){return Object.values(state.items).filter(item=>(!externalId||item.refs.some(ref=>sourceIdentity(item.source,ref)===sourceIdentity(item.source,externalId)))&&(!status||item.status===status)).map(summary);}
   let running=false;
-  async function tick(){if(running)return;running=true;try{for(const item of Object.values(state.items).filter(item=>item.status==='queued'||item.status==='error'&&item.url&&!item.authRequired&&Date.parse(item.retryAt)<=clock()).slice(0,4))await retrieve(item.id);}finally{running=false;}}
+  async function tick(){if(running)return;running=true;try{for(const item of Object.values(state.items).filter(item=>cachedSpondFile(item)||item.status==='queued'||item.status==='error'&&item.url&&!item.authRequired&&Date.parse(item.retryAt)<=clock()).slice(0,4))await retrieve(item.id);}finally{running=false;}}
   return {register,discover,retrieve,accept,read,bytes,attach,follow,list,tick,summary:()=>({total:Object.keys(state.items).length,ready:list({status:'ready'}).length,errors:list({status:'error'}).map(i=>({id:i.id,fileName:i.fileName,error:i.error})),running})};
 }

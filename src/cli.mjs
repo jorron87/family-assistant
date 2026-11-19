@@ -31,6 +31,14 @@ const runHelp = () => ({
   example: {scope:'kildeendringer',outcome:'partial',summary:'Describe actual reviewed changes and saved receipts.',sources:[],blockers:['Describe the actual remaining external blocker.'],resumeHint:'Specify the exact unresolved work and next control condition.'}
 });
 
+const sourceItemHelp = () => ({
+  usage:'node src/cli.mjs source-item SOURCE EXTERNAL_ID',
+  reads:'Previously imported raw source items, not the latest collected payload.',
+  current:'Use node src/cli.mjs collected EXTERNAL_ID for the current collector contents.',
+  batch:'source-items FILE accepts {source, externalIds:[...]} with at most 500 IDs.',
+  example:'node src/cli.mjs source-item spond spond:post:NATIVE_ID'
+});
+
 function datedFinding(finding) {
   if (!finding || !Number.isFinite(Date.parse(finding.start)) || !Number.isFinite(Date.parse(finding.end)) || Date.parse(finding.end) <= Date.parse(finding.start)) {
     throw new Error("Hvert funn må ha gyldig start og end. Bruk en tydelig merket oppfølgingsdato når hendelsesdatoen er ukjent.");
@@ -72,6 +80,7 @@ async function execute(command, args, flags) {
   for(const name of valueOptions)if(flags.has(name)&&!options.has(name))throw Error(name+' requires one value in command args.');
   args=positionals;const option=name=>options.get(name)??null;
   if(command==='run'&&flags.has('--help'))return runHelp();
+  if(command==='source-item'&&flags.has('--help'))return sourceItemHelp();
   let result;
   switch (command) {
     case 'shopping': result=await request('/api/shopping');break;
@@ -254,7 +263,9 @@ async function execute(command, args, flags) {
     case "usage": result = await request(`/api/usage?days=${Number(args[0]) || 7}`); break;
     case "run-history": result = await request(`/api/run-history${args[0] ? `?before=${encodeURIComponent(args[0])}` : ""}`); break;
     case "raw-item": result = await request(`/api/raw/${args[0]}`); break;
-    case "source-item": result=await request('/api/source-items','POST',{source:args[0],externalIds:[args[1]]});break;
+    case "source-item":
+      if(args.length!==2||!args.every(value=>value.trim()))throw Error(sourceItemHelp().usage+'. '+sourceItemHelp().current);
+      result=await request('/api/source-items','POST',{source:args[0],externalIds:[args[1]]});break;
     case "source-items": result=await request('/api/source-items','POST',json(args[0]));break;
     case "profile-queue": result = await request("/api/profile-queue"); break;
     case "document-status": result = await request(`/api/documents/${args[0]}`); break;
@@ -346,6 +357,7 @@ const print = (value) => console.log(flags.has('--pretty') ? JSON.stringify(valu
 // Eksempel: batch '[{"cmd":"drive","args":["RAW","-","URL"]},{"cmd":"calendar","args":["EVENT"],"input":{...}}]'
 async function main() {
   if((command==='run'&&flags.has('--help'))||(command==='help'&&args[0]==='run')){print(runHelp());return;}
+  if((command==='source-item'&&flags.has('--help'))||(command==='help'&&args[0]==='source-item')){print(sourceItemHelp());return;}
   if(command==='help'||flags.has('--help')||!command){
     const source=readFileSync(new URL(import.meta.url),'utf8');
     const commands=[...new Set([...source.matchAll(/case\s+["']([a-z][a-z0-9-]*)["']\s*:/g)].map(m=>m[1]).concat(['batch','help']))].sort();
