@@ -138,7 +138,17 @@ export function normalizeSpondPosts(items) {
     const id = id32(post?.id);
     if (!id || post.type === 'DELETED') continue;
     const comments = commentsOf(post.comments);
-    const attachments = attachmentsOf(post.attachments);
+    // Spond renders inline photos/videos from post.media, separately from its
+    // attachment list. A title-only photo post must still create original work.
+    const media=list(post.media).map((item,index)=>{
+      let url=null;
+      try {if(item?.url)url=resourceUrl(new URL(item.url,'https://spond.com').href);} catch { /* keep an unresolved media hint */ }
+      let name=oneLine(item?.name,300);
+      if(!name&&url)name=new URL(url).pathname.split('/').at(-1);
+      const mimeType=oneLine(item?.mimeType,100)||({jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',gif:'image/gif'}[name?.split('.').at(-1)?.toLowerCase()]??'');
+      return {id:item?.id,name:name||`media-${index+1}`,url,mimeType,version:item?.version??item?.updatedAt};
+    });
+    const attachments = attachmentsOf([...list(post.attachments),...media]);
     const body = text(post.body);
     const posted = iso(post.timestamp);
     const latestComment = comments.map((comment) => comment.at).filter(Boolean).sort().at(-1) ?? null;

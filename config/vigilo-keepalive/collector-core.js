@@ -124,7 +124,9 @@
     }),
     posts: (body) => (Array.isArray(body) ? body : []).map((post) => ({
       id: s(post?.id, 64), type: s(post?.type, 20), groupId: s(post?.groupId, 64), subGroupIds: (Array.isArray(post?.subGroupIds) ? post.subGroupIds : []).map((id) => s(id, 64)),
-      title: s(post?.title, 300), body: s(post?.body), timestamp: s(post?.timestamp, 40), attachments: files(post?.attachments), commentsDisabled: post?.commentsDisabled === true, comments: comments(post?.comments)
+      title: s(post?.title, 300), body: s(post?.body), timestamp: s(post?.timestamp, 40), attachments: files(post?.attachments),
+      media: (Array.isArray(post?.media) ? post.media : []).map(media=>({id:s(media?.id,128),type:s(media?.type,40),url:s(media?.url,8192),name:s(media?.name,300),mimeType:s(media?.mimeType,100),version:s(media?.version ?? media?.updatedAt,100)})),
+      commentsDisabled: post?.commentsDisabled === true, comments: comments(post?.comments)
     })),
     events: (body) => (Array.isArray(body) ? body : []).map((event) => ({
       id: s(event?.id, 64), heading: s(event?.heading, 300), description: s(event?.description), startTimestamp: s(event?.startTimestamp, 40), endTimestamp: s(event?.endTimestamp, 40),
