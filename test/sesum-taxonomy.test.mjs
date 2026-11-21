@@ -185,6 +185,13 @@ test('a fresh, reviewed shop pack earns one stock-up alert against the chosen Od
  assert.equal(subcategoryPrices(perPiece).comparisons[0].oda.unitPrice,3.49);
  pack.product.description='12 stk';assert.equal(subcategoryPrices(perPiece).comparisons[0].oda,null);
  pack.product.name='18 stk';pack.product.description='1 kg';assert.equal(subcategoryPrices(perPiece).comparisons[0].oda,null);
+ const net=odaRow(10,39.8);
+ Object.assign(net.product,{source:'oda',description:'3pk, 681 g',pack:null,packKnown:false});
+ Object.assign(net.price,{grossUnitPrice:94.76,unit:'kg',directUnitVerified:true});
+ const netOptions={...options,reader:{members:()=>[net],odaNative:()=>net.product},quotes:[],families:[{...options.families[0],products:[{sourceUrl:url,store:'ODA_NO',reviewCurrent:true,unit:'kg',canonicalPackAmount:.681}]}]};
+ assert.equal(subcategoryPrices(netOptions).comparisons[0].oda.unitPrice,58.44,'compare the full net pack, not the drained per-kg figure');
+ netOptions.families[0].products[0].canonicalPackAmount=.42;
+ assert.equal(subcategoryPrices({...netOptions,quotes:options.quotes}).comparisons[0].oda,null,'a conflicting approved pack cannot restore the incompatible quote');
  const newer=new Date(Date.parse(at)+60000).toISOString();
  assert.equal(subcategoryPrices({...multi,reader:{members:k=>k===cat.groupId?[odaRow(10,110,newer)]:[]}}).comparisons[0].oda.unitPrice,110);
  assert.equal(subcategoryPrices({...multi,reader:{members:k=>k===cat.groupId?[odaRow(10,110)]:[]}}).comparisons[0].oda,null);

@@ -7,21 +7,37 @@ const productId=p=>odaProductIdFromUrl(p.productSourceUrl??p.sourceUrl);
 const keyOf=p=>p.productKey??`kassal:${p.store}:${p.id}`;
 const display=p=>p?{name:p.name,storeName:p.storeName,unitPrice:rounded(p.unitPrice),receiptAt:p.lastChecked,sourceUrl:p.sourceUrl}:null;
 
-// A household may compare pieces while Oda displays metres or kilograms.
-// Require both the exact reviewed pack count and a matching whole-pack count
-// in Oda's own size description; never derive pieces from length or weight.
-function comparableUnitPrice(row,unit,odaProducts){
- const p=row.product,quote=row.price;
- if(p.unit===unit){
-  if(p.packKnown&&p.pack>0&&quote.grossPackPrice>0)return quote.grossPackPrice/p.pack;
-  if(quote.directUnitVerified&&quote.unit===unit)return quote.grossUnitPrice;
+// Oda's per-kg price may use drained weight, while the household compares
+// the whole labelled net pack. Take an explicit total from its native size
+// field. Never multiply a per-item weight or estimate a variable pack.
+const packUnits={g:['kg',0.001],kg:['kg',1],ml:['l',0.001],cl:['l',0.01],dl:['l',0.1],l:['l',1],stk:['stk',1],ruller:['stk',1]};
+function declaredAmount(product,unit){
+ if(product?.source!=='oda'||typeof product.description!=='string')return null;
+ const amounts=new Set();
+ for(const field of product.description.split(/,\s+/)){
+  const m=field.trim().match(/^(\d+(?:[,.]\d+)?)\s*(kg|g|ml|cl|dl|l|stk\.?|ruller)$/iu);
+  if(!m)continue;
+  const [basis,factor]=packUnits[m[2].toLowerCase().replace('.','')];
+  const amount=Number(m[1].replace(',','.'))*factor;
+  if(basis===unit&&amount>0)amounts.add(amount);
  }
- if(unit!=='stk'||p.source!=='oda'||!(quote.grossPackPrice>0)||typeof p.description!=='string')return null;
- const counts=p.description.split(/,\s+/).map(part=>part.trim().match(/^(\d+)\s*(?:stk\.?|ruller)$/iu)).filter(Boolean);
- if(counts.length!==1)return null;
- const count=Number(counts[0][1]);
- const matching=odaProducts.filter(alt=>productId(alt)===productId(p)&&alt.unit===unit);
- return count>0&&matching.length&&matching.every(alt=>alt.canonicalPackAmount===count)?quote.grossPackPrice/count:null;
+ return amounts.size===1?[...amounts][0]:null;
+}
+function contradictsPack(amount,unit,products,id){
+ return amount!=null&&products.some(p=>productId(p)===id&&p.unit===unit&&p.canonicalPackAmount>0&&Math.abs(p.canonicalPackAmount-amount)>1e-6);
+}
+function comparableUnitPrice(row,unit,odaProducts){
+ const p=row.product,quote=row.price,id=productId(p),amount=declaredAmount(p,unit);
+ if(contradictsPack(amount,unit,odaProducts,id))return null;
+ if(amount&&quote.grossPackPrice>0){
+  // Count-based households can use a second measure only when their reviewed
+  // pack independently confirms the same piece/roll count.
+  if(p.unit!==unit&&!odaProducts.some(a=>productId(a)===id&&a.unit===unit&&Math.abs(a.canonicalPackAmount-amount)<1e-6))return null;
+  return quote.grossPackPrice/amount;
+ }
+ if(p.unit!==unit)return null;
+ if(p.packKnown&&p.pack>0&&quote.grossPackPrice>0)return quote.grossPackPrice/p.pack;
+ return quote.directUnitVerified&&quote.unit===unit?quote.grossUnitPrice:null;
 }
 
 // A barcode can point out a shelf pack to check. It never grants household
@@ -120,7 +136,7 @@ export function subcategoryPrices({reader,links,families,quotes,stores,choice,pl
    };
    const currentReviewed=odb.filter(p=>{
     const id=productId(p),native=reader?.odaNative?.(id);
-    if(native&&!native.available)return false;
+    if(native&&(!native.available||contradictsPack(declaredAmount(native,f.unit),f.unit,odaProducts,id)))return false;
     if(native&&Date.parse(native.quote?.receiptAt)>=Date.parse(p.lastChecked)&&native.quote?.reasons?.length)return false;
     return odaIds.has(id)||only&&!placements.has(id)&&!native;
    });
