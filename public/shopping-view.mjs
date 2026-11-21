@@ -83,9 +83,13 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
   function fail(error){toast(error.message);}
   function updateBanner(summary) {
     if(!banner)return;
-    banner.hidden=!summary.dealCount;
+    banner.hidden=!summary.dealCount&&!summary.categorySignal;
     banner.replaceChildren();
-    if(!summary.dealCount)return;
+    if(!summary.dealCount){
+      const s=summary.categorySignal;
+      if(s)banner.append(button(s.categoryName+' hos '+s.store.storeName+' · '+s.diffPct+' % under Oda · sjekk varianten',onOpen));
+      return;
+    }
     if(summary.priceAlert){
       const a=summary.priceAlert;
       banner.append(button(`${a.name} hos ${a.storeName} · ${a.diffPct} % under Oda · spar ${kr(a.saving)} på ${a.packs} pakker`,onOpen));
@@ -381,6 +385,19 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
       }
       root.append(section);
     }
+    if(data.categorySignals?.length){
+      const section=el('section',undefined,'shop-store');
+      section.append(el('h3','Lavere butikkpriser å sjekke'),el('p','Disse varene tilhører samme underkategori. Sjekk at varianten passer og at butikken har den inne.','shop-sub'));
+      for(const signal of data.categorySignals){
+        const line=el('article',undefined,'shop-deal'),q=signal.store;
+        line.append(el('h4',signal.categoryName+' · '+signal.diffPct+' % under Oda'),
+          el('p',q.storeName+' · '+q.name+' · '+price(q.unitPrice)+'/'+signal.unit),
+          el('p','Oda · '+signal.oda.name+' · '+price(signal.oda.unitPrice)+'/'+signal.unit,'shop-sub'));
+        if(onExplore)line.append(button('Vis underkategorien',()=>onExplore('sesum-category:'+signal.categoryId)));
+        section.append(line);
+      }
+      root.append(section);
+    }
     if(data.subcategoryComparisons?.length){
       root.append(details('subcategory-prices','Sammenlign grunnvarene med Oda',body=>{
         for(const r of data.subcategoryComparisons){
@@ -389,6 +406,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
           for(const [label,q] of [['Oda',r.oda],['Butikk',r.store]]){
             line.append(el('p',q?q.storeName+' · '+q.name+' · '+price(q.unitPrice)+'/'+r.unit+' · '+dayLabel(q.receiptAt.slice(0,10)):label+' · mangler fersk sammenlignbar pris','shop-sub'));
           }
+          if(r.differencePct!=null)line.append(el('p',r.differencePct===0?'Samme enhetspris':Math.abs(r.differencePct)+' % '+(r.differencePct>0?'lavere':'høyere')+' pris i butikk','shop-sub'));
           if(onExplore)line.append(button('Vis underkategorien',()=>onExplore('sesum-category:'+r.categoryId)));
           body.append(line);
         }

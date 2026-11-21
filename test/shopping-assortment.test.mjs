@@ -255,3 +255,18 @@ test('a missing source page preserves metadata, review and actual price dates; o
  const f=fixture();f.ingest(sesum());f.api.classify(decision(f.api));const before=f.api.dossier('sesum:CATALOGUE:1');f.advance(60000);const receipt={id:'1',sourceUrl:'https://www.sesum.no/produkt/1-synthetic',statusCode:404,observedAt:'2026-11-11T12:01:00Z'};f.api.receiveSesumAvailability(receipt);let after=f.api.dossier('sesum:CATALOGUE:1');assert.equal(after.available,false);assert.deepEqual(after.prices,before.prices);assert.deepEqual(after.metadata,before.metadata);assert.equal(after.fetchedAt,before.fetchedAt);assert.equal(after.sourceFingerprint,before.sourceFingerprint);assert.equal(f.state.reviews[after.productKey].sourceFingerprint,before.sourceFingerprint);assert.equal(f.api.work().length,0);assert.equal(f.api.receiveSesumAvailability(receipt).changed,0);
  f.api.receiveSesum({products:[sesum()],fetchedAt:at});assert.equal(f.api.dossier('sesum:CATALOGUE:1').available,false);f.advance(60000);f.ingest(sesum());after=f.api.dossier('sesum:CATALOGUE:1');assert.equal(after.available,true);assert.deepEqual(after.prices,before.prices);assert.equal(f.api.work().length,0);assert.equal(after.availabilityHistory.length,1);assert.throws(()=>f.api.receiveSesumAvailability({...receipt,id:'2'}),/same-product/);
 });
+
+test('selected leaves deliver real product work before all listings finish',async t=>{
+ const f=collectionFixture(t,{config:{...config,familySource:'sesum'},receiveCategories:async()=>{}});
+ const categories=Array.from({length:20},(_,i)=>({id:String(i+1),name:'Shelf '+i,parentId:null}));
+ const urls=categories.map(c=>'https://www.sesum.no/kategori/'+c.id);
+ f.api.bootstrap({leafSelection:true,categoryUrls:urls});
+ const work=f.api.work();
+ for(const job of work.jobs){
+  const products=job.url.includes('/1?')||new URL(job.url).pathname==='/kategori/1'?Array.from({length:8},(_,i)=>'https://www.sesum.no/produkt/'+(i+1)+'-synthetic'):[];
+  await f.api.receive({runId:work.runId,jobId:job.id,status:'ok',fetchedAt:at,result:{ok:true,kind:'catalogue',sourceUrl:job.url,categoryUrls:[],productUrls:products,nextUrls:[],endReached:true,filtersVerified:true,total:job.url.endsWith('/kategori')?categories.length:products.length,categories}});
+ }
+ const next=f.api.work({peek:true});
+ assert.equal(next.jobs.filter(j=>j.kind==='product').length,4);
+ assert.equal(next.jobs.filter(j=>j.kind==='catalogue').length,4);
+});

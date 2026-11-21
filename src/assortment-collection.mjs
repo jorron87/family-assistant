@@ -8,6 +8,12 @@ import {productResult,sesumUrl} from './shopping-sesum.mjs';
 const hash=v=>createHash('sha256').update(v).digest('hex'),unique=a=>[...new Set(a)];
 const terminal=job=>job?.status==='complete'||job?.status==='unavailable';
 const chains=['KIWI','REMA_1000','COOP_EXTRA','MENY_NO','SPAR_NO','ODA_NO','EUROPRIS_NO','COOP_OBS','COOP_PRIX','COOP_MEGA','JOKER_NO','BUNNPRIS','MATKROKEN'];
+// The extension manifest also changes for unrelated collectors. The 1.x
+// catalogue protocol is compatible from the first singular-count fix onward.
+export function supportsSesumCatalogue(version){
+ const match=/^1\.(\d+)\.(\d+)$/.exec(version??'');
+ return !!match&&(Number(match[1])>9||Number(match[1])===9&&Number(match[2])>=1);
+}
 export function sesumCatalogueUrl(value){
  const u=new URL(value);if(u.origin!=='https://www.sesum.no'||u.username||u.password||u.hash||!/^\/kategori(?:\/[1-9]\d*(?:-[^/?#]+)?)?\/?$/.test(u.pathname))throw Error('Invalid Sesum public catalogue URL.');
  for(const [k,v] of u.searchParams)if(!['side','page','visning'].includes(k)||(k==='visning'?v!=='alle':! /^[1-9]\d{0,7}$/.test(v))||u.searchParams.getAll(k).length!==1)throw Error('Filtered/invalid Sesum catalogue URL.');
@@ -91,7 +97,13 @@ export function createAssortmentCollection({dataDir,config={},kassal,receiveSesu
   const ready=jobs.filter(j=>(!bootstrapKeys||bootstrapKeys.has(j.id))&&!terminal(j)&&j.attempts<3&&!(Date.parse(j.retryAt)>at)).sort((a,b)=>a.attempts-b.attempts);
   // Enumerate and consume products together, rather than allowing either a
   // huge listing frontier or a product backlog to starve the other.
-  const selected=[];if(bootstrapKeys)selected.push(...ready.filter(j=>j.kind==='catalogue'),...ready.filter(j=>j.kind==='product'));else for(const kind of ['catalogue','product'])selected.push(...ready.filter(j=>j.kind===kind).slice(0,2));selected.splice(state.validationRemaining??(bootstrapKeys?8:4));
+  const listings=ready.filter(j=>j.kind==='catalogue'),products=ready.filter(j=>j.kind==='product');
+  const budget=state.validationRemaining??(bootstrapKeys?8:4);
+  let selected;
+  if(state.bootstrap?.leafSelection){
+   const front=Math.min(listings.length,Math.max(Math.ceil(budget/2),budget-products.length));
+   selected=[...listings.slice(0,front),...products.slice(0,budget-front)];
+  }else selected=(bootstrapKeys?[...listings,...products]:[...listings.slice(0,2),...products.slice(0,2)]).slice(0,budget);
   if(!peek&&selected.length){for(const j of selected)j.deliveredUntil=new Date(at+180000).toISOString();save(...selected);}
   return {enabled:true,runId:state.runId,jobs:selected.map(({id,kind,url})=>({id,kind,url,familyIds:[],publicCatalogue:true})),limits:{minSpacingMs:sourceSpacing(),cycleCalls:bootstrapKeys?8:4}};
  }

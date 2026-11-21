@@ -27,7 +27,7 @@ import {weeklyLetters} from './weekly-letters.mjs';
 import {createOda} from './oda.mjs';
 import {createShoppingMaintenance} from './shopping-maintenance.mjs';
 import {createKassal} from './kassal.mjs';
-import {createAssortmentCollection} from './assortment-collection.mjs';
+import {createAssortmentCollection,supportsSesumCatalogue} from './assortment-collection.mjs';
 import {assortmentConfig as validateAssortmentConfig} from './shopping-assortment.mjs';
 import {createSesumCollector,sesumSenderAllowed} from './shopping-sesum.mjs';
 import {createShoppingCoordinator} from './shopping-coordinator.mjs';
@@ -158,7 +158,7 @@ async function handle(req, res) {
       if(method==='POST'&&!String(req.headers['content-type']??'').toLowerCase().startsWith('application/json'))return send(res,403,{error:'Sesum krever JSON.'});
       if(path==='/api/shopping/sesum/work'&&method==='GET'){
         const peek=new URL(req.url,`http://${host}`).searchParams.get('peek')==='1';
-        if(assortmentConfig.enabled){if(assortmentConfig.familySource==='sesum'&&!peek&&req.headers['x-family-collector-version']!=='1.9.1'&&req.headers['x-family-request']!=='1')return send(res,200,{enabled:false,jobs:[],reason:'collector-update-required',minimumVersion:'1.9.1'});return send(res,200,assortmentCollection.work({peek}));}
+        if(assortmentConfig.enabled){if(assortmentConfig.familySource==='sesum'&&!peek&&!supportsSesumCatalogue(req.headers['x-family-collector-version'])&&req.headers['x-family-request']!=='1')return send(res,200,{enabled:false,jobs:[],reason:'collector-update-required',minimumVersion:'1.9.1'});return send(res,200,assortmentCollection.work({peek}));}
         if(!peek)await sesum.replayPending();
         return send(res,200,sesum.work({peek}));
       }

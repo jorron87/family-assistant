@@ -158,5 +158,33 @@ test('a fresh, reviewed shop pack earns one stock-up alert against the chosen Od
  assert.deepEqual(subcategoryPrices({...options,choice:()=>11}).alerts,[]);
  assert.deepEqual(subcategoryPrices({...options,planning:()=>({...options.planning(),stock:{amount:12,known:true}})}).alerts,[]);
  assert.deepEqual(subcategoryPrices({...options,stores:[{...options.stores[0],minSavings:100}]}).alerts,[]);
- assert.deepEqual(subcategoryPrices({...options,quotes:options.quotes.slice(0,1)}).alerts,[]);
+ const unreviewed=subcategoryPrices({...options,quotes:options.quotes.slice(0,1)});
+ assert.deepEqual(unreviewed.alerts,[]);
+ assert.equal(unreviewed.signals[0].diffPct,99);
+ assert.equal(unreviewed.signals[0].store.name,'Different variant');
+ assert.deepEqual(subcategoryPrices({...options,quotes:options.quotes.slice(0,1),excluded:()=>true}).signals,[]);
+ const alternative={...options.quotes[1],store:'EXTRA',name:'Reviewed alternative',price:65,unitPrice:65};
+ const otherShop={id:'extra',chainCode:'EXTRA',name:'Extra',minSavings:5};
+ const trips=subcategoryPrices({...options,quotes:[...options.quotes,alternative],stores:[{...options.stores[0],minSavings:1000},otherShop]});
+ assert.equal(trips.alerts.length,1);assert.equal(trips.alerts[0].storeId,'extra');
+ const sibling={id:'285',groupId:'sesum-category:285',name:'Whole'};
+ const odaRow=(id,unitPrice,time=at)=>({productKey:'oda:ODA_NO:'+id,product:{name:'Native '+id,sourceUrl:'https://oda.com/no/products/'+id+'-synthetic/',store:'ODA_NO',unit:'kg',available:true,packKnown:true,pack:1},price:{fresh:true,reasons:[],grossPackPrice:unitPrice,receiptAt:time}});
+ const rows={ [cat.groupId]:[odaRow(10,100),{...options.reader.members()[0],productKey:'reviewed-shop-key',product:{...options.reader.members()[0].product,name:'Reviewed variant'},price:{...options.reader.members()[0].price,grossPackPrice:60}}],
+  [sibling.groupId]:[odaRow(12,45)]};
+ const multi={...options,choice:()=>null,reader:{members:k=>rows[k]},links:[{watchId:'duck',categories:[cat,sibling],odaReferenceIds:[10,12]}],
+  quotes:[options.quotes[0],{...options.quotes[1],productKey:'reviewed-shop-key'}]};
+ const siblingResult=subcategoryPrices(multi);
+ assert.equal(siblingResult.comparisons[0].oda.unitPrice,100);
+ assert.equal(siblingResult.comparisons[1].oda.unitPrice,45);
+ assert.deepEqual(siblingResult.alerts,[]);assert.deepEqual(siblingResult.signals,[]);
+ const newer=new Date(Date.parse(at)+60000).toISOString();
+ assert.equal(subcategoryPrices({...multi,reader:{members:k=>k===cat.groupId?[odaRow(10,110,newer)]:[]}}).comparisons[0].oda.unitPrice,110);
+ assert.equal(subcategoryPrices({...multi,reader:{members:k=>k===cat.groupId?[odaRow(10,110)]:[]}}).comparisons[0].oda,null);
+ assert.equal(subcategoryPrices({...options,reader:{members:()=>[],odaNative:()=>({available:false})}}).comparisons[0].oda,null);
+});
+
+test('later compatible extension manifests retain catalogue work',async()=>{
+ const {supportsSesumCatalogue}=await import('../src/assortment-collection.mjs');
+ for(const v of ['1.9.1','1.9.2','1.10.0'])assert.ok(supportsSesumCatalogue(v));
+ for(const v of [undefined,'1.8.9','1.9.0','1.9.2-beta','2.0.0'])assert.equal(supportsSesumCatalogue(v),false);
 });

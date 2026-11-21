@@ -129,7 +129,7 @@ export function createSesumTaxonomy(state,{persist=null,save=()=>{},now=()=>new 
    }
    for(const [id,members]of Object.entries(out.members)){const units=new Set(members.map(m=>out.products[m.k].unit??out.products[m.k].quote.unit).filter(Boolean));out.groups[id].unit=units.size===1?[...units][0]:null;if(units.size>1)for(const member of members)member.u=null;}
    cachedRevision=state.revision;cachedBase=index;cached=createIndexReader(out,{horizonDays:priceHorizonDays});
-  }return {...cached(clock()),cacheKey:`sesum-taxonomy:${state.revision}:${base.cacheKey??''}`};
+  }return {...cached(clock()),odaNative:id=>index.products['oda:ODA_NO:'+id],cacheKey:`sesum-taxonomy:${state.revision}:${base.cacheKey??''}`};
  }
  function search(query,{offset=0,limit=20,expectedFingerprint=null}={}){
   if(typeof query!=='string'||query.trim().length<2||query.length>200||!Number.isSafeInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>100)throw Error('Use a category query and bounded pagination.');
