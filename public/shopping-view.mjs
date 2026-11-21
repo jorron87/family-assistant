@@ -56,7 +56,7 @@ export function splitCheaper(rows,saving=row=>row.savings?.annual??0) {
   return {cheaper:rows.filter(x=>x.places?.length).sort((a,b)=>saving(b)-saving(a)),rest:rows.filter(x=>!x.places?.length)};
 }
 
-export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=null,base='/api/shopping',compact=false}) {
+export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=null,base='/api/shopping',compact=false,initialFindingsStore=null}) {
   const draftEdits=new Map(),cartState=new Map(),cartIds=new Map();let cartBusy=false;
   const check={itemId:null,query:'',price:'',size:null,custom:'',customUnit:null};
   let listNeed='later',cart=null,cartHolder=null,draftSync=null;
@@ -64,6 +64,8 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
   const stockDraft={text:'',location:'',mode:'minimum',files:[],intakeId:null,clientId:crypto.randomUUID()},stockPreviews=new Map();let stockSending=false;
   let dirty=false,data=null,tab='buy',search='',location='all',stale=false,odaQuery='',toastTimer=null;
   const chosen=new Map(),openSections=new Set(['draft-elsewhere']);
+  let selectedFindingsStore=initialFindingsStore||null;
+  if(initialFindingsStore!==null)tab='findings';
   panel.classList.add('shop');
   const toastNode=el('div',undefined,'shop-toast');toastNode.setAttribute('role','status');toastNode.hidden=true;
 
@@ -84,10 +86,11 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
   function fail(error){toast(error.message);}
   function updateBanner(summary) {
     if(!banner)return;
-    banner.hidden=!summary.dealCount&&!summary.categorySignal;
+    banner.hidden=!summary.dealCount&&!summary.categorySignal&&!summary.storeFindingCount;
     banner.replaceChildren();
+    if(summary.storeFindingCount)banner.append(button('Prisfunn per butikk',()=>{tab='findings';onOpen();}));
     const signal=summary.categorySignal;
-    if(signal)banner.append(button(signal.categoryName+' · '+signal.store.name+' · '+price(signal.store.unitPrice)+'/'+signal.unit+' hos '+signal.store.storeName+' · '+nf(1).format(signal.diffPct)+' % under '+signalReference(signal),onOpen));
+    if(signal)banner.append(button(signal.categoryName+' · '+signal.store.name+' · '+price(signal.store.unitPrice)+'/'+signal.unit+' hos '+signal.store.storeName+' · '+nf(1).format(signal.diffPct)+' % under '+signalReference(signal),()=>{tab='buy';onOpen();}));
     if(!summary.dealCount)return;
     if(summary.priceAlert){
       const a=summary.priceAlert;
@@ -357,6 +360,35 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     }
     return box;
   }
+  function renderFindings(root){
+    root.append(el('h3','Prisfunn per butikk'));
+    const stores=data.storeFindings??[];
+    if(!stores.length){root.append(el('p','Ingen fulgte varer har en fersk butikkpris under Oda akkurat nå.'));return;}
+    selectedFindingsStore??=stores[0].storeId;
+    const store=stores.find(s=>s.storeId===selectedFindingsStore);
+    root.append(chips(stores.map(s=>[s.storeId,s.storeName+' ('+s.families.length+')']),selectedFindingsStore,id=>{selectedFindingsStore=id;render(true);},'Velg butikk'));
+    if(!store){root.append(el('p','Ingen ferske prisfunn for den valgte butikken.'));return;}
+    const section=el('section',undefined,'shop-store');
+    section.append(el('h3',store.storeName+' · billigere enn Oda'),el('p','Fulgte varer med sammenlignbare priser fra de siste 48 timene. Kjedepris og lokalt utvalg kan variere.','shop-sub'));
+    for(const family of store.families){
+      const [first,...rest]=family.items,card=el('article',undefined,'shop-deal');
+      card.append(el('h4',family.name),el('p','Oda · '+family.oda.name+' · '+price(family.oda.unitPrice)+'/'+family.unit,'shop-sub'));
+      const appendProduct=(parent,p)=>{
+        parent.append(el('p',p.name+' · '+price(p.unitPrice)+'/'+family.unit),
+          el('strong',p.pack?price(p.pack.price)+' for '+packLabel(p.pack.amount,family.unit)+' · '+price(p.pack.saving)+' spart per pakke':price(p.difference)+' spart per '+family.unit),
+          el('p',nf(1).format(p.diffPct)+' % under Oda · '+(p.reviewed?'Gjennomgått alternativ':'Sjekk at varianten passer')+' · '+dayLabel(p.receiptAt.slice(0,10)),'shop-sub'));
+        if(p.terms.length)parent.append(el('p',p.terms.join(' · '),'shop-sub'));
+      };
+      appendProduct(card,first);
+      if(rest.length)card.append(details('findings-'+store.storeId+'-'+family.watchId,'Flere prisfunn for samme vare ('+rest.length+')',holder=>{
+        for(const p of rest){const line=el('div',undefined,'shop-deal');appendProduct(line,p);holder.append(line);}
+      },'shop-why'));
+      const stock=data.items.find(i=>i.id===family.watchId)?.stock;
+      if(stock?.known&&stock.amount>0)card.append(el('p','Anslått lager hjemme · '+amount(stock.amount,family.unit),'shop-sub'));
+      section.append(card);
+    }
+    root.append(section);
+  }
   function renderBuy(root) {
     const hero=el('section',undefined,'shop-hero');
     const potential=data.summary.potential;
@@ -370,6 +402,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
       const total=data.subcategoryComparisons.length,ready=data.subcategoryComparisons.filter(r=>r.oda&&r.store).length;
       hero.append(el('p',ready+' av '+total+' sammenligninger har fersk pris både hos Oda og i butikk.','shop-sub'));
     }
+    if(data.storeFindings?.length)hero.append(button('Se prisfunn per butikk',()=>{tab='findings';render();},'shop-explore'));
     root.append(hero,priceCheck());
     if(data.priceAlerts?.length){
       const section=el('section',undefined,'shop-store');
@@ -995,7 +1028,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     const head=el('div',undefined,'shop-head');
     if(!compact)head.append(el('h2','Handel'));
     const tabs=el('div',undefined,'shop-tabs');tabs.setAttribute('role','tablist');
-    for(const [key,label] of [['buy','Kjøp nå'],['list',`Liste${data.list.open.length?` (${data.list.open.length})`:''}`],['pantry','Lager'],['insight','Innsikt']]){
+    for(const [key,label] of [['buy','Kjøp nå'],['findings','Prisfunn'],['list',`Liste${data.list.open.length?` (${data.list.open.length})`:''}`],['pantry','Lager'],['insight','Innsikt']]){
       const node=button(label,async()=>{tab=key;if(dirty){dirty=false;try{await load();}catch{}}render();window.scrollTo({top:panel.getBoundingClientRect().top+window.scrollY-20});},key===tab?'on':'');
       node.setAttribute('role','tab');node.setAttribute('aria-selected',String(key===tab));tabs.append(node);
     }
@@ -1003,7 +1036,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     if(onExplore)head.append(button('Utforsk alle varene →',()=>onExplore(),'shop-explore'));
     const body=el('div',undefined,'shop-body');
     panel.append(head,refresh,body,toastNode);
-    if(tab==='buy')renderBuy(body);else if(tab==='list')renderList(body);else if(tab==='pantry')renderPantry(body);else renderInsight(body);
+    if(tab==='buy')renderBuy(body);else if(tab==='findings')renderFindings(body);else if(tab==='list')renderList(body);else if(tab==='pantry')renderPantry(body);else renderInsight(body);
     if(keepScroll)window.scrollTo({top:y});
   }
   async function open() {

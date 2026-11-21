@@ -96,10 +96,22 @@ function shoppingTrips(candidates,stores){
  return alerts.sort((a,b)=>b.saving-a.saving);
 }
 
+function addStoreFinding(groups,store,family,oda,product,identity,reviewed){
+ const unitPrice=rounded(product.unitPrice),difference=rounded(oda.unitPrice)-unitPrice;
+ if(!(unitPrice>0&&difference>0))return;
+ if(!groups.has(store.id))groups.set(store.id,{storeId:store.id,storeName:store.name.replace(/\s*[–-]\s*Kassal.*$/i,''),families:new Map()});
+ const families=groups.get(store.id).families;
+ if(!families.has(family.familyId))families.set(family.familyId,{watchId:family.familyId,name:family.name,unit:family.unit,oda:display(oda),items:new Map()});
+ const items=families.get(family.familyId).items;
+ const pack=product.price>0&&product.packAmount>0?{amount:product.packAmount,price:rounded(product.price),saving:rounded(oda.unitPrice*product.packAmount-product.price)}:null;
+ items.set(identity,{...display(product),reviewed,pack,difference:rounded(difference),diffPct:rounded(100*difference/oda.unitPrice),
+  terms:product.kind==='offer'?[product.memberOnly?'Medlemspris':null,product.bundlePacks>1?'Krever '+product.bundlePacks+' pakker':null,product.maxPacks?'Maks '+product.maxPacks+' pakker':null,product.conditions,'Gyldig til '+product.validTo].filter(Boolean):[]});
+}
+
 // A category price describes what the store sells. Only a separately reviewed
 // household alternative can support a stock-up quantity.
 export function subcategoryPrices({reader,links,families,quotes,nativeEntries=[],retainReviewed,stores,choice,planning,skipAlerts,excluded}){
- const comparisons=[],candidates=[],signals=[];
+ const comparisons=[],candidates=[],signals=[],storeGroups=new Map();
  const byFamily=new Map(families.map(f=>[f.familyId,f]));
  const physical=new Map(stores.filter(s=>s.chainCode&&s.chainCode!=='ODA_NO'&&!/nettbutikk/i.test(s.name)).map(s=>[s.chainCode,s]));
  const members=new Map(),nativeByWatch=new Map();
@@ -121,7 +133,7 @@ export function subcategoryPrices({reader,links,families,quotes,nativeEntries=[]
   const approvedOda=new Set([...(link.odaReferenceIds??[]),...odaProducts.map(productId).filter(Boolean)]);
   const odb=reviewed.filter(p=>p.store==='ODA_NO'&&(!chosen||productId(p)===chosen));
   const eligibleStores=reviewed.filter(p=>physical.has(p.store));
-  const alternatives=[],familyBaselines=[],categoryLows=[],placements=new Map(),barcodes=new Map();
+  const alternatives=[],familyBaselines=[],categoryLows=[],placedShops=new Map(),placements=new Map(),barcodes=new Map();
   for(const cat of link.categories){
    if(!members.has(cat.id))members.set(cat.id,reader?.members(cat.groupId)??[]);
    for(const row of members.get(cat.id)){
@@ -145,7 +157,7 @@ export function subcategoryPrices({reader,links,families,quotes,nativeEntries=[]
     if(!(unitPrice>0))continue;
     const q={name:p.name,store:p.store,productId:productId(p),unitPrice,lastChecked:row.price.receiptAt,sourceUrl:p.sourceUrl,storeName:physical.get(p.store)?.name??'Oda'};
     if(p.store==='ODA_NO'&&approvedOda.has(productId(p))&&(!chosen||productId(p)===chosen))oda.push(q);
-    else if(physical.has(p.store))shops.push({...q,packAmount:p.packKnown?p.pack:null,price:row.price.grossPackPrice,nativeShelf:p.source==='sesum'&&Boolean(p.sourceUrl),reviewedPackHint:reviewedPackHint(p,products)});
+    else if(physical.has(p.store))shops.push({...q,productKey:row.productKey,packAmount:p.packKnown?p.pack:null,price:row.price.grossPackPrice,nativeShelf:p.source==='sesum'&&Boolean(p.sourceUrl),reviewedPackHint:reviewedPackHint(p,products)});
    }
    const only=link.categories.length===1;
    // Reviewed household quotes can also come from Kassalapp or Oda MCP.
@@ -166,6 +178,7 @@ export function subcategoryPrices({reader,links,families,quotes,nativeEntries=[]
    });
    const baseline=cheapest(currentOdaQuotes([...currentReviewed,...oda]));
    const approved=eligibleStores.filter(belongs);
+   if(baseline)for(const p of shops)placedShops.set(p.productKey,p);
    const lowest=cheapest([...approved,...shops]);
    comparisons.push({watchId:f.familyId,name:f.name,categoryId:cat.id,categoryName:cat.name,unit:f.unit,oda:display(baseline),store:display(lowest),differencePct:baseline&&lowest?rounded((1-lowest.unitPrice/baseline.unitPrice)*100):null});
    if(baseline)familyBaselines.push(baseline);
@@ -181,6 +194,20 @@ export function subcategoryPrices({reader,links,families,quotes,nativeEntries=[]
    }
   }
   const baseline=cheapest(familyBaselines);
+  if(baseline){
+   for(const p of eligibleStores){
+    const key=keyOf(p),shelf=placedShops.get(key);
+    if(!shelf||Date.parse(p.lastChecked)>=Date.parse(shelf.lastChecked))placedShops.set(key,p);
+   }
+   for(const p of placedShops.values()){
+    for(const store of stores)if(store.chainCode===p.store&&physical.has(p.store)&&!/nettbutikk/i.test(store.name))
+     addStoreFinding(storeGroups,store,f,baseline,p,keyOf(p),p.kind==='catalog');
+   }
+   for(const p of quotes)if(p.kind==='offer'&&p.watchId===f.familyId&&p.unit===f.unit){
+    const store=stores.find(s=>s.id===p.storeId);
+    if(store&&store.chainCode!=='ODA_NO'&&!/nettbutikk/i.test(store.name))addStoreFinding(storeGroups,store,f,baseline,p,'offer:'+p.offerId,true);
+   }
+  }
   if(!categoryLows.length&&!alternatives.length)continue;
   const {need,stock,shelfMonths,excellentPrice,maxPacks,minDiscountPct,referenceCap,referenceFor}=planning(f.familyId);
   for(const {cat,lowest,reviewed,median,leafOda} of categoryLows){
@@ -204,5 +231,8 @@ export function subcategoryPrices({reader,links,families,quotes,nativeEntries=[]
  }
  const alerts=shoppingTrips(candidates,stores);
  const tripPrices=new Map(alerts.map(a=>[a.watchId,a.unitPrice]));
- return {comparisons,alerts,signals:signals.filter(s=>s.store.unitPrice<(tripPrices.get(s.watchId)??Infinity)).sort((a,b)=>b.diffPct-a.diffPct)};
+ const storeFindings=[...storeGroups.values()].map(({storeId,storeName,families})=>({storeId,storeName,
+  families:[...families.values()].map(f=>({...f,items:[...f.items.values()].sort((a,b)=>a.unitPrice-b.unitPrice||Number(b.reviewed)-Number(a.reviewed)||a.name.localeCompare(b.name,'nb'))})).sort((a,b)=>a.name.localeCompare(b.name,'nb'))
+ })).sort((a,b)=>a.storeName.localeCompare(b.storeName,'nb'));
+ return {comparisons,alerts,storeFindings,signals:signals.filter(s=>s.store.unitPrice<(tripPrices.get(s.watchId)??Infinity)).sort((a,b)=>b.diffPct-a.diffPct)};
 }
