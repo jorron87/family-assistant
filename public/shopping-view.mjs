@@ -4,6 +4,7 @@ import {PANTRY_GROUPS,pantryGroup} from './pantry-groups.mjs';
 const nf=(digits)=>new Intl.NumberFormat('nb-NO',{maximumFractionDigits:digits});
 const kr=value=>`${nf(0).format(value)} kr`;
 const price=value=>`${nf(2).format(value)} kr`;
+const signalReference=signal=>signal.referenceBasis==='chain-median'?'kjedemedianen':'Oda';
 const amount=(value,unit)=>`${nf(value<10?1:0).format(value)} ${unit}`;
 const dayLabel=day=>new Intl.DateTimeFormat('nb-NO',{timeZone:'Europe/Oslo',weekday:'short',day:'numeric',month:'short'}).format(new Date(day+'T12:00:00Z')).replace(/\.$/,'');
 const monthsText=months=>months<1?'noen uker':`${nf(0).format(months)} mnd`;
@@ -85,11 +86,9 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     if(!banner)return;
     banner.hidden=!summary.dealCount&&!summary.categorySignal;
     banner.replaceChildren();
-    if(!summary.dealCount){
-      const s=summary.categorySignal;
-      if(s)banner.append(button(s.categoryName+' hos '+s.store.storeName+' · '+s.diffPct+' % under Oda · '+(s.reviewed?'se prisen':'sjekk varianten'),onOpen));
-      return;
-    }
+    const signal=summary.categorySignal;
+    if(signal)banner.append(button(signal.categoryName+' · '+signal.store.name+' · '+price(signal.store.unitPrice)+'/'+signal.unit+' hos '+signal.store.storeName+' · '+nf(1).format(signal.diffPct)+' % under '+signalReference(signal),onOpen));
+    if(!summary.dealCount)return;
     if(summary.priceAlert){
       const a=summary.priceAlert;
       banner.append(button(`${a.name} hos ${a.storeName} · ${a.diffPct} % under Oda · spar ${kr(a.saving)} på ${a.packs} pakker`,onOpen));
@@ -387,13 +386,15 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     }
     if(data.categorySignals?.length){
       const section=el('section',undefined,'shop-store');
-      section.append(el('h3','Lavere butikkpriser å sjekke'));
+      section.append(el('h3','Prisfunn i fulgte underkategorier'));
       for(const signal of data.categorySignals){
         const line=el('article',undefined,'shop-deal'),q=signal.store;
-        line.append(el('h4',signal.categoryName+' · '+signal.diffPct+' % under Oda'),
-          el('p',q.storeName+' · '+q.name+' · '+price(q.unitPrice)+'/'+signal.unit),
-          el('p','Oda · '+signal.oda.name+' · '+price(signal.oda.unitPrice)+'/'+signal.unit,'shop-sub'),
-          el('p',signal.reviewed?'Gjennomgått alternativ. Sjekk lageret hjemme før kjøp.':'Samme underkategori. Sjekk at varianten passer.','shop-sub'));
+        line.append(el('h4',signal.categoryName+' · '+nf(1).format(signal.diffPct)+' % under '+signalReference(signal)),
+          el('p',q.storeName+' · '+q.name+' · '+price(q.unitPrice)+'/'+signal.unit));
+        if(signal.pack)line.append(el('strong',price(signal.pack.price)+' for '+packLabel(signal.pack.amount,signal.unit)+' · '+price(signal.pack.difference)+' lavere per pakke'));
+        if(signal.oda)line.append(el('p','Oda · '+signal.oda.name+' · '+price(signal.oda.unitPrice)+'/'+signal.unit,'shop-sub'));
+        if(signal.median)line.append(el('p','Median av laveste pris i hver av '+signal.median.chains+' andre kjeder · '+price(signal.median.unitPrice)+'/'+signal.unit,'shop-sub'));
+        line.append(el('p',(signal.reviewed?'Gjennomgått alternativ.':'Sjekk at varianten passer.')+' Bekreft prisen i butikken før storinnkjøp.','shop-sub'));
         if(onExplore)line.append(button('Vis underkategorien',()=>onExplore('sesum-category:'+signal.categoryId)));
         section.append(line);
       }

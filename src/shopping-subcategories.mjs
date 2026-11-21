@@ -60,6 +60,19 @@ function currentOdaQuotes(list){
  return [...grouped.values()].filter(p=>!p.conflict).map(p=>p.row);
 }
 
+// Each other chain contributes its lowest comparable shelf price once.
+// This is a snapshot of alternatives, independent of historical calibration.
+function otherChainMedian(rows,store){
+ const minima=new Map();
+ for(const row of rows){
+  if(row.store===store||!(row.unitPrice>0))continue;
+  minima.set(row.store,Math.min(minima.get(row.store)??Infinity,row.unitPrice));
+ }
+ if(minima.size<3)return null;
+ const prices=[...minima.values()].sort((a,b)=>a-b),middle=Math.floor(prices.length/2);
+ return {unitPrice:prices.length%2?prices[middle]:(prices[middle-1]+prices[middle])/2,chains:prices.length};
+}
+
 // Compare the remaining baskets after each selected store trip. A pack can
 // contribute to a trip threshold only once and only at the store selling it.
 function shoppingTrips(candidates,stores){
@@ -132,7 +145,7 @@ export function subcategoryPrices({reader,links,families,quotes,nativeEntries=[]
     if(!(unitPrice>0))continue;
     const q={name:p.name,store:p.store,productId:productId(p),unitPrice,lastChecked:row.price.receiptAt,sourceUrl:p.sourceUrl,storeName:physical.get(p.store)?.name??'Oda'};
     if(p.store==='ODA_NO'&&approvedOda.has(productId(p))&&(!chosen||productId(p)===chosen))oda.push(q);
-    else if(physical.has(p.store))shops.push({...q,reviewedPackHint:reviewedPackHint(p,products)});
+    else if(physical.has(p.store))shops.push({...q,packAmount:p.packKnown?p.pack:null,price:row.price.grossPackPrice,nativeShelf:p.source==='sesum'&&Boolean(p.sourceUrl),reviewedPackHint:reviewedPackHint(p,products)});
    }
    const only=link.categories.length===1;
    // Reviewed household quotes can also come from Kassalapp or Oda MCP.
@@ -155,21 +168,28 @@ export function subcategoryPrices({reader,links,families,quotes,nativeEntries=[]
    const approved=eligibleStores.filter(belongs);
    const lowest=cheapest([...approved,...shops]);
    comparisons.push({watchId:f.familyId,name:f.name,categoryId:cat.id,categoryName:cat.name,unit:f.unit,oda:display(baseline),store:display(lowest),differencePct:baseline&&lowest?rounded((1-lowest.unitPrice/baseline.unitPrice)*100):null});
-   if(!baseline)continue;
-   familyBaselines.push(baseline);
-   if(skipAlerts.has(f.familyId))continue;
+   if(baseline)familyBaselines.push(baseline);
    // A shelf observation can flag a variant to check, even without reviewed
    // evidence that this pack can satisfy the household need.
-   const lead=cheapest([...approved,...shops.filter(p=>p.reviewedPackHint)]);
-   if(lead)categoryLows.push({cat,lowest:lead,reviewed:approved.includes(lead)});
-   for(const p of approved)if(p.packAmount>0&&p.price>0&&p.unitPrice<baseline.unitPrice)alternatives.push({p,cat});
+   const lead=cheapest([...approved,...shops.filter(p=>p.reviewedPackHint||p.nativeShelf)]);
+   if(lead){
+    const median=otherChainMedian([...approved,...shops,...(baseline?[baseline]:[])],lead.store);
+    if(median||baseline)categoryLows.push({cat,lowest:lead,reviewed:approved.includes(lead),median,leafOda:baseline});
+   }
+   if(baseline&&!skipAlerts.has(f.familyId)){
+    for(const p of approved)if(p.packAmount>0&&p.price>0&&p.unitPrice<baseline.unitPrice)alternatives.push({p,cat});
+   }
   }
   const baseline=cheapest(familyBaselines);
-  if(!baseline||!categoryLows.length&&!alternatives.length)continue;
+  if(!categoryLows.length&&!alternatives.length)continue;
   const {need,stock,shelfMonths,excellentPrice,maxPacks,minDiscountPct,referenceCap,referenceFor}=planning(f.familyId);
-  for(const {cat,lowest,reviewed} of categoryLows){
-   const diff=(1-lowest.unitPrice/baseline.unitPrice)*100;
-   if(diff>=Math.max(20,minDiscountPct??0))signals.push({watchId:f.familyId,categoryId:cat.id,categoryName:cat.name,unit:f.unit,reviewed,store:display(lowest),oda:display(baseline),diffPct:rounded(diff)});
+  for(const {cat,lowest,reviewed,median,leafOda} of categoryLows){
+   const useMedian=median&&(!baseline||median.unitPrice<baseline.unitPrice);
+   if(!useMedian&&!leafOda)continue;
+   const reference=useMedian?median:baseline,diff=(1-lowest.unitPrice/reference.unitPrice)*100;
+   if(diff<Math.max(20,minDiscountPct??0))continue;
+   const pack=lowest.packAmount>0&&lowest.price>0?{amount:lowest.packAmount,price:rounded(lowest.price),difference:rounded(reference.unitPrice*lowest.packAmount-lowest.price)}:null;
+   signals.push({watchId:f.familyId,categoryId:cat.id,categoryName:cat.name,unit:f.unit,reviewed,store:display(lowest),oda:display(baseline),pack,referenceBasis:useMedian?'chain-median':'oda',median:median?{...median,unitPrice:rounded(median.unitPrice)}:null,diffPct:rounded(diff)});
   }
   for(const {p,cat} of alternatives){
    const reference=Math.min(baseline.unitPrice,referenceCap??Infinity,referenceFor?.(p)??Infinity);
@@ -183,6 +203,6 @@ export function subcategoryPrices({reader,links,families,quotes,nativeEntries=[]
   }
  }
  const alerts=shoppingTrips(candidates,stores);
- const alerted=new Set(alerts.map(a=>a.watchId));
- return {comparisons,alerts,signals:signals.filter(s=>!alerted.has(s.watchId)).sort((a,b)=>b.diffPct-a.diffPct)};
+ const tripPrices=new Map(alerts.map(a=>[a.watchId,a.unitPrice]));
+ return {comparisons,alerts,signals:signals.filter(s=>s.store.unitPrice<(tripPrices.get(s.watchId)??Infinity)).sort((a,b)=>b.diffPct-a.diffPct)};
 }
