@@ -370,6 +370,8 @@ Spond-vakten i utvidelse 1.9.2 velger en eksisterende `/client`-fane foran en ga
 
 Full gjennomgang og kildeendringer er ulike scope. change-completion er kravet for scope kildeendringer; det beviser ikke full kildedekning. Telefon/familievalg bruker scope familiehandlinger og venter ikke på kildehull. En ny innsendt melding har prioritet. Ingen overlapping av agentkjøringer; aldri frigjør en annens lease.
 
+For kildearbeid brukes `next --sources-only`: familiehandlinger, kildeelementer, originalhull, publisering og aktivitetsrestanser beholdes, mens handelsjobbenes payload utelates. `excludedShoppingJobs` og de uendrede globale tellerne viser restansen. Dette er bare en mindre arbeidsvisning, aldri et dekningsbevis eller en endring av køen. Bruk ordinær `next` eller `shopping-queue` når handel faktisk er tildelt.
+
 ## Google
 
 Kjør google-status. Hvis direkte Google OAuth er konfigurert: bruk publish. Ellers brukes agentens autoriserte Google-verktøy. connected:false gjelder tjenestens egen OAuth, ikke nødvendigvis appens verktøy. Prøv den konkrete nødvendige handlingen før tilgang erklæres blokkert. Hold familien sin Drive privat og verifiser deling til konfigurerte mottakere.

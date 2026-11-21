@@ -199,8 +199,9 @@ async function execute(command, args, flags) {
       const [phone, calendarActions, completion, queue, activities, collector, feed, shopping, clarificationState] = await Promise.all([
         request('/api/phone/inbox'), request('/api/calendar-actions'), request('/api/completion'), request('/api/review-queue'), activityState(), request('/api/collector/status'), request('/api/activity-feed'), request('/api/shopping/queue'), request('/api/clarifications/agent')
       ]);
-      result = buildNext({ phone, calendarActions, completion, queue, activities, collector, feed, shopping, clarificationAnswers:clarificationState.work });
-      Object.assign(result, shoppingOverview(shopping, { full: flags.has('--full') }));
+      const sourcesOnly = flags.has('--sources-only');
+      result = buildNext({ phone, calendarActions, completion, queue, activities, collector, feed, shopping, clarificationAnswers:clarificationState.work, sourcesOnly });
+      if (!sourcesOnly) Object.assign(result, shoppingOverview(shopping, { full: flags.has('--full') }));
       break;
     }
     case 'event': {

@@ -57,7 +57,7 @@ export function collectorSummary(collector, now = Date.now()) {
   return out;
 }
 
-export function buildNext({ phone, calendarActions, completion, queue, activities, collector, feed, shopping = [], clarificationAnswers = [], now = Date.now() }) {
+export function buildNext({ phone, calendarActions, completion, queue, activities, collector, feed, shopping = [], clarificationAnswers = [], sourcesOnly = false, now = Date.now() }) {
   const work = [];
   const phoneItems = (Array.isArray(phone) ? phone : phone?.items ?? []).filter((item) => ["queued", "processing", "blocked"].includes(item.status));
   for (const item of phoneItems) work.push({ do: "phone", id: item.id, title: item.title, status: item.status, note: item.note ?? undefined });
@@ -76,12 +76,15 @@ export function buildNext({ phone, calendarActions, completion, queue, activitie
   for(const id of new Set((feed?.facebookActivities??[]).map(item=>item.sourceId)))work.push({do:'activity-facebook',id,hint:'node src/cli.mjs activity-facebook '+id});
   for (const id of feed?.changedPages ?? []) work.push({ do: 'activity-page', id, hint: 'node src/cli.mjs activity-page ' + id });
   for (const source of activities?.pending ?? []) work.push({ do: "activity-source", id: source.sourceId, name: source.name, reason: source.reason });
-  const remaining = work.length + shoppingWorkCount(shopping);
+  const shoppingCount = shoppingWorkCount(shopping);
+  const remaining = work.length + (sourcesOnly ? 0 : shoppingCount);
   const visible = work.slice(0, 40);
-  const batch = shoppingWorkBatch(shopping, { limit: Math.min(LIST_LIMIT, Math.max(0, 40 - visible.length)) });
-  visible.push(...batch.items);
+  if (!sourcesOnly) {
+    const batch = shoppingWorkBatch(shopping, { limit: Math.min(LIST_LIMIT, Math.max(0, 40 - visible.length)) });
+    visible.push(...batch.items);
+  }
   const collectorGaps=Object.entries(collector?.supplemental??{}).filter(([,status])=>status.health!=='ok').map(([surface,status])=>({surface,...status}));
-  return { complete: completion?.complete === true && !remaining, collector: collectorSummary(collector, now),collectorGaps,counts: completion?.counts, remaining, work: visible, moreWork: Math.max(0, remaining - shoppingWorkCount(visible)), horizon: new Date(soon).toISOString().slice(0, 10) };
+  return { complete: completion?.complete === true && !remaining && !shoppingCount, ...(sourcesOnly ? {view:'sources-only',excludedShoppingJobs:shoppingCount,completionAuthority:'This view does not certify coverage. Use change-completion for source changes; full completion still includes shopping.'} : {}), collector: collectorSummary(collector, now),collectorGaps,counts: completion?.counts, remaining, work: visible, moreWork: Math.max(0, remaining - shoppingWorkCount(visible)), horizon: new Date(soon).toISOString().slice(0, 10) };
 }
 
 // ---- Kompakte svar. Skrivekommandoene trenger en kvittering, ikke hele objektet tilbake i konteksten. `--full` gir alt. ----

@@ -123,6 +123,23 @@ test('buildNext prioriterer telefon og kalenderhandling og er ferdig bare uten a
   assert.equal(done.remaining, 0);
 });
 
+test('source-only next preserves family priority and real blockers without shopping payloads or completion claims', () => {
+  const shopping=[{do:'shopping-market-refresh',watchIds:['family-a','family-b']},{do:'shopping-product-review',id:'product-a'}];
+  const completion={complete:false,counts:{shoppingPending:2},missingDrive:[{rawId:'blocked-original',kind:'source-original'}]};
+  const input={phone:[{id:'phone-a',status:'queued'}],calendarActions:[{eventId:'event-a',action:'remove'}],clarificationAnswers:[{id:'answer-a'}],completion,queue:{items:[{source:'school',externalId:'new-a'}]},shopping};
+  const view=buildNext({...input,sourcesOnly:true});
+  assert.deepEqual(view.work.map(x=>x.do),['phone','calendar-action','clarification-answer','review','drive']);
+  assert.equal(view.remaining,5);
+  assert.equal(view.excludedShoppingJobs,3);
+  assert.deepEqual(view.counts,completion.counts);
+  assert.equal(view.complete,false);
+  assert.equal(shopping.length,2);
+  assert.equal(buildNext(input).remaining,8);
+  const empty=buildNext({completion:{complete:true},shopping,sourcesOnly:true});
+  assert.equal(empty.remaining,0);
+  assert.equal(empty.complete,false);
+});
+
 test('slimProfile beholder aktive fakta og kandidater, dropper duplisert historikk', () => {
   const profile = { familyName: 'F', members: [{ id: 'child3', name: 'Barn Tre', role: 'child', extra: 'x' }], facts: [{}, {}, {}], activeFacts: [{ memberId: 'child3', key: 'k', text: 't', category: 'hobby', confidence: 'confirmed', evidence: ['lang'], id: 'i', source: 's' }], candidates: [] };
   const slim = slimProfile(profile);
