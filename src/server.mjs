@@ -343,6 +343,7 @@ async function handle(req, res) {
       if(req.headers['x-family-request']!=='1'||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host))return send(res,403,{error:'Ugyldig avsender.'});
       const input=await json(req);return send(res,200,path.endsWith('/connect')?await homeAssistant.connect(input.token):await homeAssistant.command(input));
     }
+    if (path.startsWith('/send/finance') || path.startsWith('/send/api/finance')) return send(res,403,{error:'Familieøkonomi åpnes på den godkjente mobiladressen.'});
     if(path==='/send'||path.startsWith('/send/'))return mobileHandle(req,res);
     if(path==='/phone-setup'&&method==='GET')return send(res,200,readFileSync(join(root,'public','phone-admin.html')),'text/html; charset=utf-8');
     if(path==='/phone-admin.js'&&method==='GET')return send(res,200,readFileSync(join(root,'public','phone-admin.js')),'text/javascript; charset=utf-8');
