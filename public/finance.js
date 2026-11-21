@@ -20,6 +20,8 @@ async function show(){
   el('overview').hidden=false;
   el('status').textContent='Opplysningene er felles for de godkjente voksne.';
   const current=data.connections.find(c=>c.me);
+  el('connect').disabled=!!current?.setupIssue;
+  if (current?.setupIssue) el('status').textContent=current.setupIssue;
   el('connect').textContent=current?.expires?'Forny min DNB-tilkobling':'Koble mine DNB-kontoer til felles voksenvisning';
   el('savings').textContent=data.hasRule?money(data.saved)+(data.goal!=null?' av '+money(data.goal*100):'')+' registrert denne måneden.':'Velg en kjent Nordnet-overføring under egen konto for å kjenne igjen kommende innskudd.';
   if (data.hasRule && data.saved===0) el('savings').textContent+=' Ingen innbetaling til den bekreftede mottakeren er registrert i perioden. Sjekk kontodekning og siste synk.';
@@ -27,7 +29,7 @@ async function show(){
   for (const c of data.connections) {
     const remaining=Date.parse(c.expires)-Date.now();
     const status=!c.expires?'Venter på tilkobling':remaining<=0?'Samtykket har utløpt':remaining<7*86400000?'Forny samtykket før '+date(c.expires):'Samtykke til '+date(c.expires);
-    append(connections,'p',c.name+' · '+status+(c.issue?' · '+c.issue:''));
+    append(connections,'p',c.name+' · '+(c.setupIssue?'Venter på oppsett på PC-en':status)+(c.issue?' · '+c.issue:''));
   }
   const accounts=el('accounts');accounts.replaceChildren();
   for (const a of data.accounts) {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomBytes} from 'node:crypto';
@@ -41,11 +41,20 @@ test('only enrolled devices can authorize, read or set savings rules; callback c
   const dataDir=mkdtempSync(join(tmpdir(),'finance-test-'));t.after(()=>rmSync(dataDir,{recursive:true,force:true}));
   const key=randomBytes(32),f=fixture(),cfg={redirectUrl:'https://family.example/send/finance/',owners:[
     {id:'adult-a',deviceId:'first'},{id:'adult-b',deviceId:'second'}]};
-  const options={dataDir,config:()=>cfg,client:()=>f.api,keyProvider:()=>key};
+  let requests=0;
+  const options={dataDir,config:()=>cfg,client:()=>{requests++;return f.api;},keyProvider:()=>key};
   let finance=createFinance(options);
   const call=(device,path='',input)=>finance.route({device:{id:device,memberId:'adult-a'},path:'/send/api/finance'+path,
     req:{method:input?'POST':'GET',url:'/?month=2026-01'},send:(_,status,body)=>({status,...body}),json:async()=>input});
   assert.equal((await call('child')).status,403);
+  assert.match((await call('first')).connections[0].setupIssue,/Application ID/);
+  assert.equal((await call('first','/connect',{})).status,409);
+  assert.equal(requests,0);
+  const privateKeyFile=join(dataDir,'mock-signing-key');
+  for (const owner of cfg.owners) Object.assign(owner,{applicationId:'00000000-0000-4000-8000-000000000001',privateKeyFile});
+  assert.match((await call('first','/connect',{})).error,/Signeringsnøkkelen/);
+  assert.equal(requests,0);
+  writeFileSync(privateKeyFile,'mock');
   const connect=await call('first','/connect',{});
   const params={state:new URL(connect.url).searchParams.get('state'),code:'sample'};
   assert.equal((await call('second','/confirm',params)).status,422);

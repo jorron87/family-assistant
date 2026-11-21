@@ -11,6 +11,13 @@ const settings=()=>{
   const cfg=JSON.parse(readFileSync(file,'utf8'));
   return cfg.enabled===true?cfg:null;
 };
+function setupIssue(owner) {
+  if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(owner.applicationId||'')) {
+    return 'Fullfør registreringen i Enable Banking på PC-en og legg inn Application ID i økonomioppsettet.';
+  }
+  if (!owner.privateKeyFile || !existsSync(owner.privateKeyFile)) return 'Signeringsnøkkelen må legges inn i økonomioppsettet på PC-en.';
+  return null;
+}
 export function createFinance({dataDir, config=settings, client=bankingClient, keyProvider=loadKey}) {
   const path=join(dataDir,'finance.enc');
   let state,key,busy=false;
@@ -40,6 +47,7 @@ export function createFinance({dataDir, config=settings, client=bankingClient, k
     return owners;
   }
   async function syncOwner(owner, force=false) {
+    if (setupIssue(owner)) return;
     const current=load(), connection=current.owners[owner.id];
     if (!connection || Date.parse(connection.expires)<=Date.now()) return;
     if (!force && connection.attempt && Date.now()-Date.parse(connection.attempt)<(connection.issue?3600000:day)) return;
@@ -77,7 +85,7 @@ export function createFinance({dataDir, config=settings, client=bankingClient, k
     });
     const saved=accounts.flatMap(a=>a.rows).filter(r=>r.saving&&r.currency==='NOK').reduce((n,r)=>n-r.minor,0);
     const connections=owners.map(o=>{
-      const c=s.owners[o.id];return {name:o.name||o.id,me:o.id===owner.id,expires:c?.expires||null,issue:c?.issue||null,attempt:c?.attempt||null};
+      const c=s.owners[o.id];return {name:o.name||o.id,me:o.id===owner.id,setupIssue:setupIssue(o),expires:c?.expires||null,issue:c?.issue||null,attempt:c?.attempt||null};
     });
     return {accounts,connections,saved,hasRule:Array.from(active).some(k=>!!s.targets[k]),goal:cfg.monthlySavingsNok??null};
   }
@@ -90,6 +98,10 @@ export function createFinance({dataDir, config=settings, client=bankingClient, k
       return send(res,200,view(cfg,owner,month));
     }
     if (req.method!=='POST') return send(res,405,{error:'Ugyldig metode.'});
+    if (path==='/send/api/finance/connect'||path==='/send/api/finance/confirm') {
+      const issue=setupIssue(owner);
+      if (issue) return send(res,409,{error:issue});
+    }
     const input=await json(req);
     try {
       const result=await exclusive(async()=>{
