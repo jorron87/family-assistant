@@ -41,7 +41,7 @@ export function createAssortmentCollection({dataDir,config={},kassal,receiveSesu
  const clock=()=>new Date(now()).getTime();
  function load(){
   if(state)return;key??=loadKey(dataDir);state=existsSync(file)?JSON.parse(decrypt(readFileSync(file),key)): {version:1,runId:null,sesum:{jobs:{}},kassal:{page:1,pages:{},complete:false},history:[],revision:0};if(state.version!==1)throw Error('Unknown assortment collection version.');state.revision??=0;
-  if(existsSync(journal)){const bytes=readFileSync(journal,'utf8');if(bytes&&!bytes.endsWith('\n'))throw Error('Incomplete catalogue collection transaction; preserve for recovery.');for(const line of bytes.split('\n'))if(line){const patch=JSON.parse(decrypt(Buffer.from(line,'base64'),key));if(patch.revision<=state.revision)continue;if(patch.revision!==state.revision+1)throw Error('Catalogue collection transaction gap.');if(patch.meta.runId!==state.runId)state.sesum={jobs:{}};const meta={...patch.meta};if(meta.bootstrap&&!Object.hasOwn(meta.bootstrap,'jobIds'))meta.bootstrap={...state.bootstrap,...meta.bootstrap};Object.assign(state,meta);state.kassal=patch.kassal;state.history=patch.history;state.sesum.pauseUntil=patch.pauseUntil;Object.assign(state.sesum.jobs,patch.jobs);state.revision=patch.revision;}}
+  if(existsSync(journal)){const bytes=readFileSync(journal,'utf8');if(bytes&&!bytes.endsWith('\n'))throw Error('Incomplete catalogue collection transaction; preserve for recovery.');for(const line of bytes.split('\n'))if(line){const patch=JSON.parse(decrypt(Buffer.from(line,'base64'),key));if(patch.revision<=state.revision)continue;if(patch.revision!==state.revision+1)throw Error('Catalogue collection transaction gap.');if(patch.meta.runId!==state.runId)state.sesum={jobs:{}};const meta={...patch.meta};if(meta.bootstrap&&!Object.hasOwn(meta.bootstrap,'jobIds'))meta.bootstrap={...state.bootstrap,...meta.bootstrap};Object.assign(state,meta);state.kassal=patch.kassal;state.history=patch.history;state.sesum.pauseUntil=patch.pauseUntil;state.sesum.failureStreak=patch.failureStreak??0;Object.assign(state.sesum.jobs,patch.jobs);state.revision=patch.revision;}}
   lastSavedJobIds=state.bootstrap?.jobIds;
   if(state.planVersion!==4){
    state.planVersion=4;const changed=[];
@@ -57,7 +57,7 @@ export function createAssortmentCollection({dataDir,config={},kassal,receiveSesu
   for(const job of jobs)dirtyJobs.add(job.id);
   const {runId,startedAt,paused,validationRemaining,planVersion,bootstrap}=state;
   const compactBootstrap=bootstrap?{...bootstrap,jobIds:bootstrap.jobIds===lastSavedJobIds?undefined:bootstrap.jobIds}:bootstrap;
-  const patch={revision:state.revision+1,meta:{runId,startedAt,paused,validationRemaining,planVersion,bootstrap:compactBootstrap},kassal:state.kassal,history:state.history,pauseUntil:state.sesum.pauseUntil??null,jobs:Object.fromEntries([...dirtyJobs].map(id=>[id,state.sesum.jobs[id]]))};
+  const patch={revision:state.revision+1,meta:{runId,startedAt,paused,validationRemaining,planVersion,bootstrap:compactBootstrap},kassal:state.kassal,history:state.history,pauseUntil:state.sesum.pauseUntil??null,failureStreak:state.sesum.failureStreak??0,jobs:Object.fromEntries([...dirtyJobs].map(id=>[id,state.sesum.jobs[id]]))};
   mkdirSync(dataDir,{recursive:true});appendFileSync(journal,encrypt(Buffer.from(JSON.stringify(patch)),key).toString('base64')+'\n');state.revision++;dirtyJobs.clear();lastSavedJobIds=state.bootstrap?.jobIds;
  }
  function catalogueJobUrl(value){const u=new URL(sesumCatalogueUrl(value)),id=u.pathname.match(/^\/kategori\/(\d+)/)?.[1];if(id){if(categoryIsLeaf(id)||u.searchParams.has('side')||u.searchParams.has('page'))u.searchParams.delete('visning');else u.searchParams.set('visning','alle');}u.searchParams.sort();return u.href;}
@@ -75,7 +75,7 @@ export function createAssortmentCollection({dataDir,config={},kassal,receiveSesu
  function pause(){load();state.paused=true;if(state.bootstrap)state.bootstrap.manuallyPaused=true;save();return status();}
  function resume(){load();if(!state.runId)throw Error('Start an explicit catalogue sweep first.');if(state.bootstrap&&state.bootstrap.status!=='collecting')throw Error('Selected catalogue collection has ended; start a new explicit selection.');state.paused=false;state.validationRemaining=null;if(state.bootstrap)delete state.bootstrap.manuallyPaused;save();return status();}
  function validate({validationReads=1,jobIds=[]}={}){
-  load();if(!state.runId||!Number.isInteger(validationReads)||validationReads<1||validationReads>8||!Array.isArray(jobIds)||jobIds.length>8||jobIds.some(id=>!Object.hasOwn(state.sesum.jobs,id)||terminal(state.sesum.jobs[id])))throw Error('Select a bounded validation budget and explicit unfinished source jobs.');
+  load();if(Date.parse(state.sesum.pauseUntil)>clock())throw Error('Wait for the active Sesum source pause.');if(!state.runId||!Number.isInteger(validationReads)||validationReads<1||validationReads>8||!Array.isArray(jobIds)||jobIds.length>8||jobIds.some(id=>!Object.hasOwn(state.sesum.jobs,id)||terminal(state.sesum.jobs[id])))throw Error('Select a bounded validation budget and explicit unfinished source jobs.');
   const jobs=jobIds.map(id=>state.sesum.jobs[id]);for(const job of jobs){(job.retryHistory??=[]).push({at:new Date(clock()).toISOString(),error:job.error??null,errors:job.errors??[],attempts:job.attempts});job.status='pending';job.attempts=0;job.retryAt=null;job.deliveredUntil=null;}
   state.validationRemaining=validationReads;state.paused=false;state.sesum.pauseUntil=null;save(...jobs);return status();
  }
@@ -85,6 +85,26 @@ export function createAssortmentCollection({dataDir,config={},kassal,receiveSesu
  function reconcileListings(){if(state.bootstrap?.status!=='collecting'||state.bootstrap.mode!=='selected-categories')return;const jobs=state.bootstrap.jobIds.map(id=>state.sesum.jobs[id]);const mismatches=listingMismatches(jobs);for(const gap of mismatches){state.bootstrap.reconciliationRounds??={};const round=state.bootstrap.reconciliationRounds[gap.category]??0;if(round>=2)continue;state.bootstrap.reconciliationRounds[gap.category]=round+1;for(const job of jobs)if(job.kind==='catalogue'&&job.category===gap.category)reset(job,'listing-count-reconciliation');}state.bootstrap.countMismatches=listingMismatches(jobs);}
  function finishBootstrap(){reconcileListings();if(state.bootstrap?.status==='collecting'&&state.bootstrap.jobIds.every(id=>terminal(state.sesum.jobs[id]))){const missing=state.bootstrap.jobIds.filter(id=>{const j=state.sesum.jobs[id];return j.status==='unavailable'?false:j.kind==='catalogue'?j.category==='index'&&!j.categoryTreeReceipt:!j.categoryReceipt;});state.bootstrap.status=state.bootstrap.countMismatches?.length?'listing-count-mismatch':missing.length?'category-metadata-missing':'complete';state.bootstrap.missingCategoryReceipts=missing;state.bootstrap.finishedAt=new Date(clock()).toISOString();state.paused=true;}}
  function sourceSpacing(){const denials=Object.values(state.sesum.jobs).reduce((n,j)=>n+(['auth_required','rate_limited'].includes(j.error)?j.attempts:0),0);return denials?Math.min(30000,6000*2**Math.min(denials-1,3)):1500;}
+ // Compare one more product in each selected leaf before working down any
+ // single large shelf. Only actual listing edges belonging to this run count.
+ function leafProducts(ready){
+  const selected=state.bootstrap.jobIds.map(id=>state.sesum.jobs[id]);
+  const byCategory=new Map(),ranks=new Map(),readyIds=new Set(ready.map(j=>j.id));
+  for(const list of selected){
+   if(list.kind!=='catalogue'||list.category==='index'||!list.productJobIds)continue;
+   if(!byCategory.has(list.category))byCategory.set(list.category,new Set());
+   for(const id of list.productJobIds)byCategory.get(list.category).add(id);
+  }
+  for(const ids of byCategory.values()){
+   let position=0;
+   for(const id of ids)if(terminal(state.sesum.jobs[id]))position++;
+   for(const id of ids)if(readyIds.has(id)){
+    ranks.set(id,Math.min(ranks.get(id)??Infinity,position));
+    position++;
+   }
+  }
+  return ready.sort((a,b)=>a.attempts-b.attempts||(ranks.get(a.id)??Infinity)-(ranks.get(b.id)??Infinity));
+ }
  function work({peek=false}={}){
   load();if(paused())return {enabled:false,jobs:[],reason:'assortment-collection-paused'};
   reconcileListings();if(dirtyJobs.size)save();
@@ -98,11 +118,11 @@ export function createAssortmentCollection({dataDir,config={},kassal,receiveSesu
   // Enumerate and consume products together, rather than allowing either a
   // huge listing frontier or a product backlog to starve the other.
   const listings=ready.filter(j=>j.kind==='catalogue'),products=ready.filter(j=>j.kind==='product');
-  const budget=state.validationRemaining??(bootstrapKeys?8:4);
+  const budget=Math.min(state.validationRemaining??8,state.sesum.pauseUntil?1:bootstrapKeys?8:4);
   let selected;
   if(state.bootstrap?.leafSelection){
    const front=Math.min(listings.length,Math.max(Math.ceil(budget/2),budget-products.length));
-   selected=[...listings.slice(0,front),...products.slice(0,budget-front)];
+   selected=[...listings.slice(0,front),...leafProducts(products).slice(0,budget-front)];
   }else selected=(bootstrapKeys?[...listings,...products]:[...listings.slice(0,2),...products.slice(0,2)]).slice(0,budget);
   if(!peek&&selected.length){for(const j of selected)j.deliveredUntil=new Date(at+180000).toISOString();save(...selected);}
   return {enabled:true,runId:state.runId,jobs:selected.map(({id,kind,url})=>({id,kind,url,familyIds:[],publicCatalogue:true})),limits:{minSpacingMs:sourceSpacing(),cycleCalls:bootstrapKeys?8:4}};
@@ -119,7 +139,30 @@ export function createAssortmentCollection({dataDir,config={},kassal,receiveSesu
    if(job.kind==='product'&&input.status==='error'&&['http_404','http_410'].includes(input.error?.code)){
     job.pendingUnavailable={id:new URL(job.url).pathname.match(/^\/produkt\/(\d+)/)[1],sourceUrl:job.url,statusCode:Number(input.error.code.slice(5)),observedAt:input.fetchedAt};save(job);await receiveUnavailable(job.pendingUnavailable);finishUnavailable(job);return {accepted:true,status:'unavailable'};
    }
-   if(input.status!=='ok'||result?.ok!==true||result.kind!==job.kind){job.attempts++;job.status=job.attempts>=3?'blocked':'partial';job.error=input.error?.code??result?.errors?.[0]??'incomplete-source-receipt';job.errors=(result?.errors??[]).slice(0,20).map(s=>String(s).slice(0,500));const requested=Number(input.error?.retryAfterMs),delay=Number.isFinite(requested)?Math.min(86400000,Math.max(30*60000,requested)):30*60000;job.retryAt=new Date(clock()+delay).toISOString();job.deliveredUntil=null;if(['auth_required','rate_limited'].includes(job.error))state.sesum.pauseUntil=job.retryAt;save(job);return {accepted:true,status:job.status};}
+   if(input.status!=='ok'||result?.ok!==true||result.kind!==job.kind){
+    job.attempts++;
+    job.status=job.attempts>=3?'blocked':'partial';
+    job.error=input.error?.code??result?.errors?.[0]??'incomplete-source-receipt';
+    job.errors=(result?.errors??[]).slice(0,20).map(s=>String(s).slice(0,500));
+    const at=clock(),error=input.error??{},denied=['auth_required','rate_limited'].includes(job.error);
+    const httpStatus=Number.isInteger(error.httpStatus)&&error.httpStatus>=400&&error.httpStatus<=599?error.httpStatus:null;
+    const header=error.sourceRetryAfterMs;
+    const sourceDelay=httpStatus!==null&&Number.isSafeInteger(header)&&header>=0&&Number.isFinite(new Date(at+header).getTime())?header:null;
+    const legacyDelay=Number.isFinite(error.retryAfterMs)?Math.min(86400000,Math.max(0,error.retryAfterMs)):0;
+    const servicePause=denied||sourceDelay!==null&&httpStatus>=500;
+    const streak=servicePause?(state.sesum.failureStreak??0)+1:0;
+    // A missing header on a legacy receipt is unknown. In a new receipt the
+    // browser records its exact HTTP status and explicitly reports absence.
+    const confirmedAuth=job.error==='auth_required'&&[401,403].includes(httpStatus)&&header===null;
+    const fallback=confirmedAuth?Math.min(60,10*2**Math.min(streak-1,3))*60000:30*60000;
+    const delay=sourceDelay!==null?Math.max(60000,sourceDelay):Math.max(fallback,legacyDelay);
+    job.retryAt=new Date(at+delay).toISOString();
+    job.deliveredUntil=null;
+    job.lastFailure={observedAt:input.fetchedAt,code:job.error,httpStatus,sourceRetryAfterMs:sourceDelay,
+     waitBasis:sourceDelay!==null?'source-retry-after':httpStatus!==null?'local-backoff':'legacy-backoff',retryAt:job.retryAt};
+    if(servicePause){state.sesum.failureStreak=streak;state.sesum.pauseUntil=new Date(Math.max(Date.parse(state.sesum.pauseUntil)||0,at+delay)).toISOString();}
+    save(job);return {accepted:true,status:job.status,retryAt:job.retryAt};
+   }
    if(job.kind==='catalogue'){
     if(sesumCatalogueUrl(result.sourceUrl)!==job.url||!Array.isArray(result.productUrls)||!Array.isArray(result.categoryUrls)||!Array.isArray(result.nextUrls)||result.filtersVerified!==true||result.errors?.length)throw Error('Unproven full Sesum catalogue receipt.');
     const products=unique(result.productUrls.map(u=>sesumUrl(u,'product'))),categories=unique(result.categoryUrls.map(sesumCatalogueUrl)),next=unique(result.nextUrls.map(sesumCatalogueUrl));
@@ -141,6 +184,9 @@ export function createAssortmentCollection({dataDir,config={},kassal,receiveSesu
     job.pending={familyIds:[],fetchedAt:input.fetchedAt,products:[{...product,sourceCategories:job.sourceCategories??[]}]};save(job);
     await receiveSesum(job.pending);delete job.pending;
     job.categoryReceipt=Array.isArray(product.categoryPathIds)&&product.categoryPathIds.length>0;
+   }
+   if(state.sesum.pauseUntil&&Date.parse(input.fetchedAt)>=Date.parse(state.sesum.pauseUntil)){
+    state.sesum.pauseUntil=null;state.sesum.failureStreak=0;
    }
    job.status='complete';job.deliveredUntil=null;job.fetchedAt=input.fetchedAt;
    finishBootstrap();
@@ -178,7 +224,7 @@ export function createAssortmentCollection({dataDir,config={},kassal,receiveSesu
   const countMismatches=[...categories].filter(([,r])=>!r.pending&&(r.totals.size!==1||!r.totals.has(r.products.size))).map(([category,r])=>({category,observedProducts:r.products.size,reportedTotals:[...r.totals]}));
   const latest=done.filter(j=>j.fetchedAt&&j.collectorVersion).sort((a,b)=>Date.parse(a.fetchedAt)-Date.parse(b.fetchedAt)).at(-1),selected=state.bootstrap?.jobIds.map(id=>state.sesum.jobs[id]).filter(Boolean)??[],selectedCategories=selected.filter(j=>j.kind==='catalogue'),selectedProducts=selected.filter(j=>j.kind==='product');
   const unavailable=jobs.filter(j=>j.status==='unavailable'),sesumComplete=!!state.runId&&jobs.length>0&&done.length+unavailable.length===jobs.length&&!jobs.some(j=>j.pending||j.pendingUnavailable)&&!countMismatches.length,kassalComplete=state.kassal.complete===true;
-  return {enabled:config.enabled,collectionEnabled:config.collectionEnabled,paused:paused(),bootstrap:state.bootstrap?{...state.bootstrap,jobIds:undefined,jobs:state.bootstrap.jobIds.length,categories:{jobs:selectedCategories.length,complete:selectedCategories.filter(j=>j.status==='complete').length},products:{jobs:selectedProducts.length,complete:selectedProducts.filter(j=>j.status==='complete').length,unavailable:selectedProducts.filter(j=>j.status==='unavailable').length,processed:selectedProducts.filter(terminal).length,reused:selectedProducts.filter(j=>j.reusedObservation).length},retainedOutsideScope:jobs.length-selected.length,issues:selected.filter(j=>j.error&&!terminal(j)).slice(0,10).map(j=>({id:j.id,kind:j.kind,url:j.url,status:j.status,error:j.error,errors:j.errors??[],collectorVersion:j.collectorVersion??null})),unavailable:selected.filter(j=>j.status==='unavailable').map(j=>({id:j.id,url:j.url,receipt:j.unavailableReceipt})),remaining:state.bootstrap.jobIds.filter(id=>!terminal(state.sesum.jobs[id])).length}:null,validationRemaining:state.validationRemaining??null,runId:state.runId,startedAt:state.startedAt??null,busy,sesum:{jobs:jobs.length,complete:done.length,unavailable:unavailable.length,remaining:jobs.length-done.length-unavailable.length,blocked:jobs.filter(j=>j.status==='blocked').length,products:jobs.filter(j=>j.kind==='product').length,completeSweep:sesumComplete,countMismatches,issues:jobs.filter(j=>j.error&&!terminal(j)).slice(0,8).map(j=>({id:j.id,kind:j.kind,url:j.url,status:j.status,error:j.error,errors:j.errors??[],collectorVersion:j.collectorVersion??null,collectorBuild:j.collectorBuild??null})),implementationReceipt:latest?{collectorVersion:latest.collectorVersion,collectorBuild:latest.collectorBuild,kind:latest.kind,fetchedAt:latest.fetchedAt}:null,pauseUntil:state.sesum.pauseUntil??null},kassal:{page:state.kassal.page,pagesRead:Object.keys(state.kassal.pages).length,rowsObserved:Object.values(state.kassal.pages).reduce((n,r)=>n+r.rows,0),completeSweep:kassalComplete,error:state.kassal.error??null,retryAt:state.kassal.retryAt??null},collectionComplete:sesumComplete&&(config.familySource==='sesum'||kassalComplete),coverageNote:'A sweep exhausts the source-delivered public catalogue/API pages. It does not prove every retailer SKU, local stock or semantic review completion.'};
+  return {enabled:config.enabled,collectionEnabled:config.collectionEnabled,paused:paused(),bootstrap:state.bootstrap?{...state.bootstrap,jobIds:undefined,jobs:state.bootstrap.jobIds.length,categories:{jobs:selectedCategories.length,complete:selectedCategories.filter(j=>j.status==='complete').length},products:{jobs:selectedProducts.length,complete:selectedProducts.filter(j=>j.status==='complete').length,unavailable:selectedProducts.filter(j=>j.status==='unavailable').length,processed:selectedProducts.filter(terminal).length,reused:selectedProducts.filter(j=>j.reusedObservation).length},retainedOutsideScope:jobs.length-selected.length,issues:selected.filter(j=>j.error&&!terminal(j)).slice(0,10).map(j=>({id:j.id,kind:j.kind,url:j.url,status:j.status,error:j.error,retryAt:j.retryAt??null,lastFailure:j.lastFailure??null,errors:j.errors??[],collectorVersion:j.collectorVersion??null})),unavailable:selected.filter(j=>j.status==='unavailable').map(j=>({id:j.id,url:j.url,receipt:j.unavailableReceipt})),remaining:state.bootstrap.jobIds.filter(id=>!terminal(state.sesum.jobs[id])).length}:null,validationRemaining:state.validationRemaining??null,runId:state.runId,startedAt:state.startedAt??null,busy,sesum:{jobs:jobs.length,complete:done.length,unavailable:unavailable.length,remaining:jobs.length-done.length-unavailable.length,blocked:jobs.filter(j=>j.status==='blocked').length,products:jobs.filter(j=>j.kind==='product').length,completeSweep:sesumComplete,countMismatches,issues:jobs.filter(j=>j.error&&!terminal(j)).slice(0,8).map(j=>({id:j.id,kind:j.kind,url:j.url,status:j.status,error:j.error,retryAt:j.retryAt??null,lastFailure:j.lastFailure??null,errors:j.errors??[],collectorVersion:j.collectorVersion??null,collectorBuild:j.collectorBuild??null})),implementationReceipt:latest?{collectorVersion:latest.collectorVersion,collectorBuild:latest.collectorBuild,kind:latest.kind,fetchedAt:latest.fetchedAt}:null,pauseUntil:state.sesum.pauseUntil??null},kassal:{page:state.kassal.page,pagesRead:Object.keys(state.kassal.pages).length,rowsObserved:Object.values(state.kassal.pages).reduce((n,r)=>n+r.rows,0),completeSweep:kassalComplete,error:state.kassal.error??null,retryAt:state.kassal.retryAt??null},collectionComplete:sesumComplete&&(config.familySource==='sesum'||kassalComplete),coverageNote:'A sweep exhausts the source-delivered public catalogue/API pages. It does not prove every retailer SKU, local stock or semantic review completion.'};
  }
  function refreshSelected(getCategoryIds){
   load();

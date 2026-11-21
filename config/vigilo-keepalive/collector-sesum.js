@@ -10,8 +10,8 @@
   'use strict';
   const ORIGIN = 'https://www.sesum.no';
   const WORK = '/api/shopping/sesum/work', RECEIVE = '/api/shopping/sesum/receive';
-  const VERSION = 'sesum-collector-1.9.1';
-  const BUILD = 'sesum-collector-build-1.9.1-1';
+  const VERSION = 'sesum-collector-1.9.3';
+  const BUILD = 'sesum-collector-build-1.9.3-1';
   // The background alarm repairs the bridge every minute. Page ticks advance
   // the bounded durable queue more often; the server still controls spacing
   // and each batch has at most eight reads. Running/Locks prevent overlaps.
@@ -39,8 +39,10 @@
     } catch { return false; }
   }
   function retryDelay(value, at) {
-    const seconds = Number(value), date = Date.parse(value);
-    return Math.min(86400000, Math.max(0, Number.isFinite(seconds) ? seconds * 1000 : Number.isFinite(date) ? date - at : 0));
+    if (typeof value !== 'string') return null;
+    const header = value.trim();
+    const delay = /^\d+$/.test(header) ? Number(header) * 1000 : /GMT$/i.test(header) ? Math.max(0, Date.parse(header) - at) : NaN;
+    return Number.isSafeInteger(delay) && Number.isFinite(new Date(at + delay).getTime()) ? delay : null;
   }
   function receiptSize(value) { return new TextEncoder().encode(JSON.stringify(value)).byteLength; }
   async function readHtml(response) {
@@ -83,12 +85,15 @@
       const wait = (state.lastCallAt ?? -Infinity) + spacing - now();
       if (wait > 0) await sleep(wait);
       state.lastCallAt = now(); calls++;
-      let result = null, error = null, status = 'ok', pause = 0;
+      let result = null, error = null, status = 'ok', pause = 0, httpStatus = null, sourceRetryAfterMs = null;
       try {
         const response = await fetchPage(job.url, {method:'GET',credentials:job.publicCatalogue===true?'omit':'same-origin',redirect:'error',headers:{Accept:'text/html'},signal:AbortSignal.timeout(25000)});
         if (!response.ok) {
           const code = response.status === 401 || response.status === 403 ? 'auth_required' : response.status === 429 ? 'rate_limited' : `http_${response.status}`;
-          pause = code === 'auth_required' ? 10 * 60000 : code === 'rate_limited' ? Math.max(30 * 60000, retryDelay(response.headers?.get('retry-after'), now())) : response.status >= 500 ? 5 * 60000 : 0;
+          httpStatus = response.status;
+          sourceRetryAfterMs = retryDelay(response.headers?.get('retry-after'), now());
+          const fallback = code === 'auth_required' ? 10 * 60000 : code === 'rate_limited' ? 30 * 60000 : httpStatus >= 500 ? 5 * 60000 : 0;
+          pause = sourceRetryAfterMs == null ? fallback : Math.max(60000, sourceRetryAfterMs);
           throw Object.assign(new Error(code), {code});
         }
         if (response.url && !allowedUrl(response.url, job.kind)) throw Object.assign(new Error('unexpected_response_url'), {code:'unexpected_response_url'});
@@ -99,6 +104,7 @@
         status = 'error';
         const code = typeof failure?.code === 'string' && /^[a-z0-9_]{1,60}$/.test(failure.code) ? failure.code : 'network_error';
         error = {code,message:code === 'auth_required' ? 'Normal Sesum access must be restored in the browser.' : 'Sesum read failed; no price receipt was inferred.'};
+        if (httpStatus !== null) Object.assign(error, {httpStatus, sourceRetryAfterMs});
         if (!pause && ['network_error','unexpected_content_type','unexpected_response_url','oversized_response'].includes(code)) pause = 5 * 60000;
       }
       if (pause) { state.pausedUntil = now() + pause; error.retryAfterMs = pause; }

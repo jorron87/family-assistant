@@ -42,7 +42,7 @@ test('an existing Sesum tab is reused without navigating or touching Vigilo',asy
   assert.equal(runInNewContext('('+probe+')()',{__familienSesumCollector:'sesum-collector-1.7.0'}),false,'the earlier same-version build is repaired');
   assert.equal(runInNewContext('('+probe+')()',{__familienSesumCollector:'sesum-collector-1.7.0',__familienSesumCollectorBuild:'sesum-collector-build-1.7.0-2'}),false,'the previous receipt build is replaced by the faster bounded scheduler');
   assert.equal(runInNewContext('('+probe+')()',{__familienSesumCollector:'sesum-collector-1.7.0',__familienSesumCollectorBuild:'sesum-collector-build-1.7.0-4'}),false,'the previous parser without explicit own unit labels is replaced');
-  assert.equal(runInNewContext('('+probe+')()',{__familienSesumCollector:'sesum-collector-1.9.1',__familienSesumCollectorBuild:'sesum-collector-build-1.9.1-1'}),true);
+  assert.equal(runInNewContext('('+probe+')()',{__familienSesumCollector:'sesum-collector-1.9.3',__familienSesumCollectorBuild:'sesum-collector-build-1.9.3-1'}),true);
 });
 test('only a missing Sesum tab creates a background Sesum tab',async()=>{
   const h=harness({tabs:[{id:1,url:'https://web-parent.prod.vigilo-oas.no/news'}]});await h.sesumTick();

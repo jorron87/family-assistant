@@ -485,7 +485,9 @@ export function createSesumCollector({dataDir,config={},families,receivePrices,r
     if(input.status==='error'){
       const code=text(input.error?.code,80)??'fetch_error';
       const requestedDelay=Math.min(24*3600000,Math.max(0,Number(input.error?.retryAfterMs)||0));
-      const delay=code==='rate_limited'||code==='auth_required'?Math.max(10*60000,requestedDelay):Math.max(60000,requestedDelay);
+      const sourceDelay=input.error?.sourceRetryAfterMs;
+      const verifiedDelay=Number.isInteger(input.error?.httpStatus)&&Number.isSafeInteger(sourceDelay)&&sourceDelay>=0&&Number.isFinite(new Date(now().getTime()+sourceDelay).getTime());
+      const delay=verifiedDelay?Math.max(60000,sourceDelay):code==='rate_limited'||code==='auth_required'?Math.max(10*60000,requestedDelay):Math.max(60000,requestedDelay);
       job.attempts++;job.error={code,message:text(input.error?.message,500)??'Kilden kunne ikke leses.'};
       job.deliveredUntil=null;job.retryAt=new Date(now().getTime()+delay).toISOString();
       if(code==='rate_limited'||code==='auth_required'||requestedDelay>0&&(['network_error','unexpected_content_type','unexpected_response_url','oversized_response'].includes(code)||/^http_5\d\d$/.test(code)))state.pauseUntil=new Date(Math.max(Date.parse(state.pauseUntil)||0,Date.parse(job.retryAt))).toISOString();

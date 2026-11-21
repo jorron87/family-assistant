@@ -235,7 +235,10 @@ test('source denial keeps the full retry-after pause and reduces subsequent requ
 
 test('after the global source pause, untouched products precede retries without hiding failed work',async t=>{
  let time=new Date(at);const f=collectionFixture(t,{now:()=>time});f.api.bootstrap({productUrls:Array.from({length:9},(_,i)=>'https://www.sesum.no/produkt/'+(i+1)+'-synthetic')});const work=f.api.work();for(const job of work.jobs)await f.api.receive({runId:work.runId,jobId:job.id,status:job.kind==='catalogue'?'ok':'error',fetchedAt:at,...(job.kind==='catalogue'?{result:{ok:true,kind:'catalogue',sourceUrl:job.url,categoryUrls:[],productUrls:[],nextUrls:[],endReached:true,filtersVerified:true,total:0}}:{error:{code:'auth_required'}})});
- assert.equal(f.api.work().jobs.length,0);time=new Date(+time+31*60000);const restored=createAssortmentCollection(f.settings),next=restored.work();assert.deepEqual(next.jobs.slice(0,2).map(j=>j.url),['https://www.sesum.no/produkt/8-synthetic','https://www.sesum.no/produkt/9-synthetic']);assert.equal(restored.status().bootstrap.remaining,9);assert.ok(next.jobs.some(j=>j.url.includes('/1-')),'failed products remain eligible after untouched products and after backoff');
+ assert.equal(f.api.work().jobs.length,0);time=new Date(+time+31*60000);const restored=createAssortmentCollection(f.settings),next=restored.work();assert.deepEqual(next.jobs.map(j=>j.url),['https://www.sesum.no/produkt/8-synthetic']);assert.equal(restored.status().bootstrap.remaining,9);
+ const probe=next.jobs[0];await restored.receive({runId:next.runId,jobId:probe.id,status:'ok',fetchedAt:time.toISOString(),result:{ok:true,kind:'product',sourceUrl:probe.url,product:{...sesum(),id:8,sourceUrl:probe.url},prices:[]}});
+ const batch=restored.work();assert.equal(batch.jobs[0].url,'https://www.sesum.no/produkt/9-synthetic');
+ assert.ok(batch.jobs.some(j=>j.url.includes('/1-')),'failed products remain eligible after a successful recovery read');
 });
 
 test('a confirmed missing own-product page completes collection separately from prices and reopens on rediscovery',async t=>{
@@ -269,4 +272,27 @@ test('selected leaves deliver real product work before all listings finish',asyn
  const next=f.api.work({peek:true});
  assert.equal(next.jobs.filter(j=>j.kind==='product').length,4);
  assert.equal(next.jobs.filter(j=>j.kind==='catalogue').length,4);
+});
+
+test('source delay and HTTP denial evidence survive a restart; local waits have a separate basis',async t=>{
+ for(const [httpStatus,code,sourceRetryAfterMs,minutes] of [[401,'auth_required',null,10],[403,'auth_required',null,10],[403,'auth_required',180000,3],[429,'rate_limited',120000,2],[429,'rate_limited',null,30],[503,'http_503',172800000,2880]]){
+  let time=new Date(at);const f=collectionFixture(t,{now:()=>time});f.api.bootstrap({productUrls:['https://www.sesum.no/produkt/2-synthetic']});
+  const work=f.api.work(),j=work.jobs.find(j=>j.kind==='product');
+  await f.api.receive({runId:work.runId,jobId:j.id,status:'error',fetchedAt:at,error:{code,httpStatus,sourceRetryAfterMs}});
+  const reloaded=createAssortmentCollection(f.settings),s=reloaded.status(),fail=s.bootstrap.issues[0].lastFailure;
+  assert.equal(fail.httpStatus,httpStatus);assert.equal(fail.sourceRetryAfterMs,sourceRetryAfterMs);
+  assert.equal(fail.waitBasis,sourceRetryAfterMs===null?'local-backoff':'source-retry-after');
+  assert.equal(Date.parse(s.sesum.pauseUntil),Date.parse(at)+minutes*60000);
+  assert.throws(()=>reloaded.validate({jobIds:[j.id]}),/source pause/);
+ }
+});
+test('selected category batches give different shelves early reads while retaining every product',async t=>{
+ const f=collectionFixture(t,{config:{...config,familySource:'sesum'},receiveCategories:async()=>{}});
+ f.api.bootstrap({leafSelection:true,categoryUrls:['https://www.sesum.no/kategori/12','https://www.sesum.no/kategori/13']});
+ const w=f.api.work();
+ for(const j of w.jobs){
+  const id=new URL(j.url).pathname.split('/')[2],ids=id==='12'?[1,2,3,4,5,6,7,8,9,10]:id==='13'?[11,12,13]:[];
+  await f.api.receive({runId:w.runId,jobId:j.id,status:'ok',fetchedAt:at,result:{ok:true,kind:'catalogue',sourceUrl:j.url,categoryUrls:[],productUrls:ids.map(i=>'https://www.sesum.no/produkt/'+i+'-p'),nextUrls:[],endReached:true,filtersVerified:true,total:id?ids.length:2,categories:[{id:'12',name:'A',parentId:null},{id:'13',name:'B',parentId:null}]}});
+ }
+ const next=f.api.work();assert.equal(next.jobs.length,8);assert.ok(next.jobs.slice(0,2).some(j=>j.url.includes('/11-p')));assert.equal(f.api.status().bootstrap.products.jobs,13);
 });

@@ -29,8 +29,8 @@ test('all followed families resume across bounded ticks without a pilot or produ
   for(let i=1;i<h.calls.length;i++)assert.ok(h.calls[i].at-h.calls[i-1].at>=2000,'server spacing applies across faster page ticks');
   for(const {options} of h.calls){assert.equal(options.method,'GET');assert.equal(options.credentials,'same-origin');assert.equal(options.redirect,'error');assert.deepEqual(Object.keys(options.headers),['Accept']);}
   assert.ok(h.receipts.every(r=>r.status==='ok'&&r.result.endReached===true));
-  assert.ok(h.receipts.every(r=>r.collectorVersion==='sesum-collector-1.9.1'),'successful browser work identifies its actual installed collector');
-  assert.ok(h.receipts.every(r=>r.collectorBuild==='sesum-collector-build-1.9.1-1'));
+  assert.ok(h.receipts.every(r=>r.collectorVersion==='sesum-collector-1.9.3'),'successful browser work identifies its actual installed collector');
+  assert.ok(h.receipts.every(r=>r.collectorBuild==='sesum-collector-build-1.9.3-1'));
   assert.equal(JSON.stringify(h.receipts).includes('synthetic source only'),false,'raw HTML is never relayed');
 });
 test('only exact Sesum product and ordinary search routes are fetched',async()=>{
@@ -39,8 +39,8 @@ test('only exact Sesum product and ordinary search routes are fetched',async()=>
   assert.equal(collector.allowedUrl(ORIGIN+'/sok?q=x&side=2','search'),true);assert.equal(collector.allowedUrl(ORIGIN+'/produkt/0-invalid','product'),false);assert.equal(collector.allowedUrl(product.url+'?private=1','product'),false);
   const h=harness({jobs:[{...product,url:'https://evil.example/produkt/123-secret'}]});await h.run();
   assert.equal(h.calls.length,0);assert.equal(h.receipts[0].error.code,'invalid_job');
-  assert.equal(h.receipts[0].collectorVersion,'sesum-collector-1.9.1');
-  assert.equal(h.receipts[0].collectorBuild,'sesum-collector-build-1.9.1-1');
+  assert.equal(h.receipts[0].collectorVersion,'sesum-collector-1.9.3');
+  assert.equal(h.receipts[0].collectorBuild,'sesum-collector-build-1.9.3-1');
 });
 test('authentication rejection stops the cycle and pauses ordinary reads',async()=>{
   const h=harness({jobs:[product,search(2)],fetchPage:async()=>htmlResponse({ok:false,status:403})});
@@ -104,4 +104,11 @@ test('public full category listings omit household preference cookies and keep t
  const jobs=[{id:'catalogue:1',kind:'catalogue',url:ORIGIN+'/kategori/283-and?visning=alle',publicCatalogue:true},{...product,publicCatalogue:true}];
  const h=harness({jobs,core:{parseCatalogue:(_html,sourceUrl)=>({ok:true,kind:'catalogue',sourceUrl,categoryUrls:[],productUrls:[],nextUrls:[],endReached:true,filtersVerified:true}),parseProduct:(_html,sourceUrl)=>({ok:true,kind:'product',sourceUrl,product:{id:123},prices:[]})}});
  await h.run();assert.equal(h.receipts.length,2);assert.ok(h.receipts.every(r=>r.status==='ok'));assert.ok(h.calls.every(r=>r.options.credentials==='omit'));assert.equal(h.calls[0].url,jobs[0].url);
+});
+
+test('distinguishes actual status and provider Retry-After from a local fallback',async()=>{
+ for(const [status,value,expected,wait] of [[401,null,null,600000],[403,'120',120000,120000],[429,'90',90000,90000],[429,'invalid',null,1800000],[503,'172800',172800000,172800000]]){
+  const h=harness({fetchPage:async()=>htmlResponse({ok:false,status,headers:{get:k=>k==='retry-after'?value:null}})});await h.run();
+  const e=h.receipts[0].error;assert.equal(e.httpStatus,status);assert.equal(e.sourceRetryAfterMs,expected);assert.equal(e.retryAfterMs,wait);
+ }
 });
