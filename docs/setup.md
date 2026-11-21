@@ -122,3 +122,15 @@ Starting full collection is explicit. shopping-assortment-start accepts a UTF-8 
 4. Åpne en kjent utgående Nordnet-overføring og bekreft mottakeren. For denne kontoen regnes betalinger til samme mottakerkonto som sparing. Hvis bankdata mangler mottakerkonto, støttes eksakt betalingsmerkelapp som inneholder «Nordnet». En endret merkelapp trenger ny bekreftelse. Et valgfritt tall i `monthlySavingsNok` i lokal konfigurasjon viser felles månedlig mål.
 
 Ved ny telefon eller ny paring, verifiser den nye telefonens ID fysisk og kjør veiviseren igjen med samme stabile voksen-ID. Fjern en voksen fra lokal konfigurasjon for å avslutte enhetens tilgang. Trekk tilbake banksamtykket hos leverandøren/banken ved avslutning.
+
+### Personvern for familieøkonomi
+
+Familieøkonomi er en privat oversikt som drives av husstanden på egen maskin. Når en kontoeier gir samtykke hos banken, formidler Enable Banking kontoidentifikatorer, saldo og bokførte transaksjoner til løsningen. Opplysningene brukes til å vise kjøp, avstemme saldo og følge sparing. Kontoeierne velger selv kontoer i bankens godkjenningsflyt.
+
+Økonomiregisteret lagres kryptert på husstandens maskin. Enhetene som husstanden uttrykkelig har godkjent som voksentelefoner, har felles innsyn. Hver kontoeier kan trekke tilbake banktilgangen hos banken eller leverandøren. Tidligere innhentede opplysninger kan fortsatt ligge i registeret og i husstandens sikkerhetskopier. Spørsmål om innsyn, tilgang eller sletting rettes til den som administrerer husstandens installasjon, via kontaktadressen i registreringen hos Enable Banking.
+
+### Bruksvilkår for familieøkonomi
+
+Applikasjonen er beregnet på privat, ikke-kommersiell bruk i egen husstand. Hver voksen kobler til sine egne kontoer og godkjenner hvilke kontoopplysninger som skal vises til de andre godkjente voksne. Integrasjonen leser kontoopplysninger. Betalinger og investeringsbeslutninger foretar kontoeieren selv i banken.
+
+Oversikten viser tidspunktet for siste banklesing. Ved ufullstendig historikk, utløpt samtykke eller avvik i saldo bør kontoeieren kontrollere tallene i nettbanken før de brukes til økonomiske beslutninger.
