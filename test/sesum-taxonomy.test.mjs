@@ -192,6 +192,10 @@ test('a fresh, reviewed shop pack earns one stock-up alert against the chosen Od
  assert.equal(subcategoryPrices(netOptions).comparisons[0].oda.unitPrice,58.44,'compare the full net pack, not the drained per-kg figure');
  netOptions.families[0].products[0].canonicalPackAmount=.42;
  assert.equal(subcategoryPrices({...netOptions,quotes:options.quotes}).comparisons[0].oda,null,'a conflicting approved pack cannot restore the incompatible quote');
+ const householdSku={store:'ODA_NO',productKey:'kassal:ODA_NO:1',sourceUrl:url,watchId:'duck',unit:'kg',status:'approved',packAmount:.681};
+ netOptions.families[0].products[0].productKey=householdSku.productKey;
+ assert.equal(subcategoryPrices({...netOptions,nativeEntries:[householdSku]}).comparisons[0].oda.unitPrice,58.44,'the household net-pack review outranks a drained library membership');
+ assert.equal(subcategoryPrices({...netOptions,nativeEntries:[{...householdSku,status:'pending'}]}).comparisons[0].oda,null);
  const newer=new Date(Date.parse(at)+60000).toISOString();
  assert.equal(subcategoryPrices({...multi,reader:{members:k=>k===cat.groupId?[odaRow(10,110,newer)]:[]}}).comparisons[0].oda.unitPrice,110);
  assert.equal(subcategoryPrices({...multi,reader:{members:k=>k===cat.groupId?[odaRow(10,110)]:[]}}).comparisons[0].oda,null);

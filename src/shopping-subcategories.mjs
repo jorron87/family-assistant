@@ -85,15 +85,26 @@ function shoppingTrips(candidates,stores){
 
 // A category price describes what the store sells. Only a separately reviewed
 // household alternative can support a stock-up quantity.
-export function subcategoryPrices({reader,links,families,quotes,stores,choice,planning,skipAlerts,excluded}){
+export function subcategoryPrices({reader,links,families,quotes,nativeEntries=[],stores,choice,planning,skipAlerts,excluded}){
  const comparisons=[],candidates=[],signals=[];
  const byFamily=new Map(families.map(f=>[f.familyId,f]));
  const physical=new Map(stores.filter(s=>s.chainCode&&s.chainCode!=='ODA_NO'&&!/nettbutikk/i.test(s.name)).map(s=>[s.chainCode,s]));
- const members=new Map();
+ const members=new Map(),nativeByWatch=new Map();
+ for(const entry of nativeEntries){
+  if(!nativeByWatch.has(entry.watchId))nativeByWatch.set(entry.watchId,[]);
+  nativeByWatch.get(entry.watchId).push(entry);
+ }
  for(const link of links){
   const f=byFamily.get(link.watchId),chosen=choice(f.familyId);
   const reviewed=quotes.filter(p=>p.watchId===f.familyId&&p.kind==='catalog'&&p.unit===f.unit);
-  const odaProducts=f.products.filter(p=>p.store==='ODA_NO'&&p.reviewCurrent);
+  // A household catalogue review owns its exact SKU and measurement. The
+  // general library can describe the same can by a different (drained) weight.
+  const byKey=new Map(f.products.filter(p=>p.reviewCurrent).map(p=>[keyOf(p),p]));
+  for(const e of nativeByWatch.get(f.familyId)??[]){
+   if(e.status==='approved')byKey.set(keyOf(e),{...e,reviewCurrent:true,canonicalPackAmount:e.packAmount});
+   else byKey.delete(keyOf(e));
+  }
+  const products=[...byKey.values()],odaProducts=products.filter(p=>p.store==='ODA_NO');
   const approvedOda=new Set([...(link.odaReferenceIds??[]),...odaProducts.map(productId).filter(Boolean)]);
   const odb=reviewed.filter(p=>p.store==='ODA_NO'&&(!chosen||productId(p)===chosen));
   const eligibleStores=reviewed.filter(p=>physical.has(p.store));
@@ -121,7 +132,7 @@ export function subcategoryPrices({reader,links,families,quotes,stores,choice,pl
     if(!(unitPrice>0))continue;
     const q={name:p.name,store:p.store,productId:productId(p),unitPrice,lastChecked:row.price.receiptAt,sourceUrl:p.sourceUrl,storeName:physical.get(p.store)?.name??'Oda'};
     if(p.store==='ODA_NO'&&approvedOda.has(productId(p))&&(!chosen||productId(p)===chosen))oda.push(q);
-    else if(physical.has(p.store))shops.push({...q,reviewedPackHint:reviewedPackHint(p,f.products)});
+    else if(physical.has(p.store))shops.push({...q,reviewedPackHint:reviewedPackHint(p,products)});
    }
    const only=link.categories.length===1;
    // Reviewed household quotes can also come from Kassalapp or Oda MCP.
