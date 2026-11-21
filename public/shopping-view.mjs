@@ -142,9 +142,9 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     return row;
   }
   const packLabel=(size,unit)=>{
-    if(unit==='kg')return size<1?`${Math.round(size*100)*10} g`:`${nf(2).format(size)} kg`;
-    if(unit==='l')return size<1?`${nf(1).format(size*10)} dl`:`${nf(2).format(size)} l`;
-    return size===1?'stk':`${nf(0).format(size)} stk`;
+    if(unit==='kg'&&size<1)return nf(2).format(size*1000)+' g';
+    if(unit==='l'&&size<1)return nf(2).format(size*1000)+' ml';
+    return nf(3).format(size)+' '+unit;
   };
   function stockSummary(item) {
     if(!item.stock.known)return 'Ikke registrert';
