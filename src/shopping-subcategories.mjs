@@ -7,6 +7,23 @@ const productId=p=>odaProductIdFromUrl(p.productSourceUrl??p.sourceUrl);
 const keyOf=p=>p.productKey??`kassal:${p.store}:${p.id}`;
 const display=p=>p?{name:p.name,storeName:p.storeName,unitPrice:rounded(p.unitPrice),receiptAt:p.lastChecked,sourceUrl:p.sourceUrl}:null;
 
+// A household may compare pieces while Oda displays metres or kilograms.
+// Require both the exact reviewed pack count and a matching whole-pack count
+// in Oda's own size description; never derive pieces from length or weight.
+function comparableUnitPrice(row,unit,odaProducts){
+ const p=row.product,quote=row.price;
+ if(p.unit===unit){
+  if(p.packKnown&&p.pack>0&&quote.grossPackPrice>0)return quote.grossPackPrice/p.pack;
+  if(quote.directUnitVerified&&quote.unit===unit)return quote.grossUnitPrice;
+ }
+ if(unit!=='stk'||p.source!=='oda'||!(quote.grossPackPrice>0)||typeof p.description!=='string')return null;
+ const counts=p.description.split(/,\s+/).map(part=>part.trim().match(/^(\d+)\s*(?:stk\.?|ruller)$/iu)).filter(Boolean);
+ if(counts.length!==1)return null;
+ const count=Number(counts[0][1]);
+ const matching=odaProducts.filter(alt=>productId(alt)===productId(p)&&alt.unit===unit);
+ return count>0&&matching.length&&matching.every(alt=>alt.canonicalPackAmount===count)?quote.grossPackPrice/count:null;
+}
+
 function currentOdaQuotes(list){
  const grouped=new Map();
  for(const row of list){
@@ -52,7 +69,8 @@ export function subcategoryPrices({reader,links,families,quotes,stores,choice,pl
  for(const link of links){
   const f=byFamily.get(link.watchId),chosen=choice(f.familyId);
   const reviewed=quotes.filter(p=>p.watchId===f.familyId&&p.kind==='catalog'&&p.unit===f.unit);
-  const approvedOda=new Set([...(link.odaReferenceIds??[]),...f.products.filter(p=>p.store==='ODA_NO'&&p.reviewCurrent).map(productId).filter(Boolean)]);
+  const odaProducts=f.products.filter(p=>p.store==='ODA_NO'&&p.reviewCurrent);
+  const approvedOda=new Set([...(link.odaReferenceIds??[]),...odaProducts.map(productId).filter(Boolean)]);
   const odb=reviewed.filter(p=>p.store==='ODA_NO'&&(!chosen||productId(p)===chosen));
   const eligibleStores=reviewed.filter(p=>physical.has(p.store));
   const alternatives=[],familyBaselines=[],categoryLows=[],placements=new Map(),barcodes=new Map();
@@ -74,8 +92,8 @@ export function subcategoryPrices({reader,links,families,quotes,stores,choice,pl
     const p=row.product;
     keys.add(row.productKey);
     if(p.store==='ODA_NO')odaIds.add(productId(p));
-    if(excluded?.(f.familyId,p,row.productKey)||!row.price.fresh||row.price.reasons.length||!p.available||p.unit!==f.unit)continue;
-    const unitPrice=p.packKnown&&p.pack>0&&row.price.grossPackPrice>0?row.price.grossPackPrice/p.pack:row.price.directUnitVerified&&row.price.unit===f.unit?row.price.grossUnitPrice:null;
+    if(excluded?.(f.familyId,p,row.productKey)||!row.price.fresh||row.price.reasons.length||!p.available)continue;
+    const unitPrice=comparableUnitPrice(row,f.unit,odaProducts);
     if(!(unitPrice>0))continue;
     const q={name:p.name,store:p.store,productId:productId(p),unitPrice,lastChecked:row.price.receiptAt,sourceUrl:p.sourceUrl,storeName:physical.get(p.store)?.name??'Oda'};
     if(p.store==='ODA_NO'&&approvedOda.has(productId(p))&&(!chosen||productId(p)===chosen))oda.push(q);
@@ -100,22 +118,22 @@ export function subcategoryPrices({reader,links,families,quotes,stores,choice,pl
    });
    const baseline=cheapest(currentOdaQuotes([...currentReviewed,...oda]));
    const approved=eligibleStores.filter(belongs);
-   const lowest=cheapest([...shops,...approved]);
+   const lowest=cheapest([...approved,...shops]);
    comparisons.push({watchId:f.familyId,name:f.name,categoryId:cat.id,categoryName:cat.name,unit:f.unit,oda:display(baseline),store:display(lowest),differencePct:baseline&&lowest?rounded((1-lowest.unitPrice/baseline.unitPrice)*100):null});
    if(!baseline)continue;
    familyBaselines.push(baseline);
    if(skipAlerts.has(f.familyId))continue;
    // A shelf observation can flag a variant to check, even without reviewed
    // evidence that this pack can satisfy the household need.
-   if(lowest&&shops.includes(lowest)&&!approved.some(p=>p.store===lowest.store&&p.unitPrice<=lowest.unitPrice))categoryLows.push({cat,lowest});
+   if(lowest)categoryLows.push({cat,lowest,reviewed:approved.includes(lowest)});
    for(const p of approved)if(p.packAmount>0&&p.price>0&&p.unitPrice<baseline.unitPrice)alternatives.push({p,cat});
   }
   const baseline=cheapest(familyBaselines);
   if(!baseline||!categoryLows.length&&!alternatives.length)continue;
   const {need,stock,shelfMonths,excellentPrice,maxPacks,minDiscountPct,referenceCap,referenceFor}=planning(f.familyId);
-  for(const {cat,lowest} of categoryLows){
+  for(const {cat,lowest,reviewed} of categoryLows){
    const diff=(1-lowest.unitPrice/baseline.unitPrice)*100;
-   if(diff>=Math.max(20,minDiscountPct??0))signals.push({watchId:f.familyId,categoryId:cat.id,categoryName:cat.name,unit:f.unit,store:display(lowest),oda:display(baseline),diffPct:rounded(diff)});
+   if(diff>=Math.max(20,minDiscountPct??0))signals.push({watchId:f.familyId,categoryId:cat.id,categoryName:cat.name,unit:f.unit,reviewed,store:display(lowest),oda:display(baseline),diffPct:rounded(diff)});
   }
   for(const {p,cat} of alternatives){
    const reference=Math.min(baseline.unitPrice,referenceCap??Infinity,referenceFor?.(p)??Infinity);

@@ -177,6 +177,11 @@ test('a fresh, reviewed shop pack earns one stock-up alert against the chosen Od
  assert.equal(siblingResult.comparisons[0].oda.unitPrice,100);
  assert.equal(siblingResult.comparisons[1].oda.unitPrice,45);
  assert.deepEqual(siblingResult.alerts,[]);assert.deepEqual(siblingResult.signals,[]);
+ const pack=odaRow(10,62.90);Object.assign(pack.product,{source:'oda',unit:'kg',description:'Medium, 18 stk',packKnown:false,pack:null});
+ const perPiece={...options,links:[{watchId:'duck',categories:[cat]}],quotes:[],reader:{members:()=>[pack]},families:[{...options.families[0],unit:'stk',products:[{sourceUrl:url,store:'ODA_NO',reviewCurrent:true,unit:'stk',canonicalPackAmount:18}]}]};
+ assert.equal(subcategoryPrices(perPiece).comparisons[0].oda.unitPrice,3.49);
+ pack.product.description='12 stk';assert.equal(subcategoryPrices(perPiece).comparisons[0].oda,null);
+ pack.product.name='18 stk';pack.product.description='1 kg';assert.equal(subcategoryPrices(perPiece).comparisons[0].oda,null);
  const newer=new Date(Date.parse(at)+60000).toISOString();
  assert.equal(subcategoryPrices({...multi,reader:{members:k=>k===cat.groupId?[odaRow(10,110,newer)]:[]}}).comparisons[0].oda.unitPrice,110);
  assert.equal(subcategoryPrices({...multi,reader:{members:k=>k===cat.groupId?[odaRow(10,110)]:[]}}).comparisons[0].oda,null);
