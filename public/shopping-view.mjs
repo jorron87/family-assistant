@@ -64,6 +64,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
   const stockDraft={text:'',location:'',mode:'minimum',files:[],intakeId:null,clientId:crypto.randomUUID()},stockPreviews=new Map();let stockSending=false;
   let dirty=false,data=null,tab='buy',search='',location='all',stale=false,odaQuery='',toastTimer=null;
   const chosen=new Map(),openSections=new Set(['draft-elsewhere']);
+  const tripExamples=new Map();
   let selectedFindingsStore=initialFindingsStore||null;
   if(initialFindingsStore!==null)tab='findings';
   panel.classList.add('shop');
@@ -366,25 +367,56 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     if(!stores.length){root.append(el('p','Ingen fulgte varer har en fersk butikkpris under Oda akkurat nå.'));return;}
     selectedFindingsStore??=stores[0].storeId;
     const store=stores.find(s=>s.storeId===selectedFindingsStore);
-    root.append(chips(stores.map(s=>[s.storeId,s.storeName+' ('+s.families.length+')']),selectedFindingsStore,id=>{selectedFindingsStore=id;render(true);},'Velg butikk'));
+    root.append(chips(stores.map(s=>[s.storeId,s.storeName+' · '+price(s.totals.odaSaving)+' under Oda']),selectedFindingsStore,id=>{selectedFindingsStore=id;render(true);},'Velg butikk'));
     if(!store){root.append(el('p','Ingen ferske prisfunn for den valgte butikken.'));return;}
     const section=el('section',undefined,'shop-store');
-    section.append(el('h3',store.storeName+' · billigere enn Oda'),el('p','Fulgte varer med sammenlignbare priser fra de siste 48 timene. Kjedepris og lokalt utvalg kan variere.','shop-sub'));
+    const t=store.totals,check=store.checkStock;
+    section.append(el('h3',store.storeName+' · billigere enn Oda'),
+      el('strong',t.count?price(t.odaSaving)+' spart mot Oda · '+price(t.cost)+' å betale':'Ingen beregnet kurv med avklart variant og lager'),
+      el('p','Beregnet turbesparelse '+price(t.saving)+' · turgrense '+price(store.minSavings)+' · '+(store.worthTrip?'egen tur lønner seg etter familiens grense':'egen tur er foreløpig ikke begrunnet'),'shop-sub'));
+    if(check.count)section.append(el('p','Sjekk lageret for '+check.count+' grunnvarer. Hvis lageranslaget stemmer og ukjent lager er tomt, kan disse i tillegg spare '+price(check.odaSaving)+' mot Oda ('+price(check.saving)+' i turberegningen).','shop-sub'));
+    const example=store.families.map(f=>{
+      const id=tripExamples.get(store.storeId+'|'+f.watchId);
+      const selected=f.items.find(p=>p.identity===id&&p.estimate.status==='priced');
+      const planned=f.items.find(p=>p.identity===f.plannedIdentity&&!p.estimate.checkStock);
+      return {selected,item:selected??planned};
+    });
+    if(example.some(row=>row.selected)){
+      const sum=key=>example.reduce((n,r)=>n+(r.item?.estimate[key]??0),0);
+      section.append(el('strong','Ditt regneeksempel · '+price(sum('odaSaving'))+' spart mot Oda · '+price(sum('cost'))+' å betale'),
+        el('p','Forutsatt at valgte varianter passer og lageranslagene stemmer: '+price(sum('saving'))+' i turbesparelse mot turgrensen på '+price(store.minSavings)+'.','shop-sub'));
+    }
+    section.append(el('p','Turbesparelsen tar også hensyn til lavere dokumenterte referansepriser. Prisene er fra de siste 48 timene. Sjekk lokal pris og beholdning.','shop-sub'));
     for(const family of store.families){
-      const [first,...rest]=family.items,card=el('article',undefined,'shop-deal');
+      const first=family.items.find(p=>p.identity===family.plannedIdentity)??family.items[0],rest=family.items.filter(p=>p!==first),card=el('article',undefined,'shop-deal');
       card.append(el('h4',family.name),el('p','Oda · '+family.oda.name+' · '+price(family.oda.unitPrice)+'/'+family.unit,'shop-sub'));
+      const household=data.items.find(i=>i.id===family.watchId);
+      if(household)card.append(el('p',(household.annualAmount==null?'Årsforbruk ukjent':'Anslått årsforbruk '+nf(2).format(household.annualAmount)+' '+family.unit)+' · '+(household.stock?.known?'Anslått lager '+nf(2).format(household.stock.amount)+' '+family.unit:'Lager ukjent'),'shop-sub'));
       const appendProduct=(parent,p)=>{
         parent.append(el('p',p.name+' · '+price(p.unitPrice)+'/'+family.unit),
           el('strong',p.pack?price(p.pack.price)+' for '+packLabel(p.pack.amount,family.unit)+' · '+price(p.pack.saving)+' spart per pakke':price(p.difference)+' spart per '+family.unit),
           el('p',nf(1).format(p.diffPct)+' % under Oda · '+(p.reviewed?'Gjennomgått alternativ':'Sjekk at varianten passer')+' · '+dayLabel(p.receiptAt.slice(0,10)),'shop-sub'));
         if(p.terms.length)parent.append(el('p',p.terms.join(' · '),'shop-sub'));
+        const e=p.estimate;
+        const quantity=holder=>{
+          if(e.status==='priced'){
+            const label=!p.reviewed?'Regneeksempel':p!==first?'Alternativ mengde':e.checkStock?'Mengde etter lagersjekk':'Kjøp';
+            holder.append(el('strong',label+' · '+e.packs+' × '+packLabel(p.pack.amount,family.unit)+' · '+price(e.cost)+' å betale'),
+              el('p',price(e.odaSaving)+' spart mot Oda'+(e.months!=null?' · behov for '+nf(1).format(e.months)+' mnd':' · én tilbudsenhet ved ukjent forbruk')+(e.checkStock?' · kontroller lageret hjemme':''),'shop-sub'));
+            if(!p.reviewed||e.checkStock||p.identity!==family.plannedIdentity){
+              const key=store.storeId+'|'+family.watchId,selected=tripExamples.get(key)===p.identity;
+              const toggle=button(selected?'Fjern fra regneeksemplet':'Bruk i mitt regneeksempel',()=>{if(selected)tripExamples.delete(key);else tripExamples.set(key,p.identity);render(true);});
+              toggle.setAttribute('aria-pressed',String(selected));holder.append(toggle);
+            }
+          }else holder.append(el('p',({covered:'0 pakker · lageret dekker behovet.',limit:'0 pakker innenfor kjøpsgrensen.', 'unknown-pack':'Pakningsmengden er ukjent.', 'unknown-need':'Avklar forbruket før påfyll av eksisterende lager.', 'too-large':'0 pakker · pakningen koster mer enn behovet tilsvarer hos Oda.'})[e.status],'shop-sub'));
+        };
+        if(p.reviewed)quantity(parent);
+        else parent.append(details('estimate-'+store.storeId+'-'+family.watchId+'-'+p.identity,'Regn på mengden hvis varianten passer',quantity,'shop-why'));
       };
       appendProduct(card,first);
       if(rest.length)card.append(details('findings-'+store.storeId+'-'+family.watchId,'Flere prisfunn for samme vare ('+rest.length+')',holder=>{
         for(const p of rest){const line=el('div',undefined,'shop-deal');appendProduct(line,p);holder.append(line);}
       },'shop-why'));
-      const stock=data.items.find(i=>i.id===family.watchId)?.stock;
-      if(stock?.known&&stock.amount>0)card.append(el('p','Anslått lager hjemme · '+amount(stock.amount,family.unit),'shop-sub'));
       section.append(card);
     }
     root.append(section);

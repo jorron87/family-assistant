@@ -755,7 +755,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const draft=odaDraft(a,today,at,found);
     const brandDeals=draft.items.flatMap(x=>{const place=x.places?.find(p=>p.sameBrand);return place?[{watchId:x.watchId,name:x.name,currentName:x.productName,currentUnit:x.unitPrice,unit:x.unit,place}]:[];}).sort((x,y)=>y.place.dropPct-x.place.dropPct);
     const families=taxonomy?sesumFamilies():[];
-    const comparisons=taxonomy?subcategoryPrices({reader:taxonomy.reader(),families,links:taxonomy.watchLinks(families),quotes:found.prices.quotes,nativeEntries:found.prices.reviewedNative,retainReviewed:(entry,key)=>{
+    const comparisons=taxonomy?subcategoryPrices({at,reader:taxonomy.reader(),families,links:taxonomy.watchLinks(families),quotes:found.prices.quotes,nativeEntries:found.prices.reviewedNative,retainReviewed:(entry,key)=>{
       const original=reviewedReader()?.product(key);
       return !!original&&!nativeHoldsMember(original,key,entry.watchId,[entry]);
     },stores:s.settings.stores,choice:id=>s.odaChoices[id],excluded:(id,p,k)=>scopedProductHeld(found.prices[priceContextExclusions](s.watches[id]),p,k)||found.prices.excluded.has(id+'|'+k),skipAlerts:new Set(main.map(d=>d.watchId)),planning:id=>{
@@ -1538,7 +1538,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const reader=reviewedReader(),entries=catalog.entries();
     return Object.values(s.watches).filter(w=>w.enabled!==false&&(!familyId||w.id===familyId)).map(w=>{
       const members=reader?[...linkedMembers(w,reader,{allChains:true,includeParked:true,ignoreScopedExclusions:true}).values()]:[];
-      const products=members.map(m=>({productKey:m.productKey,source:m.product.source??m.productKey.split(':')[0],store:m.product.store,id:m.product.id,name:m.product.name,brand:m.product.brand,ean:m.product.ean,canonicalPackAmount:m.product.pack,unit:m.product.unit,metadataFingerprint:m.product.metadataFingerprint??m.product.textHash,sourceUrl:m.product.sourceUrl,reviewCurrent:m.reviewCurrent,groupIds:reader.groupsOf(m.productKey).filter(g=>g.s==='approved'&&g.r).map(g=>g.groupId),rawPack:m.product.rawPack}));
+      const products=members.map(m=>({productKey:m.productKey,source:m.product.source??m.productKey.split(':')[0],store:m.product.store,id:m.product.id,name:m.product.name,brand:m.product.brand,ean:m.product.ean,canonicalPackAmount:m.product.pack,unit:m.product.unit,sourceFingerprint:m.product.sourceFingerprint,metadataFingerprint:m.product.metadataFingerprint??m.product.textHash,sourceUrl:m.product.sourceUrl,reviewCurrent:m.reviewCurrent,groupIds:reader.groupsOf(m.productKey).filter(g=>g.s==='approved'&&g.r).map(g=>g.groupId),rawPack:m.product.rawPack}));
       const native=entries.filter(e=>e.watchId===w.id&&e.status==='approved');
       for(const e of native)if(!products.some(p=>p.productKey===catalogKey(e)))products.push({productKey:catalogKey(e),source:'kassal',store:e.store,id:e.id,name:e.name,brand:e.brand,ean:e.ean,canonicalPackAmount:e.packAmount,unit:e.unit,metadataFingerprint:e.fingerprint,sourceUrl:e.sourceUrl,reviewCurrent:true,groupIds:[],rawPack:{weight:e.weight,weightUnit:e.weightUnit}});
       const concrete=products.filter(p=>p.source!=='sesum').map(p=>p.name.replace(/\b\d+\s*[x×]\s*/giu,' ').replace(/\b\d+(?:[.,]\d+)?\s*(?:kg|g|ml|cl|dl|l|stk)\b/giu,' ').replace(/\s+/g,' ').trim());

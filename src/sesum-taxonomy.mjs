@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {createIndexReader} from './shopping-library.mjs';
 import {odaProductIdFromUrl} from './oda-product-identity.mjs';
+import {sesumSourceFingerprint} from './sesum-prices.mjs';
 const hash=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const key=id=>'sesum-category:'+id;
 const native=id=>{if(! /^[1-9]\d*$/.test(String(id))||!Number.isSafeInteger(Number(id)))throw Error('Invalid native Sesum category ID.');return String(id);};
@@ -122,6 +123,7 @@ export function createSesumTaxonomy(state,{persist=null,save=()=>{},now=()=>new 
     // Normalize explicit SI units only; no inferred count, density or ca-weight.
     if(row&&!product.packKnown&&row.metadata.soldByWeight===false){const units={g:['kg',.001],kg:['kg',1],ml:['l',.001],l:['l',1],stk:['stk',1],piece:['stk',1],m:['m',1]},measure=units[String(row.metadata.weightUnit).toLowerCase()];if(measure&&typeof row.metadata.weight==='number'&&row.metadata.weight>0){product.pack=row.metadata.weight*measure[1];product.unit=measure[0];product.packKnown=true;product.packEvidence=`Sesums native faste pakning: ${row.metadata.weight} ${row.metadata.weightUnit}`;}}
     if(row?.metadata.soldByWeight===true&&receipt.grossUnitPrice>0&&receipt.unitPriceEvidence){product.quote.grossPackPrice=null;product.quote.grossUnitPrice=receipt.grossUnitPrice;product.quote.unit=receipt.unit;product.quote.directUnitVerified=true;product.quote.unitPriceEvidence=receipt.unitPriceEvidence;product.unit=receipt.unit;product.quote.reasons=product.quote.reasons.filter(r=>!['unknown-gross-package-price','missing-unit-price-evidence','unknown-direct-unit'].includes(r));}
+    if(row)product.catalogueSourceFingerprint=sesumSourceFingerprint({...row.metadata,store:receipt.store});
     out.products[productKey]=product;
     const quote=product.quote,price=current(quote.receiptAt,clock(),priceHorizonDays)&&!quote.reasons.length;
     const amount=product.pack,unitPrice=price&&product.packKnown&&typeof amount==='number'&&amount>0&&quote.grossPackPrice?quote.grossPackPrice/amount:price&&quote.directUnitVerified?quote.grossUnitPrice:null;
