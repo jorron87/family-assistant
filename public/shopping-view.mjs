@@ -86,6 +86,11 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     banner.hidden=!summary.dealCount;
     banner.replaceChildren();
     if(!summary.dealCount)return;
+    if(summary.priceAlert){
+      const a=summary.priceAlert;
+      banner.append(button(`${a.name} hos ${a.storeName} · ${a.diffPct} % under Oda · spar ${kr(a.saving)} på ${a.packs} pakker`,onOpen));
+      return;
+    }
     const lead=summary.excellentCount?`Svært bra pris på ${summary.top}`:`${summary.dealCount} ${summary.dealCount===1?'godt kjøp':'gode kjøp'} denne uka`;
     banner.append(button(`${lead} · spar ${kr(summary.potential)} · se Handel`,onOpen));
   }
@@ -352,13 +357,43 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
   function renderBuy(root) {
     const hero=el('section',undefined,'shop-hero');
     const potential=data.summary.potential;
-    if(data.deals.length||data.steady.length){
-      const parts=[data.deals.length?data.deals.length+' '+(data.deals.length===1?'tilbud':'tilbud'):null,data.steady.length?data.steady.length+' fast lav pris':null].filter(Boolean).join(' og ');
+    if(data.deals.length||data.steady.length||data.priceAlerts?.length){
+      const parts=[data.priceAlerts?.length?data.priceAlerts.length+' prisvarsel mot Oda':null,data.deals.length?data.deals.length+' '+(data.deals.length===1?'tilbud':'tilbud'):null,data.steady.length?data.steady.length+' fast lav pris':null].filter(Boolean).join(' og ');
       hero.append(el('p','Denne uka','shop-sub'),el('div',`${kr(potential)} å spare`,'shop-hero-number'),el('p',`${parts}${data.saved.year?` · ${kr(data.saved.year)} spart i år`:''}`,'shop-sub'));
     }else{
-      hero.append(el('div',data.monitoring?'Ingen kupp akkurat nå':'Tilbudsovervåkning er av','shop-hero-number small'),el('p',`${data.storesCheckedToday} butikker sjekket i dag${data.saved.year?` · ${kr(data.saved.year)} spart i år`:''}`,'shop-sub'));
+      hero.append(el('div',data.monitoring?(data.subcategoryComparisons?.some(r=>!r.oda||!r.store)?'Ingen bekreftede kupp ennå':'Ingen kupp akkurat nå'):'Tilbudsovervåkning er av','shop-hero-number small'),el('p',`${data.storesCheckedToday} butikker sjekket i dag${data.saved.year?` · ${kr(data.saved.year)} spart i år`:''}`,'shop-sub'));
+    }
+    if(data.subcategoryComparisons?.length){
+      const total=data.subcategoryComparisons.length,ready=data.subcategoryComparisons.filter(r=>r.oda&&r.store).length;
+      hero.append(el('p',ready+' av '+total+' sammenligninger har fersk pris både hos Oda og i butikk.','shop-sub'));
     }
     root.append(hero,priceCheck());
+    if(data.priceAlerts?.length){
+      const section=el('section',undefined,'shop-store');
+      section.append(el('h3','Verdt en handletur'));
+      for(const a of data.priceAlerts){
+        const card=el('article',undefined,'shop-deal');
+        card.append(el('h4',a.name+' hos '+a.storeName),el('p',a.productName+' · '+price(a.unitPrice)+'/'+a.unit),
+          el('p','Oda · '+a.oda.name+' · '+price(a.oda.unitPrice)+'/'+a.unit+' · '+a.diffPct+' % lavere pris i butikken','shop-sub'),
+          el('strong','Spar '+kr(a.saving)+' på '+a.packs+' × '+packLabel(a.packAmount,a.unit)),
+          el('p',(a.stockKnown?'':'Sjekk lageret hjemme. ')+'Kjedepris. Lokal beholdning kan variere.','shop-sub'));
+        section.append(card);
+      }
+      root.append(section);
+    }
+    if(data.subcategoryComparisons?.length){
+      root.append(details('subcategory-prices','Sammenlign grunnvarene med Oda',body=>{
+        for(const r of data.subcategoryComparisons){
+          const line=el('article',undefined,'shop-deal');
+          line.append(el('h4',r.name+' · '+r.categoryName));
+          for(const [label,q] of [['Oda',r.oda],['Butikk',r.store]]){
+            line.append(el('p',q?q.storeName+' · '+q.name+' · '+price(q.unitPrice)+'/'+r.unit+' · '+dayLabel(q.receiptAt.slice(0,10)):label+' · mangler fersk sammenlignbar pris','shop-sub'));
+          }
+          if(onExplore)line.append(button('Vis underkategorien',()=>onExplore('sesum-category:'+r.categoryId)));
+          body.append(line);
+        }
+      }));
+    }
     if(data.brandDeals?.length)root.append(brandDealsBlock());
     root.append(...storeSections(data.deals));
     if(data.steady.length){

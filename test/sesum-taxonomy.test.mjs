@@ -122,3 +122,41 @@ test('complete Sesum snapshots retire removed categories while partial receipts 
  f.taxonomy.receive({categories:[categories[0]],fetchedAt:at});assert.equal(f.taxonomy.status().categories,4);f.taxonomy.receive({categories:[categories[0]],completeTree:true,fetchedAt:at});assert.equal(f.taxonomy.status().categories,1);assert.equal(f.taxonomy.definition('284'),null);assert.equal(f.taxonomy.work().length,1);assert.equal(f.taxonomy.reader().group('sesum-category:284'),null);assert.ok(f.state.categories['284'].retiredAt);assert.ok(f.state.categoryPlacements['oda:ODA_NO:10']);
  assert.throws(()=>f.taxonomy.receive({categories:[categories[2]],completeTree:true,fetchedAt:at}),/Incomplete/);f.taxonomy.receive({categories,completeTree:true,fetchedAt:at});assert.equal(f.taxonomy.status().categories,4);assert.equal(f.taxonomy.work().length,0);
 });
+
+test('a household follows separate leaves without promoting their shared parent or a sibling',()=>{
+ const state={},families=[{familyId:'staple',name:'Two forms',requirementsFingerprint:'rules',products:[]}];
+ const taxonomy=createSesumTaxonomy(state,{now:()=>new Date(at),watchFamilies:()=>families});
+ taxonomy.receive({categories,fetchedAt:at});
+ const input={familyId:'staple',requirementsFingerprint:'rules',reviewed:true,evidence:'Two specific forms have been read against their distinct source category definitions.'};
+ const bind=id=>({id,fingerprint:taxonomy.definition(id).fingerprint});
+ state.categoryWatchLinks.staple={...input,categoryId:'283',categoryFingerprint:bind('283').fingerprint};
+ assert.equal(taxonomy.watchLinks(families)[0].status,'needs-category');
+ assert.throws(()=>taxonomy.linkWatch({...input,categories:[bind('283')]}),/leaf/);
+ taxonomy.linkWatch({...input,categories:[bind('284'),bind('2112')]});
+ assert.deepEqual(taxonomy.watchLinks(families)[0].categoryIds,['284','2112']);
+ assert.equal(taxonomy.watchLinks(families)[0].groupId,null);
+ const parent={raw:{categoryPathIds:['46','283']},sourceCategories:[{id:'284'}]};
+ assert.equal(taxonomy.sourceCategory(parent),'284');
+ parent.sourceCategories.push({id:'2112'});
+ assert.equal(taxonomy.sourceCategory(parent),'283');
+});
+
+test('a fresh, reviewed shop pack earns one stock-up alert against the chosen Oda product',async()=>{
+ const {subcategoryPrices}=await import('../src/shopping-subcategories.mjs');
+ const url='https://oda.com/no/products/10-synthetic/',cat={id:'284',name:'And',groupId:'sesum-category:284'};
+ const base={watchId:'duck',kind:'catalog',unit:'kg',packAmount:1,lastChecked:at};
+ const options={reader:{members:()=>[{productKey:'sesum:KIWI:9',product:{name:'Different variant',store:'KIWI',unit:'kg',available:true,packKnown:true,pack:1},price:{reasons:[],fresh:true,grossPackPrice:1,receiptAt:at}}]},
+  links:[{watchId:'duck',categories:[cat]}],families:[{familyId:'duck',unit:'kg',name:'Plain duck',products:[]}],
+  quotes:[{...base,name:'Usual Oda pack',sourceUrl:url,price:100,unitPrice:100,store:'ODA_NO',storeName:'Oda'},
+   {...base,name:'Reviewed shop pack',price:60,unitPrice:60,store:'KIWI',storeName:'KIWI'}],
+  stores:[{id:'shop',chainCode:'KIWI',name:'KIWI',minSavings:10}],choice:()=>10,skipAlerts:new Set(),
+  planning:()=>({need:{amount:12},stock:{amount:0,known:true},shelfMonths:3,maxPacks:10,referenceCap:90})};
+ const result=subcategoryPrices(options);
+ assert.equal(result.comparisons[0].store.unitPrice,1);
+ assert.equal(result.alerts[0].productName,'Reviewed shop pack');
+ assert.equal(result.alerts[0].packs,3);assert.equal(result.alerts[0].saving,90);
+ assert.deepEqual(subcategoryPrices({...options,choice:()=>11}).alerts,[]);
+ assert.deepEqual(subcategoryPrices({...options,planning:()=>({...options.planning(),stock:{amount:12,known:true}})}).alerts,[]);
+ assert.deepEqual(subcategoryPrices({...options,stores:[{...options.stores[0],minSavings:100}]}).alerts,[]);
+ assert.deepEqual(subcategoryPrices({...options,quotes:options.quotes.slice(0,1)}).alerts,[]);
+});

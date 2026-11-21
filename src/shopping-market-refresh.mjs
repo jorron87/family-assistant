@@ -14,7 +14,7 @@ export async function refreshReviewedMarket({shopping,kassal,watchId}) {
     if(!before||reviewKey(before)!==reviewKey(expected))return {watchId,deferred:true,reason:'review-changed-during-refresh'};
     if(!p||String(p.id)!==expected.id||p.store?.code!==expected.store)throw Error('Market source identity changed.');
     const current=typeof p.current_price==='object'?p.current_price?.price:p.current_price;
-    const receiptAt=(typeof p.current_price==='object'?p.current_price?.date:null)??p.price_history?.[0]?.date;
+    const receiptAt=(typeof p.current_price==='object'?p.current_price?.date:null)??p.price_history?.filter(h=>Number(h.price)===Number(current)&&Number.isFinite(Date.parse(h.date))).sort((a,b)=>Date.parse(b.date)-Date.parse(a.date))[0]?.date;
     // This is an exact-ID read, not a product search. Preserve the actual
     // discovery query rather than replacing it with an operation label.
     shopping.catalogObserve({watchId,products:[{id:p.id,store:p.store.code,name:p.name,ean:p.ean??null,brand:p.brand??null,ingredients:p.ingredients??null,description:p.description??null,weight:p.weight??null,weightUnit:p.weight_unit??null,sourceUrl:p.url??null,categories:p.category??[],image:p.image,...(Number(current)>0&&receiptAt?{currentPrice:Number(current),lastChecked:receiptAt}:{})}]});

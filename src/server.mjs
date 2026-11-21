@@ -70,7 +70,7 @@ const dispatchTick=()=>{if(!restarting&&!process.env.FAMILIEN_NO_DISPATCH)trackH
 const host = "127.0.0.1";
 const port = Number(process.env.FAMILIEN_PORT ?? 4318);
 oda=createOda({dataDir:DATA_DIR,shopping:store.shopping,redirectUrl:`http://127.0.0.1:${port}/api/shopping/oda/callback`});
-const shoppingMaintenance=createShoppingMaintenance({store,oda,kassal:{status:()=>kassal.status(),product:input=>kassal.product(input)},enabled:()=>!restarting&&!process.env.FAMILIEN_NO_DISPATCH&&readConfig('collector.json').dispatch?.enabled===true});
+const shoppingMaintenance=createShoppingMaintenance({store,oda,kassal:{status:()=>kassal.status(),product:input=>kassal.product(input)},enabled:()=>!restarting&&!process.env.FAMILIEN_NO_DISPATCH&&(readConfig('collector.json').dispatch?.enabled===true||assortmentConfig.enabled&&assortmentConfig.reviewedPriceRefreshEnabled===true)});
 const odaCart=createOdaCart({oda,shopping:store.shopping});
 const kassal=createKassal({dataDir:DATA_DIR});
 let sesumConfig={enabled:false};
@@ -120,9 +120,9 @@ async function handle(req, res) {
       if(path==='/api/shopping/assortment/status'&&method==='GET')return send(res,200,{...(store.shopping.taxonomy?{enabled:true,...store.shopping.taxonomy.status()}:store.shopping.assortment.status()),collection:assortmentCollection.status()});
       if(path==='/api/shopping/assortment/taxonomy-plan'&&method==='GET')return send(res,200,store.shopping.taxonomyBootstrapPlan());
       if(path==='/api/shopping/assortment/taxonomy-category-collect'&&method==='POST'){
-        const plan=store.shopping.taxonomyBootstrapPlan(),ids=[...new Set(plan.watchLinks.map(l=>l.categoryId).filter(Boolean))];
+        const plan=store.shopping.taxonomyBootstrapPlan(),ids=[...new Set(plan.watchLinks.flatMap(l=>l.categoryIds))];
         if(!ids.length)throw Error('Associate actual household categories before collecting their products.');
-        return send(res,200,{categories:ids.length,collection:assortmentCollection.bootstrap({categoryUrls:ids.map(id=>'https://www.sesum.no/kategori/'+id)})});
+        return send(res,200,{categories:ids.length,collection:assortmentCollection.bootstrap({leafSelection:true,categoryUrls:ids.map(id=>'https://www.sesum.no/kategori/'+id)})});
       }
       if(path==='/api/shopping/assortment/taxonomy-watch-link'&&method==='POST')return send(res,200,store.shopping.taxonomy.linkWatch(await json(req)));
       if(path==='/api/shopping/assortment/taxonomy-product'&&method==='GET')return send(res,200,store.shopping.taxonomy.dossier(new URL(req.url,'http://localhost').searchParams.get('productKey')));
@@ -580,7 +580,7 @@ async function handle(req, res) {
 }
 const mobileHandle=phoneHandler({odaCart,productImages,oda,store,root,send,body,json,onQueued:dispatchTick,weather,sessionMaintenance});
 setInterval(dispatchTick,5000).unref();
-setInterval(()=>{if(!restarting&&!process.env.FAMILIEN_NO_DISPATCH&&assortmentConfig.collectionEnabled&&(assortmentConfig.familySource==='sesum'||readConfig('collector.json').dispatch?.enabled===true))trackHostWork('assortment-collection',()=>assortmentCollection.step()).catch(()=>{});},5000).unref();
+setInterval(()=>{if(!restarting&&!process.env.FAMILIEN_NO_DISPATCH&&assortmentConfig.collectionEnabled&&(assortmentConfig.familySource==='sesum'||readConfig('collector.json').dispatch?.enabled===true))trackHostWork('assortment-collection',()=>{assortmentCollection.refreshSelected(()=>store.shopping.taxonomyBootstrapPlan().watchLinks.flatMap(l=>l.categoryIds));return assortmentCollection.step();}).catch(()=>{});},5000).unref();
 // Aktivitetskilder hentes direkte over HTTP med jevne mellomrom (kildene har egne intervaller i config/activity-feeds.json).
 if(!process.env.FAMILIEN_NO_DISPATCH&&!process.env.FAMILIEN_NO_FEED){setInterval(()=>feedRunner.run().catch(()=>{}),20*60000).unref();setTimeout(()=>feedRunner.run().catch(()=>{}),90000).unref();}
 if(!process.env.FAMILIEN_NO_DISPATCH){setInterval(()=>{if(!restarting)trackHostWork('resource-maintenance',()=>resources.tick()).catch(()=>{});},15000).unref();}

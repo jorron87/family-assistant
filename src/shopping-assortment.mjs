@@ -112,7 +112,8 @@ export function createShoppingAssortment(state,{save=()=>{},persist=null,now=()=
  function attachSesumCategories({productIds,category,observedAt}){
   if(!Array.isArray(productIds)||productIds.length>10000||!stamp(observedAt,clock()+60000)||!category||! /^[1-9]\d*$/.test(String(category.id)))throw Error('Invalid actual source-category membership receipt.');
   const changed=[],reused=[];for(const nativeId of new Set(productIds.map(id))){const key='sesum:CATALOGUE:'+nativeId,row=own(state.products,key);if(!row||!active(row))continue;
-   reused.push(nativeId);const previous=row.sourceCategories??[],receipt={id:String(category.id),name:category.name??null,url:category.url,observedAt};
+   if(config.reviewedPriceRefreshEnabled!==true||clock()-Date.parse(row.fetchedAt)<86400000)reused.push(nativeId);
+   const previous=row.sourceCategories??[],receipt={id:String(category.id),name:category.name??null,url:category.url,observedAt};
    if(previous.some(c=>c.id===receipt.id))continue;const next={...row,sourceCategories:[...previous,receipt]};state.products[key]=next;changed.push(next);
   }
   if(changed.length){state.revision++;if(persist)persist({revision:state.revision,products:changed});else save();}return reused;

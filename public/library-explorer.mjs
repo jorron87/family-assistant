@@ -132,10 +132,10 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     const hero=el('header',undefined,'lx-hero');
     if(onBack)hero.append(button('← Tilbake til Handel',onBack,'lx-back'));
     const title=el('div',undefined,'lx-hero-title');
-    title.append(el('span','Produktbiblioteket','lx-eyebrow'),el('h2',model.familySource==='sesum'?'Sesums kategorier. Priser på tvers av kjeder.':'Samme vare. Alle merker. Alle butikker.'));
+    title.append(el('span','Produktbiblioteket','lx-eyebrow'),el('h2',model.familySource==='sesum'?'Sammenlign priser i underkategoriene':'Samme vare. Alle merker. Alle butikker.'));
     const stats=el('div',undefined,'lx-stats');
     const brandCount=new Set(model.items.map(i=>i.brandLow).filter(Boolean)).size;
-    for(const [value,label] of [[model.familySource==='sesum'?model.families.length:model.families.filter(f=>f.items.length).length,model.familySource==='sesum'?'kategorier':'varefamilier'],[brandCount,'merker'],[model.stores.length,'kjeder'],[model.items.length,'varer']]){
+    for(const [value,label] of [[model.familySource==='sesum'?model.families.filter(f=>f.leaf).length:model.families.filter(f=>f.items.length).length,model.familySource==='sesum'?'kategorier':'varefamilier'],[brandCount,'merker'],[model.stores.length,'kjeder'],[model.items.length,'varer']]){
       const stat=el('div',undefined,'lx-stat');stat.append(el('strong',whole(value)),el('span',label));stats.append(stat);
     }
     title.append(stats);
@@ -143,7 +143,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     const input=el('input');input.type='search';input.placeholder='Søk etter vare, merke, varefamilie eller strekkode';input.setAttribute('aria-label','Søk i varebiblioteket');input.value=filters.q;
     let timer=null;input.oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>{filters.q=input.value;changed();},110);};
     refs.search=input;
-    const surprise=button('Overrask meg',()=>{const pool=model.families.filter(f=>f.items.length>=3&&new Set(f.items.flatMap(i=>i.posts.map(p=>p.store))).size>=3&&(!filters.food||model.shelves[f.shelf].food));if(pool.length){stack.length=0;showFamily(pool[Math.floor(Math.random()*pool.length)].index);}},'lx-surprise');
+    const surprise=button('Overrask meg',()=>{const pool=model.families.filter(f=>f.leaf!==false&&f.items.length>=3&&new Set(f.items.flatMap(i=>i.posts.map(p=>p.store))).size>=3&&(!filters.food||model.shelves[f.shelf].food));if(pool.length){stack.length=0;showFamily(pool[Math.floor(Math.random()*pool.length)].index);}},'lx-surprise');
     search.append(input,surprise);
     const discover=el('div',undefined,'lx-discover');discover.setAttribute('role','group');discover.setAttribute('aria-label','Snarveier');
     refs.discover=[];
@@ -370,7 +370,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     if(view==='map'){refs.count.textContent=whole(result.items.length)+' varer i utvalget';renderMap();return;}
     let featured=[];
     if(view==='families'){
-      const rows=familySummaries(model,result);
+      const rows=familySummaries(model,result).filter(row=>row.family.leaf!==false);
       sorted=sortFamilies(rows,familySort,result.terms);
       if(isPristine(filters))featured=featuredFamilies(rows);
       refs.count.textContent=whole(sorted.length)+(model.familySource==='sesum'?' kategorier':' varefamilier');

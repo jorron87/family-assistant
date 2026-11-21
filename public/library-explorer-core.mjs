@@ -80,6 +80,13 @@ export function applyFollowed(model,followed) {
   const byId=new Map(model.families.map(f=>[f.id,f]));
   for(const fam of followed){
     const groups=fam.groups.map(id=>byId.get(id)).filter(Boolean);
+    if(model.familySource==='sesum'){
+      for(const group of groups){
+        group.followed??=fam;
+        for(const item of group.items)item.familyLow+=' '+low(fam.name);
+      }
+      continue;
+    }
     if(groups.length===1){
       groups[0].followed=fam;
       for(const item of groups[0].items)if(!item.familyLow.includes(low(fam.name)))item.familyLow+=' '+low(fam.name);

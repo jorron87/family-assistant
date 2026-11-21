@@ -5,6 +5,7 @@
 import {refreshReviewedMarket} from './shopping-market-refresh.mjs';
 export function createShoppingMaintenance({store,oda,kassal,enabled,clock=Date.now}) {
   let running=false,retryAt=0,lastResult=null,lastError=null;
+  const referenceRetries=new Map();
   const marketPlan=()=>kassal?.status().configured?store.shopping.marketRefreshPlan():[];
   async function runMarket(watchIds=marketPlan().slice(0,3)){
     if(running)return {deferred:true,reason:'busy'};
@@ -17,11 +18,36 @@ export function createShoppingMaintenance({store,oda,kassal,enabled,clock=Date.n
   }
   async function tick(){
     if(running||!enabled()||clock()<retryAt||store.phone.list().some(x=>['queued','processing'].includes(x.status))||store.calendarActions().length||store.shopping.stockIntake?.work().some(x=>!x.retryAt||Date.parse(x.retryAt)<=clock()))return;
+    const shopping=store.shopping;
+    if(shopping.assortment?.config.reviewedPriceRefreshEnabled&&oda?.status?.().connected&&lastResult?.kind!=='oda-references'){
+      const due=shopping.taxonomy?.referenceRefreshPlan().filter(p=>(referenceRetries.get(p.id)??0)<=clock()).slice(0,10)??[];
+      if(due.length){
+        running=true;
+        try{
+          let pending=due;
+          const found=new Set();
+          for(let page=1;page<=5&&pending.length;page++){
+            const response=await oda.readCatalog({queries:[...new Set(pending.map(p=>p.query))],page});
+            const more=new Set(),products=new Map();
+            for(const row of response.result){
+              if(row.hasMore)more.add(row.query);
+              for(const product of row.products)if(pending.some(p=>p.id===product.id)){products.set(product.id,product);found.add(product.id);}
+            }
+            if(products.size)shopping.assortment.receiveOda({products:[...products.values()],observedAt:response.observedAt});
+            pending=pending.filter(p=>!found.has(p.id)&&more.has(p.query));
+          }
+          for(const p of due)if(!found.has(p.id))referenceRetries.set(p.id,clock()+86400000);
+          lastResult={kind:'oda-references',requested:due.length,found:found.size};lastError=null;
+        }catch{lastError='Oda reference refresh failed.';retryAt=clock()+30*60000;}
+        finally{running=false;}
+        return;
+      }
+    }
     const plans=oda?.status?.().connected===false?[]:store.shopping.odaRefreshPlan({automatic:true}).slice(0,10);
-    if(!plans.length){if(marketPlan().length)await runMarket();return;}
+    if(!plans.length||lastResult?.kind==='oda'){const ids=marketPlan();if(ids.length){await runMarket(ids.slice(0,3));return;}if(!plans.length){lastResult=null;return;}}
     running=true;
     try{
-      lastResult=await oda.refreshPrices({watchIds:plans.map(p=>p.watchId),maxPages:5});lastError=null;
+      lastResult={kind:'oda',...await oda.refreshPrices({watchIds:plans.map(p=>p.watchId),maxPages:5})};lastError=null;
       retryAt=clock()+(lastResult.deferred?5:1)*60000;
     }catch{lastError='Automatic reviewed Oda price refresh failed; existing price gaps remain.';retryAt=clock()+30*60000;}
     finally{running=false;}
