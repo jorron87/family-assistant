@@ -24,6 +24,14 @@ function comparableUnitPrice(row,unit,odaProducts){
  return count>0&&matching.length&&matching.every(alt=>alt.canonicalPackAmount===count)?quote.grossPackPrice/count:null;
 }
 
+// A barcode can point out a shelf pack to check. It never grants household
+// equivalence or a purchase quantity. Require a previously reviewed pack,
+// matching brand and measurement as well as the native category.
+function reviewedPackHint(p,products){
+ if(!p.packKnown||!(p.pack>0)||!p.brand||!/^\d{8,14}$/.test(String(p.ean??'')))return false;
+ return products.some(other=>other.reviewCurrent&&String(other.ean)===String(p.ean)&&other.brand?.trim().toLowerCase()===p.brand.trim().toLowerCase()&&other.unit===p.unit&&Math.abs(other.canonicalPackAmount-p.pack)<1e-6);
+}
+
 function currentOdaQuotes(list){
  const grouped=new Map();
  for(const row of list){
@@ -97,7 +105,7 @@ export function subcategoryPrices({reader,links,families,quotes,stores,choice,pl
     if(!(unitPrice>0))continue;
     const q={name:p.name,store:p.store,productId:productId(p),unitPrice,lastChecked:row.price.receiptAt,sourceUrl:p.sourceUrl,storeName:physical.get(p.store)?.name??'Oda'};
     if(p.store==='ODA_NO'&&approvedOda.has(productId(p))&&(!chosen||productId(p)===chosen))oda.push(q);
-    else if(physical.has(p.store))shops.push(q);
+    else if(physical.has(p.store))shops.push({...q,reviewedPackHint:reviewedPackHint(p,f.products)});
    }
    const only=link.categories.length===1;
    // Reviewed household quotes can also come from Kassalapp or Oda MCP.
@@ -125,7 +133,8 @@ export function subcategoryPrices({reader,links,families,quotes,stores,choice,pl
    if(skipAlerts.has(f.familyId))continue;
    // A shelf observation can flag a variant to check, even without reviewed
    // evidence that this pack can satisfy the household need.
-   if(lowest)categoryLows.push({cat,lowest,reviewed:approved.includes(lowest)});
+   const lead=cheapest([...approved,...shops.filter(p=>p.reviewedPackHint)]);
+   if(lead)categoryLows.push({cat,lowest:lead,reviewed:approved.includes(lead)});
    for(const p of approved)if(p.packAmount>0&&p.price>0&&p.unitPrice<baseline.unitPrice)alternatives.push({p,cat});
   }
   const baseline=cheapest(familyBaselines);

@@ -404,8 +404,8 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
         for(const r of data.subcategoryComparisons){
           const line=el('article',undefined,'shop-deal');
           line.append(el('h4',r.name+' · '+r.categoryName));
-          for(const [label,q] of [['Oda',r.oda],['Butikk',r.store]]){
-            line.append(el('p',q?q.storeName+' · '+q.name+' · '+price(q.unitPrice)+'/'+r.unit+' · '+dayLabel(q.receiptAt.slice(0,10)):label+' · mangler fersk sammenlignbar pris','shop-sub'));
+          for(const [label,q] of [['Oda',r.oda],['Lavest i underkategorien',r.store]]){
+            line.append(el('p',q?(q===r.store?'Lavest i underkategorien · ':'')+q.storeName+' · '+q.name+' · '+price(q.unitPrice)+'/'+r.unit+' · '+dayLabel(q.receiptAt.slice(0,10)):label+' · mangler fersk sammenlignbar pris','shop-sub'));
           }
           if(r.differencePct!=null)line.append(el('p',r.differencePct===0?'Samme enhetspris':Math.abs(r.differencePct)+' % '+(r.differencePct>0?'lavere':'høyere')+' pris i butikk','shop-sub'));
           if(onExplore)line.append(button('Vis underkategorien',()=>onExplore('sesum-category:'+r.categoryId)));

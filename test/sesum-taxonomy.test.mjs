@@ -160,8 +160,11 @@ test('a fresh, reviewed shop pack earns one stock-up alert against the chosen Od
  assert.deepEqual(subcategoryPrices({...options,stores:[{...options.stores[0],minSavings:100}]}).alerts,[]);
  const unreviewed=subcategoryPrices({...options,quotes:options.quotes.slice(0,1)});
  assert.deepEqual(unreviewed.alerts,[]);
- assert.equal(unreviewed.signals[0].diffPct,99);
- assert.equal(unreviewed.signals[0].store.name,'Different variant');
+ assert.deepEqual(unreviewed.signals,[],'a different product on the same shelf cannot trigger a dashboard alert');
+ const corroborated={...options,quotes:options.quotes.slice(0,1),reader:{members:()=>options.reader.members().map(r=>({...r,product:{...r.product,ean:'1234567890123',brand:'Brand'}}))},families:[{...options.families[0],products:[{ean:'1234567890123',reviewCurrent:true,brand:'Brand',unit:'kg',canonicalPackAmount:1}]}]};
+ assert.equal(subcategoryPrices(corroborated).signals[0].diffPct,99);
+ assert.deepEqual(subcategoryPrices(corroborated).alerts,[]);
+ assert.deepEqual(subcategoryPrices({...corroborated,excluded:()=>true}).signals,[]);
  assert.deepEqual(subcategoryPrices({...options,quotes:options.quotes.slice(0,1),excluded:()=>true}).signals,[]);
  const alternative={...options.quotes[1],store:'EXTRA',name:'Reviewed alternative',price:65,unitPrice:65};
  const otherShop={id:'extra',chainCode:'EXTRA',name:'Extra',minSavings:5};
