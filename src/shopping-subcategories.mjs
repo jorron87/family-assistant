@@ -108,9 +108,18 @@ function purchaseEstimate(product,oda,plan,at){
   offer:{packAmount:product.packAmount,price:product.price,bundlePacks:product.bundlePacks??1},caps:[maxPacks,product.maxPacks],unitSaving:oda.unitPrice-product.unitPrice});
  if(covered)return {status:'covered',packs:0,months:fullMonths};
  if(!recommended)return {status:'limit'};
- const {packs,cost}=recommended,amount=packs*product.packAmount;
- // Compare the entire checkout cost with the quantity the household can use.
- const usable=need.amount==null?amount:Math.min(amount,Math.max(0,need.amount*fullMonths/12-(stock.amount??0)));
+ let {packs,cost}=recommended,amount=packs*product.packAmount;
+ // A normal pack bought for the next trip may last beyond the planning
+ // window. Only the actual shelf-life limit makes its remainder unusable.
+ const capacity=need.amount==null?amount:Math.max(0,need.amount*Math.min(12,shelfMonths)/12-(stock.amount??0));
+ const bundle=product.bundlePacks??1,smaller=packs-bundle;
+ if(amount>capacity&&smaller>0){
+  const smallerAmount=smaller*product.packAmount,smallerCost=rounded(smaller*product.price);
+  if(Math.min(reference,oda.unitPrice)*(capacity-Math.min(capacity,smallerAmount))<=cost-smallerCost){
+   packs=smaller;cost=smallerCost;amount=smallerAmount;
+  }
+ }
+ const usable=Math.min(amount,capacity);
  const odaSaving=rounded(oda.unitPrice*usable-cost);
  if(odaSaving<=0)return {status:'too-large'};
  return {status:'priced',packs,amount:rounded(amount),months:fullMonths,cost,odaSaving,

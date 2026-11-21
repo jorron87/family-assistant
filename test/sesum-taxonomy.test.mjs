@@ -178,6 +178,11 @@ test('a fresh, reviewed shop pack earns one stock-up alert against the chosen Od
  assert.equal(kiwi.signals[0].median,null);
  assert.deepEqual(kiwi.alerts,[]);
  assert.equal(kiwi.storeFindings[0].totals.count,0);
+ const mincePlan={...shelf,planning:()=>({...options.planning(),need:{amount:24.56},maxPacks:null,shelfMonths:4,referenceCap:162.25})};
+ const fourMonths=subcategoryPrices(mincePlan).storeFindings[0].families[0].items[0].estimate;
+ assert.equal(fourMonths.packs,20);assert.equal(fourMonths.odaSaving,500);
+ const smallDiscount={...mincePlan,planning:()=>({...mincePlan.planning(),need:{amount:2.4},shelfMonths:12}),reader:{members:()=>[shelfRow(8,'KIWI',157)]}};
+ assert.equal(subcategoryPrices(smallDiscount).storeFindings[0].families[0].items[0].estimate.packs,1,'a long-lived pack can be used after the next shopping trip');
  const evidence='abc',withPrior={...shelf,families:[{...shelf.families[0],products:[{productKey:lead.productKey,reviewCurrent:true,unit:'kg',canonicalPackAmount:0.4,sourceFingerprint:evidence}]}]};
  assert.equal(subcategoryPrices(withPrior).storeFindings[0].totals.count,0);
  const exact=subcategoryPrices({...withPrior,reader:{members:()=>[{...lead,product:{...lead.product,catalogueSourceFingerprint:evidence}}]}}).storeFindings[0];
