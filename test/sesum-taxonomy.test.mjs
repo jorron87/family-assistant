@@ -196,6 +196,10 @@ test('a fresh, reviewed shop pack earns one stock-up alert against the chosen Od
  netOptions.families[0].products[0].productKey=householdSku.productKey;
  assert.equal(subcategoryPrices({...netOptions,nativeEntries:[householdSku]}).comparisons[0].oda.unitPrice,58.44,'the household net-pack review outranks a drained library membership');
  assert.equal(subcategoryPrices({...netOptions,nativeEntries:[{...householdSku,status:'pending'}]}).comparisons[0].oda,null);
+ netOptions.families[0].products[0].canonicalPackAmount=.681;
+ const pending={...householdSku,status:'pending'};
+ assert.equal(subcategoryPrices({...netOptions,nativeEntries:[pending],retainReviewed:()=>true}).comparisons[0].oda.unitPrice,58.44,'keep a current reviewed library pack when the native pending row has compatible facts');
+ assert.equal(subcategoryPrices({...netOptions,nativeEntries:[{...pending,reviewHold:{}}],retainReviewed:()=>true}).comparisons[0].oda,null);
  const newer=new Date(Date.parse(at)+60000).toISOString();
  assert.equal(subcategoryPrices({...multi,reader:{members:k=>k===cat.groupId?[odaRow(10,110,newer)]:[]}}).comparisons[0].oda.unitPrice,110);
  assert.equal(subcategoryPrices({...multi,reader:{members:k=>k===cat.groupId?[odaRow(10,110)]:[]}}).comparisons[0].oda,null);

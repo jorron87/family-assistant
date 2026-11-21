@@ -755,7 +755,10 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const draft=odaDraft(a,today,at,found);
     const brandDeals=draft.items.flatMap(x=>{const place=x.places?.find(p=>p.sameBrand);return place?[{watchId:x.watchId,name:x.name,currentName:x.productName,currentUnit:x.unitPrice,unit:x.unit,place}]:[];}).sort((x,y)=>y.place.dropPct-x.place.dropPct);
     const families=taxonomy?sesumFamilies():[];
-    const comparisons=taxonomy?subcategoryPrices({reader:taxonomy.reader(),families,links:taxonomy.watchLinks(families),quotes:found.prices.quotes,nativeEntries:found.prices.reviewedNative,stores:s.settings.stores,choice:id=>s.odaChoices[id],excluded:(id,p,k)=>scopedProductHeld(found.prices[priceContextExclusions](s.watches[id]),p,k)||found.prices.excluded.has(id+'|'+k),skipAlerts:new Set(main.map(d=>d.watchId)),planning:id=>{
+    const comparisons=taxonomy?subcategoryPrices({reader:taxonomy.reader(),families,links:taxonomy.watchLinks(families),quotes:found.prices.quotes,nativeEntries:found.prices.reviewedNative,retainReviewed:(entry,key)=>{
+      const original=reviewedReader()?.product(key);
+      return !!original&&!nativeHoldsMember(original,key,entry.watchId,[entry]);
+    },stores:s.settings.stores,choice:id=>s.odaChoices[id],excluded:(id,p,k)=>scopedProductHeld(found.prices[priceContextExclusions](s.watches[id]),p,k)||found.prices.excluded.has(id+'|'+k),skipAlerts:new Set(main.map(d=>d.watchId)),planning:id=>{
       const w=s.watches[id],need=needOf(w,a),paid=needRows(w,a).filter(p=>p.baselineAmount>0).map(p=>p.baselineTotal/p.baselineAmount);
       const limits=[...paid,w.marketCalibration?.referencePrice,w.priceGuide?.referencePrice,freshPrice(w.referenceCeiling?.checkedAt,at)?w.referenceCeiling.price:null].filter(n=>n>0);
       return {need,stock:estimateStock(w,rateOf(need),at),shelfMonths:shelfLifeMonths(w),excellentPrice:w.excellentPrice,maxPacks:w.maxPacks,minDiscountPct:w.minDiscountPct,referenceFor:p=>comparisonReference(w,a,p,found.prices),referenceCap:limits.length?Math.min(...limits):null};
