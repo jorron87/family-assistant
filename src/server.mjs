@@ -8,6 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createStore, DATA_DIR } from "./store.mjs";
 import { refreshWaste } from './waste.mjs';
+import {createFinance} from './finance.mjs';
 import {phoneHandler} from './phone-server.mjs';
 import {createOdaCart} from './shopping-oda-cart.mjs';
 import {createImageFetcher,createSourceFetcher,flyerPage} from './shopping-source.mjs';
@@ -578,7 +579,11 @@ async function handle(req, res) {
     return send(res, status, { error: error.message });
   }
 }
-const mobileHandle=phoneHandler({odaCart,productImages,oda,store,root,send,body,json,onQueued:dispatchTick,weather,sessionMaintenance});
+const finance=createFinance({dataDir:DATA_DIR});
+if (!process.env.FAMILIEN_NO_DISPATCH) setInterval(()=>{
+  if (!restarting) trackHostWork('finance-sync',()=>finance.tick()).catch(()=>console.error('Kunne ikke lese økonomioppsettet.'));
+},60000).unref();
+const mobileHandle=phoneHandler({finance,odaCart,productImages,oda,store,root,send,body,json,onQueued:dispatchTick,weather,sessionMaintenance});
 setInterval(dispatchTick,5000).unref();
 setInterval(()=>{if(!restarting&&!process.env.FAMILIEN_NO_DISPATCH&&assortmentConfig.collectionEnabled&&(assortmentConfig.familySource==='sesum'||readConfig('collector.json').dispatch?.enabled===true))trackHostWork('assortment-collection',()=>{assortmentCollection.refreshSelected(()=>store.shopping.taxonomyBootstrapPlan().watchLinks.flatMap(l=>l.categoryIds));return assortmentCollection.step();}).catch(()=>{});},5000).unref();
 // Aktivitetskilder hentes direkte over HTTP med jevne mellomrom (kildene har egne intervaller i config/activity-feeds.json).

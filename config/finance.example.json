@@ -1,0 +1,6 @@
+{
+  "enabled": false,
+  "redirectUrl": "https://family.example/send/finance/",
+  "monthlySavingsNok": null,
+  "owners": []
+}

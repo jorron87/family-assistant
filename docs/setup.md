@@ -111,3 +111,14 @@ Large catalogue observations and semantic reviews are stored in a separate encry
 Start the bounded household category plan with shopping-taxonomy and shopping-taxonomy-bootstrap; the durable source whitelist automatically pauses after its selected receipts. This never resumes unrelated source jobs or starts an agent. Native IDs/names/hierarchy are preserved; household stock, need and exact variant records remain intact.
 
 Starting full collection is explicit. shopping-assortment-start accepts a UTF-8 JSON file with validationReads:1 through 8 for a bounded live validation; its durable budget cannot turn into a full sweep on restart. Pause collection with shopping-assortment-pause. Resume an existing sweep only when the owner has authorized it. Enabling this config never enables an agent runtime, changes models/permissions or bypasses the dispatch pause.
+
+## Automatisk økonomiinnlesing fra DNB
+
+Åpne **Profiler → Familieøkonomi** på hver voksens egen, parede telefon. Noter enhets-ID-en der. Tilgangen følger den fysisk godkjente nettleseren. Bruk skjermlås og en privat telefon. Enhets-ID er ikke en innloggingskode.
+
+1. Hver kontoeier registrerer sin egen produksjonsapplikasjon hos [Enable Banking](https://enablebanking.com/docs/api/linked-accounts) for privat bruk. Registrer mobilnettstedets eksakte HTTPS-adresse med stien `/send/finance/` som returadresse, inkludert siste skråstrek. Velg kontoinformasjon (AIS) og knytt egne DNB-kontoer til applikasjonen. Kontoeieren godkjenner dette selv hos banken.
+2. Oppbevar den private RSA-nøkkelen i en tilgangsbegrenset mappe utenfor Git og nettsidens mapper. Bare eieren og tjenestens Windows-konto trenger lesetilgang. På vertsmaskinen, kjør `npm run finance:setup` én gang per voksen. Oppgi enhets-ID, applikasjons-ID og filstien til nøkkelen lokalt. Veiviseren oppdaterer den ignorerte finance.json. Konfigurasjonen leses på nytt uten omstart.
+3. Åpne økonomisiden igjen på samme telefon. Velg tilkobling, bekreft deling med de andre godkjente voksne og fullfør bankens samtykke i samme nettleser. Gjenta på den andre telefonen. Sjekk et utvalg faktiske bokførte kjøp og saldo på begge kontoer. Kontroller etter neste bokføring at den dukker opp uten filimport.
+4. Åpne en kjent utgående Nordnet-overføring og bekreft mottakeren. For denne kontoen regnes betalinger til samme mottakerkonto som sparing. Hvis bankdata mangler mottakerkonto, støttes eksakt betalingsmerkelapp som inneholder «Nordnet». En endret merkelapp trenger ny bekreftelse. Et valgfritt tall i `monthlySavingsNok` i lokal konfigurasjon viser felles månedlig mål.
+
+Ved ny telefon eller ny paring, verifiser den nye telefonens ID fysisk og kjør veiviseren igjen med samme stabile voksen-ID. Fjern en voksen fra lokal konfigurasjon for å avslutte enhetens tilgang. Trekk tilbake banksamtykket hos leverandøren/banken ved avslutning.
