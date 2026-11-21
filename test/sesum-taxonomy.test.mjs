@@ -206,6 +206,9 @@ test('a fresh, reviewed shop pack earns one stock-up alert against the chosen Od
  const peerRows=[shelfRow(2,'A',175),shelfRow(3,'A',300),shelfRow(4,'B',150),shelfRow(5,'C',200)];
  const market={...shelf,quotes:[],stores:[...options.stores,...['A','B','C'].map(code=>({id:code,chainCode:code,name:code}))],reader:{members:()=>[lead,...peerRows]}};
  const marketSignal=subcategoryPrices(market).signals[0];
+ const medianStore=subcategoryPrices(market).storeFindings.find(s=>s.storeId==='shop');
+ assert.deepEqual(medianStore.medianFindings,[marketSignal]);
+ assert.equal(medianStore.totals.count,0);
  assert.equal(marketSignal.oda,null);
  assert.equal(marketSignal.referenceBasis,'chain-median');
  assert.deepEqual(marketSignal.median,{unitPrice:175,chains:3});

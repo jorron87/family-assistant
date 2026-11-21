@@ -126,11 +126,14 @@ function purchaseEstimate(product,oda,plan,at){
   saving:rounded(reference*usable-cost),checkStock:!stock.known||stock.needsCheck===true};
 }
 
+function findingsForStore(groups,store){
+ if(!groups.has(store.id))groups.set(store.id,{storeId:store.id,storeName:store.name.replace(/\s*[–-]\s*Kassal.*$/i,''),minSavings:store.minSavings??0,families:new Map(),medianFindings:[]});
+ return groups.get(store.id);
+}
 function addStoreFinding(groups,store,family,oda,product,identity,reviewed,plan,at){
  const unitPrice=rounded(product.unitPrice),difference=rounded(oda.unitPrice)-unitPrice;
  if(!(unitPrice>0&&difference>0))return;
- if(!groups.has(store.id))groups.set(store.id,{storeId:store.id,storeName:store.name.replace(/\s*[–-]\s*Kassal.*$/i,''),minSavings:store.minSavings??0,families:new Map()});
- const families=groups.get(store.id).families;
+ const {families}=findingsForStore(groups,store);
  if(!families.has(family.familyId))families.set(family.familyId,{watchId:family.familyId,name:family.name,unit:family.unit,oda:display(oda),items:new Map()});
  const items=families.get(family.familyId).items;
  const pack=product.price>0&&product.packAmount>0?{amount:product.packAmount,price:rounded(product.price),saving:rounded(oda.unitPrice*product.packAmount-product.price)}:null;
@@ -138,7 +141,7 @@ function addStoreFinding(groups,store,family,oda,product,identity,reviewed,plan,
   terms:product.kind==='offer'?[product.memberOnly?'Medlemspris':null,product.bundlePacks>1?'Krever '+product.bundlePacks+' pakker':null,product.maxPacks?'Maks '+product.maxPacks+' pakker':null,product.conditions,'Gyldig til '+product.validTo].filter(Boolean):[]});
 }
 
-function storeTrip({storeId,storeName,minSavings,families}){
+function storeTrip({storeId,storeName,minSavings,families,medianFindings}){
  const totals={cost:0,odaSaving:0,saving:0,count:0},checkStock={...totals};
  const rows=[...families.values()].map(f=>{
   const items=[...f.items.values()].sort((a,b)=>a.unitPrice-b.unitPrice||Number(b.reviewed)-Number(a.reviewed)||a.name.localeCompare(b.name,'nb'));
@@ -150,7 +153,7 @@ function storeTrip({storeId,storeName,minSavings,families}){
   }
   return {...f,items,plannedIdentity:planned?.identity??null};
  });
- return {storeId,storeName,minSavings,totals,checkStock,worthTrip:totals.saving>0&&totals.saving>=minSavings,families:rows.sort((a,b)=>a.name.localeCompare(b.name,'nb'))};
+ return {storeId,storeName,minSavings,totals,checkStock,medianFindings,worthTrip:totals.saving>0&&totals.saving>=minSavings,families:rows.sort((a,b)=>a.name.localeCompare(b.name,'nb'))};
 }
 
 // A category price describes what the store sells. Only a separately reviewed
@@ -268,6 +271,7 @@ export function subcategoryPrices({reader,links,families,quotes,nativeEntries=[]
    if(diff<Math.max(20,minDiscountPct??0))continue;
    const pack=lowest.packAmount>0&&lowest.price>0?{amount:lowest.packAmount,price:rounded(lowest.price),difference:rounded(reference.unitPrice*lowest.packAmount-lowest.price)}:null;
    signals.push({watchId:f.familyId,categoryId:cat.id,categoryName:cat.name,unit:f.unit,reviewed,store:display(lowest),oda:display(baseline),pack,referenceBasis:useMedian?'chain-median':'oda',median:median?{...median,unitPrice:rounded(median.unitPrice)}:null,diffPct:rounded(diff)});
+   if(!baseline)findingsForStore(storeGroups,physical.get(lowest.store)).medianFindings.push(signals.at(-1));
   }
   for(const {p,cat} of alternatives){
    const reference=Math.min(baseline.unitPrice,referenceCap??Infinity,referenceFor?.(p)??Infinity);
