@@ -56,6 +56,36 @@ export function splitCheaper(rows,saving=row=>row.savings?.annual??0) {
   return {cheaper:rows.filter(x=>x.places?.length).sort((a,b)=>saving(b)-saving(a)),rest:rows.filter(x=>!x.places?.length)};
 }
 
+// One store visit covers each household need and each physical product once.
+// Give the reviewed plan priority when two needs point to the same pack.
+export function storeBasket(store) {
+  const candidates=[];
+  for(const f of store.families){
+    const p=f.items.find(i=>i.identity===f.plannedIdentity)??f.items.find(i=>i.estimate.status==='priced')??f.items.find(i=>i.estimate.status==='unknown-pack');
+    if(!p)continue;
+    candidates.push({...p,watchId:f.watchId,unit:f.unit,reference:'Oda',referenceUnit:f.oda.unitPrice,
+      referenceSaving:p.estimate.odaSaving,confirmed:p.reviewed&&p.estimate.status==='priced'&&!p.estimate.checkStock});
+  }
+  for(const s of store.medianFindings){
+    if(!['priced','unknown-pack'].includes(s.estimate.status))continue;
+    candidates.push({...s.store,identity:s.identity,watchId:s.watchId,unit:s.unit,pack:s.pack,estimate:s.estimate,terms:[],
+      categories:[{id:s.categoryId,name:s.categoryName}],reference:'Median',referenceUnit:s.median.unitPrice,
+      referenceSaving:s.estimate.referenceSaving,reviewed:s.reviewed,confirmed:false});
+  }
+  candidates.sort((a,b)=>Number(b.confirmed)-Number(a.confirmed)||Number(b.estimate.status==='priced')-Number(a.estimate.status==='priced')||
+    Number(b.reviewed)-Number(a.reviewed)||(b.estimate.saving??0)-(a.estimate.saving??0));
+  const needs=new Set(),products=new Set(),rows=[];
+  let saving=0,confirmedTripSaving=0;
+  for(const row of candidates){
+    if(needs.has(row.watchId)||products.has(row.identity))continue;
+    needs.add(row.watchId);products.add(row.identity);rows.push(row);
+    saving+=row.referenceSaving??0;
+    if(row.confirmed)confirmedTripSaving+=row.estimate.saving;
+  }
+  rows.sort((a,b)=>a.name.localeCompare(b.name,'nb'));
+  return {rows,saving,confirmedTripSaving};
+}
+
 export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=null,base='/api/shopping',compact=false,initialFindingsStore=null}) {
   const draftEdits=new Map(),cartState=new Map(),cartIds=new Map();let cartBusy=false;
   const check={itemId:null,query:'',price:'',size:null,custom:'',customUnit:null};
@@ -64,7 +94,6 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
   const stockDraft={text:'',location:'',mode:'minimum',files:[],intakeId:null,clientId:crypto.randomUUID()},stockPreviews=new Map();let stockSending=false;
   let dirty=false,data=null,tab='buy',search='',location='all',stale=false,odaQuery='',toastTimer=null;
   const chosen=new Map(),openSections=new Set(['draft-elsewhere']);
-  const tripExamples=new Map();
   let selectedFindingsStore=initialFindingsStore||null;
   if(initialFindingsStore!==null)tab='findings';
   panel.classList.add('shop');
@@ -370,48 +399,39 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     root.append(chips(stores.map(s=>[s.storeId,s.storeName]),selectedFindingsStore,id=>{selectedFindingsStore=id;render(true);},'Velg butikk'));
     if(!store){root.append(el('p','Ingen ferske prisfunn for den valgte butikken.'));return;}
     const section=el('section',undefined,'shop-store shop-findings');
+    const {rows,saving,confirmedTripSaving}=storeBasket(store);
     const ready=el('ul'),check=el('ul');
-    let saving=0,selectedCount=0;
-    function addRow(list,{name,current,reference,terms=[],quantity='',toggle=null}){
-      const row=el('li'),item=el(toggle?'label':'span',undefined,'finding-product');
-      if(toggle){
-        const input=el('input');input.type='checkbox';input.checked=toggle.checked;
-        input.setAttribute('aria-label','Ta med '+name+' i beregningen');
-        input.onchange=()=>toggle.change(input.checked);
-        item.append(input);
-      }
-      item.append(el('span',quantity+name));
+    const references=[...new Set(rows.filter(r=>r.estimate.packs).map(r=>r.reference==='Median'?'kjedemedianen':'Oda'))];
+    const header=el('header',undefined,'finding-total');
+    header.append(el('h3',store.storeName+' · '+price(saving)+' mulig å spare'));
+    if(references.length){
+      const trip=confirmedTripSaving>0&&confirmedTripSaving>=store.minSavings?'Egen tur lønner seg':'Under turgrensen';
+      header.append(el('span','Mot '+references.join(' / ')+'. '+trip+' · '+price(Math.max(0,confirmedTripSaving))+' avklart / '+price(store.minSavings)+' turgrense','shop-sub'));
+    }
+    section.append(header);
+    for(const p of rows){
+      const row=el('li'),categories=p.categories;
+      const quantity=p.estimate.packs?p.estimate.packs+' × ':'Antall ukjent · ';
+      const multiple=categories.length>1&&onExplore;
+      const item=multiple?el('details'):row;
+      const link=multiple?el('summary'):onExplore&&categories.length?button('',()=>onExplore('sesum-category:'+categories[0].id)):el('div');
+      link.className='finding-link';
+      link.append(el('span',quantity+p.name,'finding-product'));
       const prices=el('span',undefined,'finding-prices');
-      prices.append(el('strong',current),el('span',' ('+reference+')','finding-reference'));
-      row.append(item,prices);
-      if(terms.length)row.append(el('small',terms.join(' · '),'finding-terms'));
-      list.append(row);
-    }
-    for(const family of store.families){
-      const p=family.items.find(i=>i.identity===family.plannedIdentity)??family.items.find(i=>i.estimate.status==='priced')??family.items.find(i=>i.estimate.status==='unknown-pack');
-      if(!p)continue;
-      if(!p.pack){
-        addRow(check,{name:p.name,current:price(p.unitPrice)+'/'+family.unit,reference:'Oda '+price(family.oda.unitPrice)+'/'+family.unit,terms:p.terms});
-        continue;
+      const current=p.pack?price(p.pack.price)+' / '+packLabel(p.pack.amount,p.unit):price(p.unitPrice)+'/'+p.unit;
+      const reference=p.pack?price(p.referenceUnit*p.pack.amount):price(p.referenceUnit)+'/'+p.unit;
+      prices.append(el('strong',current),el('span',' ('+p.reference+' '+reference+')','finding-reference'));
+      link.append(prices);item.append(link);
+      if(multiple){
+        for(const cat of categories)item.append(button(cat.name,()=>onExplore('sesum-category:'+cat.id),'shop-product-link'));
+        row.append(item);
       }
-      const confirmed=p.reviewed&&!p.estimate.checkStock;
-      const key=store.storeId+'|'+family.watchId;
-      const checked=tripExamples.has(key)?tripExamples.get(key)===p.identity:confirmed;
-      if(checked){saving+=p.estimate.odaSaving;selectedCount++;}
-      addRow(confirmed?ready:check,{name:p.name,quantity:checked?p.estimate.packs+' × ':'',
-        current:price(p.pack.price)+' / '+packLabel(p.pack.amount,family.unit),
-        reference:'Oda '+price(p.pack.price+p.pack.saving),terms:p.terms,
-        toggle:{checked,change:on=>{tripExamples.set(key,on?p.identity:null);render(true);}}
-      });
-    }
-    for(const signal of store.medianFindings??[]){
-      addRow(check,{name:signal.store.name,current:price(signal.store.unitPrice)+'/'+signal.unit,
-        reference:'Median '+price(signal.median.unitPrice)+'/'+signal.unit});
+      if(p.terms.length)row.append(el('small',p.terms.join(' · '),'finding-terms'));
+      (p.confirmed?ready:check).append(row);
     }
     if(ready.childElementCount)section.append(ready);
-    if(check.childElementCount)section.append(el('h4','Sjekk variant eller lager'),check);
-    if(!ready.childElementCount&&!check.childElementCount)section.append(el('p','Ingen varer å kjøpe nå.'));
-    if(selectedCount)section.append(el('p','Valgte varer · '+price(saving)+' spart mot Oda','finding-total'));
+    if(check.childElementCount)section.append(el('h4','Anslag · sjekk variant eller lager'),check);
+    if(!rows.length)section.append(el('p','Ingen varer å kjøpe nå.'));
     root.append(section);
   }
   function renderBuy(root) {

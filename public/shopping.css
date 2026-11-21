@@ -24,14 +24,17 @@
 .shop-findings ul { list-style: none; padding: 0; margin: 0; }
 .shop-findings h4 { margin: 1em 0 .35em; color: var(--s-muted); font-size: .9em; }
 .shop-findings h4:first-child { margin-top: 0; }
-.shop-findings li { display: flex; flex-wrap: wrap; align-items: baseline; gap: .1em 1em; padding: .55em 0; }
+.shop-findings li { padding: 0; }
 .shop-findings li + li { border-top: 1px solid var(--s-line); }
-.finding-product { flex: 1 1 15em; display: flex; gap: .55em; align-items: baseline; }
-.finding-product input { flex: none; margin: 0; accent-color: var(--s-green); }
+.shop .finding-link { display: flex; flex-wrap: wrap; align-items: baseline; gap: .15em 1em; width: 100%; padding: .65em 0; margin: 0; background: none; color: inherit; border: 0; box-shadow: none; font: inherit; text-align: left; cursor: pointer; }
+.finding-product { flex: 1 1 15em; overflow-wrap: anywhere; text-decoration: underline; text-decoration-color: var(--s-line); text-underline-offset: .18em; }
+.finding-link:hover .finding-product, .finding-link:focus-visible .finding-product { text-decoration-color: currentColor; }
+.shop .finding-link:focus-visible { outline: 2px solid var(--s-green); outline-offset: 2px; }
 .finding-prices { font-variant-numeric: tabular-nums; }
 .finding-reference, .finding-terms { color: var(--s-muted); font-size: .9em; }
-.finding-terms { flex-basis: 100%; }
-.shop-findings .finding-total { margin-top: .75em; padding-top: .65em; border-top: 1px solid var(--s-line); font-weight: 600; }
+.finding-terms { display: block; padding-bottom: .5em; }
+.shop-findings .finding-total { margin-bottom: .5em; padding-bottom: .65em; border-bottom: 1px solid var(--s-line); }
+.shop-findings .finding-total h3 { margin-bottom: .15em; }
 .shop-deal { padding: 16px 0; border-top: 1px solid var(--s-line); }
 .shop-deal h4 { font-size: 19px; font-weight: 600; margin: 8px 0 2px; }
 .shop-store-head + .shop-deal { border-top: 0; padding-top: 4px; }
