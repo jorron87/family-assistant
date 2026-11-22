@@ -34,7 +34,7 @@ test('only evidenced old actual receipts park agent search; unknown or missing p
 });
 
 test('continuation rejects changed search ordering and bad bounds instead of silently skipping results',()=>{
- const index=indexOf([product(1,{name:'Coffee Z'}),product(2,{name:'Coffee A',quote:{grossPackPrice:20,receiptAt:new Date(at-47*3600000).toISOString(),reasons:[]}})]),factory=createIndexReader(index),first=factory(at).searchPage('coffee',{limit:1});
+ const index=indexOf([product(1,{name:'Coffee Z'}),product(2,{name:'Coffee A',quote:{grossPackPrice:20,receiptAt:new Date(at-(21*24-1)*3600000).toISOString(),reasons:[]}})]),factory=createIndexReader(index),first=factory(at).searchPage('coffee',{limit:1});
  assert.equal(first.items[0].key,keyOf(2));assert.throws(()=>factory(at+2*3600000).searchPage('coffee',{offset:1,expectedFingerprint:first.fingerprint}),/results changed/);
  const changed=createIndexReader(indexOf([...Object.values(index.products),product(3)]))(at);assert.throws(()=>changed.searchPage('coffee',{offset:1,expectedFingerprint:first.fingerprint}),/results changed/);
  for(const options of [{offset:-1},{offset:1.2},{offset:Number.MAX_SAFE_INTEGER+1},{limit:0},{limit:201},{limit:1.2},{expectedFingerprint:'not-a-fingerprint'}])assert.throws(()=>factory(at).searchPage('coffee',options),/search|fingerprint/);

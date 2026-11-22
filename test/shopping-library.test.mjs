@@ -170,7 +170,7 @@ test('changed composition, package, review or group rules cannot lend a library 
 
 test('expired library prices do not survive the shared freshness boundary or an unreadable file',t=>{
  const f=fixture(t);f.approve();assert.equal(f.shop.familyView().items[0].prices.current,40);
- f.clock.at='2026-11-12T12:00:00Z';assert.equal(f.shop.familyView().items[0].prices.current,null);
+ f.clock.at='2026-12-02T12:00:00Z';assert.equal(f.shop.familyView().items[0].prices.current,null);
  fs.writeFileSync(f.file,'not JSON');assert.equal(f.provider(f.shop.catalogEntries()).status,'unavailable');assert.equal(f.shop.familyView().odaDraft.items.length,0);
 });
 

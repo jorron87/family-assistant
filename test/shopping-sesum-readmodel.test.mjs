@@ -71,12 +71,12 @@ test('repeated reads recheck actual price freshness and parked family work when 
   f.scoped('72','blocked',{reason:'The actual organic declaration remains unknown after a separately recorded scoped review.',retryAt:'2026-11-11T12:00:00Z'});
   const plain=()=>f.shop.familyView().items.find(row=>row.id==='plain');
   assert.equal(plain().prices.current,40);assert.equal(f.family('72','organic').familyReview.status,'blocked');
-  f.clock.at=new Date(Date.parse(NOW)+49*3600000).toISOString();
+  f.clock.at=new Date(Date.parse(NOW)+(21*24+1)*3600000).toISOString();
   assert.equal(plain().prices.current,null,'an earlier API read cannot keep an expired source or native quote fresh');
   assert.equal(f.family('72','organic').familyReview.status,'blocked','stale prices within the source horizon do not erase explicit scoped research debt');
   f.ingest('72',{},f.clock.at);assert.equal(plain().prices.current,40,'a genuinely newer actual receipt restores the current shared quote');
   assert.equal(f.family('72','organic').familyReview.status,'blocked');
-  f.clock.at=new Date(Date.parse(NOW)+186*86400000).toISOString();
+  f.clock.at=new Date(Date.parse(NOW)+206*86400000).toISOString();
   assert.equal(f.family('72','organic').familyReview,null,'a product older than the actual-price horizon creates no family review work');
   assert.equal(plain().prices.current,null);
   f.ingest('72',{},f.clock.at);assert.equal(f.family('72','organic').familyReview.status,'blocked');assert.equal(plain().prices.current,40);

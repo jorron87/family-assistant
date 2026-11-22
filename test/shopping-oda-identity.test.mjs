@@ -36,7 +36,7 @@ test('an incidental other Oda product ID in price evidence never changes the can
 });
 
 test('a known canonical product remains identifiable when its actual price expires, without inventing a fresh quote',t=>{
- const f=fixture(t);f.clock.at='2026-11-13T12:00:00Z';const reader=f.provider.reader(),view=f.shop.familyView();
+ const f=fixture(t);f.clock.at='2026-12-02T12:00:00Z';const reader=f.provider.reader(),view=f.shop.familyView();
  assert.equal(reader.byOdaId(f.odaId),f.p.productKey);assert.equal(reader.quote(f.p.productKey).price.fresh,false);assert.equal(view.items[0].prices.current,null);assert.equal(view.odaDraft.items.length,0,'a refresh flow may reuse identity, never a fictitious fresh price');
  assert.deepEqual(view.odaDraft.refresh.map(x=>x.watchId),[f.w.id]);assert.equal(f.shop.odaRefreshPlan()[0].watchId,f.w.id);
 });
@@ -81,5 +81,5 @@ test('composite reads resolve the Oda price overlay once and observe the next ac
  f.clock.at='2026-11-10T12:01:00Z';receive(25);
  assert.equal(f.shop.familyView().odaDraft.items.find(x=>x.watchId===f.w.id).unitPrice,25);
  assert.equal(f.shop.productInfo({key:f.p.productKey,watchId:f.w.id}).product.price.grossPackPrice,25);
- f.clock.at='2026-11-13T12:00:00Z';assert.equal(f.shop.familyView().odaDraft.items.length,0,'per-read reuse never preserves expired prices across calls');
+ f.clock.at='2026-12-02T12:00:00Z';assert.equal(f.shop.familyView().odaDraft.items.length,0,'per-read reuse never preserves expired prices across calls');
 });

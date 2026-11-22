@@ -15,6 +15,7 @@ import {createSesumCatalogue} from './sesum-catalogue.mjs';
 import {createShoppingAssortment} from './shopping-assortment.mjs';
 import {searchAssortmentFamilies} from './assortment-family-search.mjs';
 import {subcategoryPrices} from './shopping-subcategories.mjs';
+import {currentPriceReceipt,RECENT_PRICE_MS} from './price-freshness.mjs';
 import {buildBargains,bargainHideKeys,fitsFamily} from './shopping-bargains.mjs';
 import {createSesumTaxonomy} from './sesum-taxonomy.mjs';
 import {sesumCollectionCompletion} from './sesum-completion.mjs';
@@ -228,7 +229,10 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   const reviewedReader=()=>readValue('reviewed-library-reader',()=>discovery.overlay(baseLibraryReader()));
   sesumPrices=createSesumPrices(s.sesumPrices,{save,now,reader:reviewedReader,nativeEntries:()=>catalog.entries(),sourceCurrent:source=>sesumCatalogue.current(source)});
   const orders=()=>Object.values(s.orders);
-  const freshPrice=(time,at=now().getTime())=>Number.isFinite(Date.parse(time))&&at-Date.parse(time)>=0&&at-Date.parse(time)<=48*3600000;
+  const freshPrice=(time,at=now().getTime())=>currentPriceReceipt(time,at);
+  // A new actual read (a primary campaign proof, an Oda read) must be recent;
+  // the three-week window is for how long a seen price stays current.
+  const recentRead=(time,at=now().getTime())=>{const age=at-Date.parse(time);return Number.isFinite(age)&&age>=0&&age<=RECENT_PRICE_MS;};
   const variablePack=name=>/(?:^|\s)ca\.?\s*\d|cirka|omtrent|vektvare|\b(?:pr|per)\.?\s*kg\b/i.test(name??'');
   const assortmentState=assortmentRepository?.state??s.assortment;
   const assortment=createShoppingAssortment(assortmentState,{save,persist:assortmentRepository?.save,now,config:assortmentConfig,reader:()=>sesumPrices.overlay(reviewedReader())});
@@ -408,7 +412,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       if(previous.campaignFreshProof)entry.campaignFreshProof=structuredClone(previous.campaignFreshProof);
       if(!campaignReview&&input.observedAt&&Date.parse(entry.observedAt)>Date.parse(previous.observedAt)&&offerTermsFingerprint(entry,store.chainCode)===offerTermsFingerprint(previous,store.chainCode)){
         const receipt=input.sourceReceipt;
-        if(!receipt||typeof receipt.evidence!=='string'||receipt.evidence.trim().length<10||receipt.evidence.length>6000||url(receipt.url)!==entry.sourceUrl||isSesumSource(receipt.url)||!freshPrice(receipt.observedAt)||Date.parse(entry.observedAt)>Date.parse(receipt.observedAt))throw Error('Ny prisferskhet for Sesum-tilbudet krever sourceReceipt fra faktisk primærlesing.');
+        if(!receipt||typeof receipt.evidence!=='string'||receipt.evidence.trim().length<10||receipt.evidence.length>6000||url(receipt.url)!==entry.sourceUrl||isSesumSource(receipt.url)||!recentRead(receipt.observedAt)||Date.parse(entry.observedAt)>Date.parse(receipt.observedAt))throw Error('Ny prisferskhet for Sesum-tilbudet krever sourceReceipt fra faktisk primærlesing.');
         entry.campaignFreshProof={offerTermsFingerprint:offerTermsFingerprint(entry,store.chainCode),sourceUrl:entry.sourceUrl,observedAt:new Date(receipt.observedAt).toISOString(),evidence:receipt.evidence.trim()};
       }
     }
@@ -507,7 +511,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   function odaRefreshReceive({plan,receipts,observedAt,searchComplete,searchError=null}) {
     const current=odaRefreshPlan({force:true,watchId:plan.watchId}).find(p=>p.watchId===plan.watchId);
     if(!current||current.fingerprint!==plan.fingerprint)throw Error('Oda-produktgrunnlaget er endret. Les oppfriskningsplanen på nytt.');
-    if(!Array.isArray(receipts)||receipts.length>1000||receipts.some(r=>!freshPrice(r.observedAt)||Date.parse(r.observedAt)>now().getTime()+60000)||typeof searchComplete!=='boolean'||observedAt!==null&&(!freshPrice(observedAt)||Date.parse(observedAt)>now().getTime()+60000)||observedAt===null&&!searchError||searchError!==null&&typeof searchError!=='string')throw Error('Ugyldig faktisk Oda-prislesing.');
+    if(!Array.isArray(receipts)||receipts.length>1000||receipts.some(r=>!recentRead(r.observedAt)||Date.parse(r.observedAt)>now().getTime()+60000)||typeof searchComplete!=='boolean'||observedAt!==null&&(!recentRead(observedAt)||Date.parse(observedAt)>now().getTime()+60000)||observedAt===null&&!searchError||searchError!==null&&typeof searchError!=='string')throw Error('Ugyldig faktisk Oda-prislesing.');
     const results=current.products.map(expected=>{
       const matches=receipts.filter(r=>r.product?.id===expected.odaProductId).sort((a,b)=>Date.parse(b.observedAt)-Date.parse(a.observedAt));
       const latest=matches.filter(r=>Date.parse(r.observedAt)===Date.parse(matches[0]?.observedAt)),checked=latest.map(r=>checkedOdaPrice(expected,r.product));
@@ -666,7 +670,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const result=calibrateMarket({unit:w.unit,products,now:now(),windowDays:days});
     const basis=historyBasis(w,result.products,approved);
     const ceiling=w.referenceCeiling;
-    if(result.status==='ready'&&ceiling&&now().getTime()-Date.parse(ceiling.checkedAt)<=48*3600000&&ceiling.price<result.goodPrice){
+    if(result.status==='ready'&&ceiling&&freshPrice(ceiling.checkedAt)&&ceiling.price<result.goodPrice){
       result.goodPrice=ceiling.price;
       if(result.excellentPrice!==null&&result.excellentPrice>=result.goodPrice*.98)result.excellentPrice=null;
       result.verifiedCurrentAlternative=structuredClone(ceiling);
@@ -1248,7 +1252,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   // A store can simply be cheap without a campaign. When its everyday price sits
   // well below the other chains and the family is running low, it is worth a trip.
   function steadyPrices(a,found,at) {
-    const FRESH=48*3600000,campaign=new Set(found.opportunities.map(d=>d.watchId)),listed=new Set(listOpen().map(e=>e.watchId)),entries=new Map();
+    const campaign=new Set(found.opportunities.map(d=>d.watchId)),listed=new Set(listOpen().map(e=>e.watchId)),entries=new Map();
     for(const e of catalog.entries())if(e.status==='approved')entries.set(e.watchId+'|'+e.store+'|'+e.id,e);
     const result=[];
     for(const w of Object.values(s.watches)){
@@ -1260,7 +1264,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       const prices=[...cheapest.values()],best=prices.sort((x,y)=>x.currentUnitPrice-y.currentUnitPrice)[0];
       const store=s.settings.stores.find(x=>x.chainCode===best.store);
       if(!store||/nettbutikk/i.test(store.name)||best.kind!=='catalog'||!(best.packAmount>0))continue;
-      if(w.referenceCeiling&&at-Date.parse(w.referenceCeiling.checkedAt)>FRESH)continue;
+      if(w.referenceCeiling&&!freshPrice(w.referenceCeiling.checkedAt,at))continue;
       const paid=needRows(w,a).filter(p=>p.baselineAmount>0).map(p=>p.baselineTotal/p.baselineAmount);
       const referencePrice=comparisonReference(w,a,best,found.prices);
       if(referencePrice===null)continue;
@@ -1290,7 +1294,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const storeOf=store=>!store?null:store.chainCode==='ODA_NO'?{key:'oda',name:'Oda',id:null}:{key:store.id,name:clean(store.name),id:store.id,online:/nettbutikk/i.test(store.name)};
     const storeByChain=chain=>chain==='ODA_NO'?{key:'oda',name:'Oda',id:null}:storeOf(byChain.get(chain));
     const stores=[{key:'oda',name:'Oda',oda:true,minSavings:0},...shops.filter(x=>x.chainCode!=='ODA_NO').map(x=>({...storeOf(x),minSavings:x.minSavings??0}))];
-    const lib=libReader(),families=new Map(),candidates=[];
+    const lib=libReader(),families=new Map(),candidates=[],odaPrice=new Map();
     for(const w of Object.values(s.watches)){
       if(w.enabled===false)continue;
       const need=needOf(w,a),terms=[w.name,...(w.variants??[]).map(v=>lib?.group(v.groupId)?.name)].filter(Boolean).map(t=>t.toLocaleLowerCase('nb-NO'));
@@ -1302,6 +1306,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
         const odaProductId=store.key==='oda'?odaProductIdFromUrl(p.productSourceUrl):null;
         if(store.key==='oda'&&(!odaProductId||chosen&&odaProductId!==chosen))continue;
         seen.add(store.key);
+        // The household's own Oda product price: what a cheaper store replaces.
+        if(store.key==='oda')odaPrice.set(w.id,p.unitPrice);
         const reference=referenceDetail(w,a,p,found.prices);
         candidates.push({kind:'price',reviewed:true,watchId:w.id,storeKey:store.key,storeId:store.id,storeName:store.name,online:store.online,productKey:catalogKey(p),productName:p.name,unitPrice:p.unitPrice,packAmount:p.packAmount,packPrice:p.price,maxPacks:odaProductId?s.odaLimits[odaProductId]?.max??null:null,odaProductId,receiptAt:p.lastChecked,sourceUrl:p.productSourceUrl??p.sourceUrl,image:imageRef(p.image),reference});
       }
@@ -1320,14 +1326,15 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       if(!reviewed&&!fitsFamily(family,{name:item.name,brand:product?.brand,attributes:product?.attributes}))return;
       let reference=referenceDetail(w,a,{kind:'input',chainCode:shops.find(x=>x.id===sf.storeId)?.chainCode??null,unitPrice:item.unitPrice},found.prices);
       if(median&&(!reference||median.unitPrice<reference.price))reference={price:median.unitPrice,basis:'chain-median',storeName:null};
-      // An approximate weight is never a fixed pack to plan quantities with.
-      const fixed=!variablePack(item.name)&&item.pack?.amount>0;
+      // An approximate weight or a weight range (900-1100 g) is never a fixed pack.
+      const fixed=!variablePack(item.name)&&!/\d\s*[-–]\s*\d+(?:[,.]\d+)?\s*(?:g|kg)\b/i.test(item.name)&&item.pack?.amount>0;
       candidates.push({kind:'price',reviewed:reviewed===true,watchId,storeKey:store.key,storeId:store.id,storeName:store.name,online:store.online,productKey:item.identity,productName:item.name,unitPrice:item.unitPrice,packAmount:fixed?item.pack.amount:null,packPrice:fixed?item.pack.price:null,receiptAt:item.receiptAt,sourceUrl:item.sourceUrl,image:imageRef(product?.image),reference});
     };
     for(const sf of comparisons.storeFindings??[]){
       for(const f of sf.families)for(const item of f.items)shelfRow(sf,f.watchId,item);
       for(const m of sf.medianFindings??[])shelfRow(sf,m.watchId,{...m.store,identity:m.identity,pack:m.pack},{median:m.median,reviewed:m.reviewed});
     }
+    for(const c of candidates)c.odaPrice=odaPrice.get(c.watchId)??null;
     const result=buildBargains({candidates,families,stores,hides:s.bargainHides,at});
     const listed=onList.filter(e=>!e.checkedAt);
     const mark=row=>({...row,hideKeys:bargainHideKeys(row),onList:listed.some(e=>row.offerId?e.offerId===row.offerId:e.watchId===row.watchId&&(row.oda?e.storeName==='Oda':e.storeName===row.storeName||e.storeId===row.storeId))});
@@ -1870,7 +1877,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     if(!currentCampaignReview(review,context)||review.status!=='registered'||review.offerId!==offer.id||!store||store.chainCode!==context.source.store||review.offerTermsFingerprint!==offerTermsFingerprint(offer,store.chainCode))return 'sesum-offer-needs-review';
     const freshProof=offer.campaignFreshProof?.offerTermsFingerprint===review.offerTermsFingerprint&&offer.campaignFreshProof.sourceUrl===offer.sourceUrl?Date.parse(offer.campaignFreshProof.observedAt):0;
     if(!Number.isFinite(Date.parse(review.latestPrimaryReadAt))||Date.parse(offer.observedAt)>Math.max(Date.parse(review.latestPrimaryReadAt),freshProof))return 'sesum-offer-missing-primary-proof';
-    if(!freshPrice(offer.observedAt))return 'stale-sesum-offer-proof';
+    if(!recentRead(offer.observedAt))return 'stale-sesum-offer-proof';
     if(offer.memberOnly&&!store.memberEligible)return 'member';
     return null;
   }
@@ -1920,7 +1927,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       if(!Number.isFinite(Date.parse(record.retryAt))||Date.parse(record.retryAt)<=now().getTime()||Date.parse(record.retryAt)>now().getTime()+7*86400000)throw Error('Ny vurdering må være innen sju dager og i fremtiden.');
     }else{
       if(!['expired','wrong-variant','not-a-real-offer'].includes(input.reason)||input.resolutionVerified!==true)throw Error('Et faktisk påvist avslagsgrunnlag kreves; ukjente vilkår må blokkeres.');
-      if(!Array.isArray(input.sourceReceipts)||!input.sourceReceipts.length||input.sourceReceipts.length>20||input.sourceReceipts.some(r=>!r||typeof r.evidence!=='string'||r.evidence.trim().length<10||r.evidence.length>6000||!Number.isFinite(Date.parse(r.observedAt))||Date.parse(r.observedAt)>now().getTime()||!freshPrice(r.observedAt)||!/^https:\/\//.test(r.url??'')))throw Error('Et konkret, ferskt kildebelegg for avslaget kreves.');
+      if(!Array.isArray(input.sourceReceipts)||!input.sourceReceipts.length||input.sourceReceipts.length>20||input.sourceReceipts.some(r=>!r||typeof r.evidence!=='string'||r.evidence.trim().length<10||r.evidence.length>6000||!Number.isFinite(Date.parse(r.observedAt))||Date.parse(r.observedAt)>now().getTime()||!recentRead(r.observedAt)||!/^https:\/\//.test(r.url??'')))throw Error('Et konkret, ferskt kildebelegg for avslaget kreves.');
       if(!input.sourceReceipts.some(r=>!isSesumSource(url(r.url))))throw Error('Et primært kildebelegg må avklare kampanjen.');
       if(input.reason==='expired'){
         const ends=['endsAt','ends_at','endDate','end_date','validTo','valid_to','validUntil','valid_until'].map(key=>context.receipt.promotion?.[key]).filter(value=>value!==null&&value!==undefined);

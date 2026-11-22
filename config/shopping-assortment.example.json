@@ -2,7 +2,7 @@
   "enabled": false,
   "collectionEnabled": false,
   "reviewedPriceRefreshEnabled": false,
-  "priceHorizonDays": 14,
+  "priceHorizonDays": 21,
   "familySource": "sesum",
   "odaScope": "household"
 }

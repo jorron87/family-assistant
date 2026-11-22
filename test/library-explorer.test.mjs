@@ -63,7 +63,7 @@ test('the card price is the cheapest fresh one and an old receipt never counts a
  assert.equal(old.packPrice,25);assert.equal(old.fresh,false);
  const none=priceView(item,new Set([storeNo(model,'KIWI')]),NOW,model.freshMs);
  assert.equal(none.chains,0);assert.equal(none.packPrice,null);
- assert.equal(priceView(item,new Set([meny]),NOW+3*86400000,model.freshMs).fresh,false,'freshness is judged at use');
+ assert.equal(priceView(item,new Set([meny]),NOW+22*86400000,model.freshMs).fresh,false,'freshness is judged at use');
 });
 
 test('unknown values never satisfy a limit and never count as zero',()=>{

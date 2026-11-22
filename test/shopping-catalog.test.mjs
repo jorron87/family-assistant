@@ -53,7 +53,7 @@ test('unchanged excluded variants remain excluded; changes preserve their reason
 });
 
 test('metadata observations and incomplete receipts never imply fresh prices',()=>{
- const {catalog,advance}=fixture();const first=observe(catalog);assert.equal(first.priceFresh,true);advance(49);
+ const {catalog,advance}=fixture();const first=observe(catalog);assert.equal(first.priceFresh,true);advance(21*24+1);
  const metadataOnly=observe(catalog,{id:123,store:'CHAIN_A',name:first.name});
  assert.equal(metadataOnly.lastChecked,at);assert.equal(metadataOnly.currentPrice,20);assert.equal(metadataOnly.priceFresh,false);
  const priceOnly=observe(catalog,{id:123,store:'CHAIN_A',name:first.name,currentPrice:15});

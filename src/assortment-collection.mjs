@@ -102,7 +102,11 @@ export function createAssortmentCollection({dataDir,config={},kassal,receiveSesu
  function listingMismatches(jobs){const categories=new Map();for(const job of jobs)if(job.kind==='catalogue'&&job.category!=='index'){const row=categories.get(job.category)??{totals:new Set(),products:new Set(),pending:false};if(Number.isSafeInteger(job.total))row.totals.add(job.total);for(const id of job.productJobIds??[])row.products.add(id);if(job.status!=='complete')row.pending=true;categories.set(job.category,row);}return [...categories].filter(([,r])=>!r.pending&&(r.totals.size!==1||!r.totals.has(r.products.size))).map(([category,r])=>({category,observedProducts:r.products.size,reportedTotals:[...r.totals]}));}
  function reconcileListings(){if(state.bootstrap?.status!=='collecting'||state.bootstrap.mode!=='selected-categories')return;const jobs=state.bootstrap.jobIds.map(id=>state.sesum.jobs[id]);const mismatches=listingMismatches(jobs);for(const gap of mismatches){state.bootstrap.reconciliationRounds??={};const round=state.bootstrap.reconciliationRounds[gap.category]??0;if(round>=2)continue;state.bootstrap.reconciliationRounds[gap.category]=round+1;for(const job of jobs)if(job.kind==='catalogue'&&job.category===gap.category)reset(job,'listing-count-reconciliation');}state.bootstrap.countMismatches=listingMismatches(jobs);}
  function finishBootstrap(){reconcileListings();if(state.bootstrap?.status==='collecting'&&state.bootstrap.jobIds.every(id=>terminal(state.sesum.jobs[id]))){const missing=state.bootstrap.jobIds.filter(id=>{const j=state.sesum.jobs[id];return j.status==='unavailable'?false:j.kind==='catalogue'?j.category==='index'&&!j.categoryTreeReceipt:!j.categoryReceipt;});state.bootstrap.status=state.bootstrap.countMismatches?.length?'listing-count-mismatch':missing.length?'category-metadata-missing':'complete';state.bootstrap.missingCategoryReceipts=missing;state.bootstrap.finishedAt=new Date(clock()).toISOString();state.paused=true;}}
- function sourceSpacing(){const denials=Object.values(state.sesum.jobs).reduce((n,j)=>n+(['auth_required','rate_limited'].includes(j.error)?j.attempts:0),0);return denials?Math.min(30000,6000*2**Math.min(denials-1,3)):1500;}
+ // Slow down only for denials that are still recent and not yet followed by a
+ // successful read of the same page; an old, recovered 403 must not throttle
+ // every later sweep. The base pace stays gentle on the public source.
+ const DENIAL_WINDOW_MS=6*3600000,BASE_SPACING_MS=3000;
+ function sourceSpacing(){const at=clock();const denials=Object.values(state.sesum.jobs).filter(j=>{const f=j.lastFailure;return f&&['auth_required','rate_limited'].includes(f.code)&&at-Date.parse(f.observedAt)<=DENIAL_WINDOW_MS&&!(j.status==='complete'&&Date.parse(j.fetchedAt)>=Date.parse(f.observedAt));}).reduce((n,j)=>n+Math.max(1,j.attempts??1),0);return denials?Math.min(30000,6000*2**Math.min(denials-1,3)):BASE_SPACING_MS;}
  // Compare one more product in each selected leaf before working down any
  // single large shelf. Only actual listing edges belonging to this run count.
  function leafProducts(ready){
@@ -206,6 +210,8 @@ export function createAssortmentCollection({dataDir,config={},kassal,receiveSesu
    if(state.sesum.pauseUntil&&Date.parse(input.fetchedAt)>=Date.parse(state.sesum.pauseUntil)){
     state.sesum.pauseUntil=null;state.sesum.failureStreak=0;
    }
+   // A successful read resolves an earlier failure; keep it only as history.
+   if(job.error){(job.resolvedErrors??=[]).push({code:job.error,lastFailure:job.lastFailure??null,resolvedAt:input.fetchedAt});if(job.resolvedErrors.length>10)job.resolvedErrors.splice(0,job.resolvedErrors.length-10);delete job.error;job.errors=[];}
    job.status='complete';job.deliveredUntil=null;job.fetchedAt=input.fetchedAt;
    finishBootstrap();
    save(job);return {accepted:true,status:'complete'};
@@ -248,7 +254,11 @@ export function createAssortmentCollection({dataDir,config={},kassal,receiveSesu
   load();
   if(!config.enabled||!config.collectionEnabled||config.reviewedPriceRefreshEnabled!==true)return;
   const selection=state.bootstrap;
-  if(!selection?.leafSelection||selection.mode!=='selected-categories'||selection.status!=='complete'||selection.manuallyPaused||Date.parse(state.sesum.pauseUntil)>clock()||clock()-Date.parse(selection.finishedAt)<86400000)return;
+  // Read the household's selected shelves again once a day, counted from the
+  // previous start, with an hour's rest after a sweep. A finished sweep with a
+  // listing-count or metadata gap is retried by the next sweep, never frozen.
+  if(!selection?.leafSelection||selection.mode!=='selected-categories'||selection.status==='collecting'||!selection.finishedAt||selection.manuallyPaused||Date.parse(state.sesum.pauseUntil)>clock())return;
+  if(clock()<Math.max(Date.parse(selection.startedAt)+86400000,Date.parse(selection.finishedAt)+3600000))return;
   const ids=[...new Set(getCategoryIds())];
   if(ids.length)bootstrap({leafSelection:true,categoryUrls:ids.map(id=>'https://www.sesum.no/kategori/'+id)});
  }

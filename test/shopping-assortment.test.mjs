@@ -228,7 +228,7 @@ test('a new selection refreshes completed pages and stale products while an acti
 });
 
 test('source denial keeps the full retry-after pause and reduces subsequent request frequency across restart',async t=>{
- let time=new Date(at);const f=collectionFixture(t,{now:()=>time});f.api.start();let work=f.api.work();assert.equal(work.limits.minSpacingMs,1500);await f.api.receive({runId:work.runId,jobId:work.jobs[0].id,status:'error',fetchedAt:time.toISOString(),error:{code:'rate_limited',retryAfterMs:2*3600000}});
+ let time=new Date(at);const f=collectionFixture(t,{now:()=>time});f.api.start();let work=f.api.work();assert.equal(work.limits.minSpacingMs,3000);await f.api.receive({runId:work.runId,jobId:work.jobs[0].id,status:'error',fetchedAt:time.toISOString(),error:{code:'rate_limited',retryAfterMs:2*3600000}});
  const restored=createAssortmentCollection(f.settings);time=new Date(+time+3600000);assert.equal(restored.work().jobs.length,0);assert.equal(restored.status().sesum.pauseUntil,'2026-11-11T14:00:00.000Z');time=new Date(+time+3600001);work=restored.work();assert.equal(work.jobs.length,1);assert.equal(work.limits.minSpacingMs,6000);
  await restored.receive({runId:work.runId,jobId:work.jobs[0].id,status:'error',fetchedAt:time.toISOString(),error:{code:'auth_required'}});time=new Date(+time+31*60000);assert.equal(createAssortmentCollection(f.settings).work().limits.minSpacingMs,12000);
 });
@@ -318,4 +318,25 @@ test('selected category batches give different shelves early reads while retaini
   await f.api.receive({runId:w.runId,jobId:j.id,status:'ok',fetchedAt:at,result:{ok:true,kind:'catalogue',sourceUrl:j.url,categoryUrls:[],productUrls:ids.map(i=>'https://www.sesum.no/produkt/'+i+'-p'),nextUrls:[],endReached:true,filtersVerified:true,total:id?ids.length:2,categories:[{id:'12',name:'A',parentId:null},{id:'13',name:'B',parentId:null}]}});
  }
  const next=f.api.work();assert.equal(next.jobs.length,8);assert.ok(next.jobs.slice(0,2).some(j=>j.url.includes('/11-p')));assert.equal(f.api.status().bootstrap.products.jobs,13);
+});
+test('a recovered denial no longer slows later reads',async t=>{
+ let time=new Date(at);const f=collectionFixture(t,{now:()=>time});
+ f.api.bootstrap({productUrls:['https://www.sesum.no/produkt/1-synthetic']});
+ let work=f.api.work();const [first]=work.jobs.filter(j=>j.kind==='product');
+ await f.api.receive({runId:work.runId,jobId:first.id,status:'error',fetchedAt:time.toISOString(),error:{code:'auth_required',httpStatus:403,sourceRetryAfterMs:null}});
+ time=new Date(+time+31*60000);assert.equal(createAssortmentCollection(f.settings).work({peek:true}).limits.minSpacingMs,6000,'a fresh denial still slows reads');
+ const again=createAssortmentCollection(f.settings);
+ await again.receive({runId:work.runId,jobId:first.id,status:'ok',fetchedAt:time.toISOString(),result:{ok:true,kind:'product',sourceUrl:first.url,product:{...sesum(),sourceUrl:first.url},prices:sesum().prices}});
+ assert.equal(createAssortmentCollection(f.settings).work({peek:true}).limits.minSpacingMs,3000,'a successful read of the same page ends the slowdown');
+});
+test('the selected shelves are read again a day after the previous sweep started, even after a count gap',async t=>{
+ let time=new Date(at);const f=collectionFixture(t,{now:()=>time,config:{...config,familySource:'sesum',reviewedPriceRefreshEnabled:true},receiveCategories:async()=>{}});
+ f.api.bootstrap({leafSelection:true,categoryUrls:['https://www.sesum.no/kategori/12']});
+ const sweep=async()=>{for(let round=0;round<5;round++){const w=f.api.work();if(!w.jobs?.length)break;for(const j of w.jobs){time=new Date(+time+60000);
+  await f.api.receive({runId:w.runId,jobId:j.id,status:'ok',fetchedAt:time.toISOString(),result:j.kind==='catalogue'?{ok:true,kind:'catalogue',sourceUrl:j.url,categoryUrls:[],productUrls:['https://www.sesum.no/produkt/1-p'],nextUrls:[],endReached:true,filtersVerified:true,total:1,categories:[{id:'12',name:'A',parentId:null}]}:{ok:true,kind:'product',sourceUrl:j.url,product:{...sesum(),sourceUrl:j.url,categoryPathIds:['12']},prices:sesum().prices}});}}};
+ await sweep();
+ const done=f.api.status().bootstrap;assert.equal(done.status,'complete');
+ time=new Date(+time+3600000);f.api.refreshSelected(()=>['12']);assert.equal(f.api.status().bootstrap.startedAt,done.startedAt,'not before a day after the previous start');
+ time=new Date(Date.parse(done.startedAt)+86400000+1);f.api.refreshSelected(()=>['12']);
+ const next=f.api.status().bootstrap;assert.equal(next.status,'collecting');assert.notEqual(next.startedAt,done.startedAt);
 });

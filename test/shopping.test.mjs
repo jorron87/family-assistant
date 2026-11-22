@@ -52,7 +52,7 @@ test('offers honor unit, evidence, stock, membership, dates, freshness, multibuy
  const offer={watchId:w.id,storeId:'near',externalId:'flyer-1',name:'Tilsvarende kjøttdeig',price:32,packAmount:.4,unit:'kg',validFrom:'2026-11-08',validTo:'2026-11-14',sourceUrl:'https://example.com/flyer',evidence:'400 g, 32 kr, gjelder denne uken',comparable:true,comparisonNote:'Samme type og fettandel',maxPacks:10,bundlePacks:2};
  shop.offer(offer);let result=shop.view().opportunities;assert.equal(result.length,1);assert.equal(result[0].packs,10);assert.equal(result[0].saving,280);assert.equal(result[0].quantityBasis,'household-estimate');
  shop.offer({...offer,memberOnly:true});assert.equal(shop.view().opportunities.length,0);
- shop.offer({...offer,observedAt:'2026-11-01T00:00:00Z'});assert.equal(shop.view().opportunities.length,0);
+ shop.offer({...offer,observedAt:'2026-10-15T00:00:00Z'});assert.equal(shop.view().opportunities.length,0);
  shop.offer({...offer,validTo:'2026-11-07',validFrom:'2026-11-01'});assert.equal(shop.view().opportunities.length,0);
  shop.offer({...offer,comparable:false});assert.equal(shop.view().opportunities.length,0);
  assert.throws(()=>shop.offer({...offer,unit:'l'}));assert.throws(()=>shop.offer({...offer,sourceUrl:'javascript:alert(1)'}));assert.throws(()=>shop.offer({...offer,observedAt:'2026-11-09T00:00:00Z'}));
@@ -102,7 +102,7 @@ test('a lower current alternative reduces savings and stale alternative evidence
  const offer={watchId:w.id,storeId:'near',externalId:'current',name:'Staple',price:50,packAmount:.4,unit:'kg',validFrom:'2026-11-08',validTo:'2026-11-14',sourceUrl:'https://example.com/flyer',evidence:'Current flyer',comparable:true,comparisonNote:'Equivalent'};
  shop.offer(offer);assert.equal(shop.view().opportunities.length,0);
  shop.offer({...offer,price:40});assert.equal(shop.view().opportunities[0].saving,50);assert.equal(shop.view().opportunities[0].referenceType,'alternative');
- shop.watch({...w,referenceCeiling:{...w.referenceCeiling,checkedAt:'2026-11-01T10:00:00Z'}});assert.equal(shop.view().opportunities.length,0);
+ shop.watch({...w,referenceCeiling:{...w.referenceCeiling,checkedAt:'2026-10-15T10:00:00Z'}});assert.equal(shop.view().opportunities.length,0);
  assert.throws(()=>shop.watch({...w,referenceCeiling:{...w.referenceCeiling,checkedAt:'2026-11-09T10:00:00Z'}}),/kontrolltid/);
 });
 

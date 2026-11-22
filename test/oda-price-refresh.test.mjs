@@ -10,7 +10,7 @@ import {createIndexReader} from '../src/shopping-library.mjs';
 import {productTextHash} from '../src/product-library.mjs';
 import {refreshReviewedMarket} from '../src/shopping-market-refresh.mjs';
 
-const NOW='2026-11-10T12:00:00Z',OLD='2026-11-07T12:00:00Z';
+const NOW='2026-11-10T12:00:00Z',OLD='2026-10-15T12:00:00Z';
 const product=(id=701)=>({id,name:'Synthetic plain oil',description:'1 l',price:'29.00',unitPrice:'29.00',unitName:'liter',url:`https://oda.com/no/products/${id}-synthetic/`,availability:{isAvailable:true,code:'available'}});
 function fixture(){
  const state={},clock={at:NOW},shop=shoppingStore(state,{save(){},now:()=>new Date(clock.at),odaConnected:()=>true});
@@ -39,7 +39,7 @@ test('related hits, unavailable products, failed reads and missing exact SKUs re
 test('price receipt timestamps expire normally and metadata/family races invalidate a refresh plan',()=>{
  const {shop,clock,state}=fixture(),plan=shop.odaRefreshPlan()[0];
  shop.odaRefreshReceive({plan,receipts:[{product:product(),observedAt:NOW}],observedAt:NOW,searchComplete:true});
- clock.at='2026-11-13T12:00:00Z';assert.equal(shop.familyView().odaDraft.items.length,0);assert.equal(shop.familyView().odaDraft.refresh.length,1);
+ clock.at='2026-12-02T12:00:00Z';assert.equal(shop.familyView().odaDraft.items.length,0);assert.equal(shop.familyView().odaDraft.refresh.length,1);
  const next=shop.odaRefreshPlan()[0];state.shopping.watches['plain-oil'].note='A newly selected exact variant is required.';
  assert.throws(()=>shop.odaRefreshReceive({plan:next,receipts:[],observedAt:clock.at,searchComplete:true}),/endret/);
 });
@@ -148,7 +148,7 @@ test('shared library prices use the verified Oda receipt with tolerant canonical
  assert.equal(overlay(read(Date.parse(NOW))).quote(key).price.grossPackPrice,29);assert.equal(overlay(read(Date.parse(NOW))).members('oil')[0].unitPrice,29/p.pack);
  p.rawPack.weight=2;assert.equal(overlay(read(Date.parse(NOW))).quote(key).price.grossPackPrice,30,'real source package mismatches cannot borrow a price');p.rawPack.weight=1;
  records[entry.key].available=false;assert.equal(overlay(read(Date.parse(NOW))).members('oil')[0].eligible,false);
- clock.at='2026-11-13T12:00:00Z';assert.equal(overlay(read(Date.parse(clock.at))).quote(key).price.fresh,false);
+ clock.at='2026-12-02T12:00:00Z';assert.equal(overlay(read(Date.parse(clock.at))).quote(key).price.fresh,false);
  assert.deepEqual(state.shopping.odaChoices,{});
 });
 

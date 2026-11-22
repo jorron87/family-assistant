@@ -96,3 +96,28 @@ test('the family view lists a reviewed Oda price under the usual price as a good
  assert.equal(shop.familyView().bargains.rows.length,1);
  assert.throws(()=>shop.bargainAction({action:'mismatch',keys:{mismatch:'unknown|name:x'}}),/Ugyldig/);
 });
+
+test('a seen price stays current for three weeks, while a new read must still be recent',async()=>{
+ const {currentPriceReceipt,CURRENT_PRICE_DAYS,RECENT_PRICE_MS}=await import('../src/price-freshness.mjs');
+ const now=Date.parse('2026-11-22T12:00:00Z'),day=86400000;
+ assert.equal(CURRENT_PRICE_DAYS,21);assert.equal(RECENT_PRICE_MS,48*3600000);
+ assert.equal(currentPriceReceipt('2026-11-16T18:00:00Z',now),true,'a stable shelf price seen six days ago is still current');
+ assert.equal(currentPriceReceipt(new Date(now-21*day).toISOString(),now),true);
+ assert.equal(currentPriceReceipt(new Date(now-21*day-1).toISOString(),now),false);
+ assert.equal(currentPriceReceipt(new Date(now+1000).toISOString(),now),false,'a future receipt is never current');
+ assert.equal(currentPriceReceipt('not a date',now),false);
+});
+
+test('a price clearly below the household Oda product is a cheaper place for the next trip, never a stock-up',()=>{
+ // Usual market price 200, the household's Oda product 349.50, the shop 182.
+ const families=new Map([['mince',family({name:'Grana Padano',storage:'chilled',shelfMonths:6,need:{amount:2.4,basis:'planned-amount'},terms:['grana padano']})]]);
+ const shelf=row({reviewed:false,productName:'Grana Padano 200g',unitPrice:182,packAmount:.2,packPrice:36.4,reference:{price:200,basis:'usual'},odaPrice:349.5});
+ const [r]=build([shelf],families).rows;
+ assert.equal(r.tier,'switch');assert.equal(r.referenceBasis,'oda');assert.equal(r.referencePrice,349.5);assert.equal(r.discountPct,47.93);
+ assert.equal(r.fullMonths,1,'only the next trip, since the market price is not unusually low');
+ assert.equal(r.packs,1);assert.equal(r.saving,33.5);
+ assert.equal(build([{...shelf,odaPrice:null}],families).rows.length,0,'without an Oda product it is just a normal price');
+ assert.equal(build([{...shelf,storeKey:'oda',odaPrice:349.5}],families).rows.length,0,'Oda is never cheaper than itself');
+ const market=build([{...shelf,unitPrice:140,packPrice:28}],families).rows[0];
+ assert.equal(market.tier,'excellent','a real market low stays a good buy with a stock-up plan');assert.equal(market.referenceBasis,'usual');
+});

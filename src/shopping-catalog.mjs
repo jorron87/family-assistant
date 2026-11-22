@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
+import {CURRENT_PRICE_MS} from './price-freshness.mjs';
 
-const VERSION=1,FRESH_MS=48*3600000,MAX_NUMBER=1e9;
+const VERSION=1,FRESH_MS=CURRENT_PRICE_MS,MAX_NUMBER=1e9;
 const own=(value,key)=>Object.hasOwn(value,key);
 const record=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 const digest=value=>createHash('sha256').update(value).digest('hex');

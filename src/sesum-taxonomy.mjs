@@ -2,6 +2,7 @@ import {createHash} from 'node:crypto';
 import {createIndexReader} from './shopping-library.mjs';
 import {odaProductIdFromUrl} from './oda-product-identity.mjs';
 import {sesumSourceFingerprint} from './sesum-prices.mjs';
+import {currentPriceReceipt} from './price-freshness.mjs';
 const hash=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const key=id=>'sesum-category:'+id;
 const native=id=>{if(! /^[1-9]\d*$/.test(String(id))||!Number.isSafeInteger(Number(id)))throw Error('Invalid native Sesum category ID.');return String(id);};
@@ -125,7 +126,7 @@ export function createSesumTaxonomy(state,{persist=null,save=()=>{},now=()=>new 
     if(row?.metadata.soldByWeight===true&&receipt.grossUnitPrice>0&&receipt.unitPriceEvidence){product.quote.grossPackPrice=null;product.quote.grossUnitPrice=receipt.grossUnitPrice;product.quote.unit=receipt.unit;product.quote.directUnitVerified=true;product.quote.unitPriceEvidence=receipt.unitPriceEvidence;product.unit=receipt.unit;product.quote.reasons=product.quote.reasons.filter(r=>!['unknown-gross-package-price','missing-unit-price-evidence','unknown-direct-unit'].includes(r));}
     if(row)product.catalogueSourceFingerprint=sesumSourceFingerprint({...row.metadata,store:receipt.store});
     out.products[productKey]=product;
-    const quote=product.quote,price=current(quote.receiptAt,clock(),priceHorizonDays)&&!quote.reasons.length;
+    const quote=product.quote,price=currentPriceReceipt(quote.receiptAt,clock())&&!quote.reasons.length;
     const amount=product.pack,unitPrice=price&&product.packKnown&&typeof amount==='number'&&amount>0&&quote.grossPackPrice?quote.grossPackPrice/amount:price&&quote.directUnitVerified?quote.grossUnitPrice:null;
     for(const category of path(categoryId))out.members[key(category.id)].push({k:productKey,s:'approved',r:true,u:unitPrice,q:null,n:null,e:'Sesums native kategori eller eksplisitt plassering av en Oda-vare; ingen automatisk husholdningserstatning.'});
    }

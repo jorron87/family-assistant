@@ -36,7 +36,7 @@ test('arrival order is irrelevant and an expired/future/unknown price never wins
  assert.equal(shop.familyView().deals.length,0);
  clock.at='2026-11-09T12:01:00Z';observe(null);assert.equal(shop.familyView().items[0].prices.current,171.6);
  clock.at='2026-11-09T12:02:00Z';observe(1,{lastChecked:'2026-11-09T12:02:01Z'});assert.equal(shop.familyView().items[0].prices.current,171.6);
- clock.at='2026-11-12T12:00:00Z';assert.equal(shop.familyView().items[0].prices.current,null);assert.equal(shop.familyView().odaDraft.items.length,0);
+ clock.at='2026-12-02T12:00:00Z';assert.equal(shop.familyView().items[0].prices.current,null);assert.equal(shop.familyView().odaDraft.items.length,0);
 });
 
 test('pending or excluded native metadata cannot act as a global price',()=>{

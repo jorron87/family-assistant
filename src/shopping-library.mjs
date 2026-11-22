@@ -5,8 +5,9 @@ import {fileURLToPath} from 'node:url';
 import {dirname,join} from 'node:path';
 import {readProductLibrary,productTextHash} from './product-library.mjs';
 import {odaProductIdFromUrl} from './oda-product-identity.mjs';
+import {CURRENT_PRICE_MS} from './price-freshness.mjs';
 
-const INDEX_VERSION=6,FRESH_MS=48*3600000,RETRY_MS=60000;
+const INDEX_VERSION=6,FRESH_MS=CURRENT_PRICE_MS,RETRY_MS=60000;
 // A product whose newest price receipt is older than this is parked: kept in the
 // library with its reviews, but out of the views and out of agent work queues.
 // It returns by itself when a newer receipt arrives. Nothing is deleted.
@@ -162,7 +163,7 @@ export function libraryPriceProvider(file,{now=()=>new Date(),indexFile=null,bui
   const want=sourceStamp(file);
   try{const next=stampOf(indexFile);if(next!==indexStamp){const parsed=JSON.parse(readFileSync(indexFile,'utf8'));if(parsed.version===INDEX_VERSION){reader=createIndexReader(parsed,{horizonDays});builtFrom=parsed.source;}indexStamp=next;}}catch(error){if(error.code!=='ENOENT')throw error;}
   if(builtFrom!==want&&!building&&Date.now()>=retryAt){building=true;build(file,indexFile,ok=>{building=false;if(!ok)retryAt=Date.now()+RETRY_MS;});}
-  // Receipts in a slightly older index still expire on their own 48 hours.
+  // Receipts in a slightly older index still expire on their own after three weeks.
   status=reader?'ready':'building';return reader;
  }
  function current() {

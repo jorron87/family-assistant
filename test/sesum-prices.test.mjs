@@ -164,7 +164,7 @@ test('native provider overrides require the existing native approval and exact t
 test('source exclusions remain explicit, no name-only decision is created, and price age expires live',()=>{
  const f=fixture();f.ingest();const candidate=f.prices.candidates()[0];
  f.prices.review({sourceKey:candidate.sourceKey,sourceFingerprint:candidate.sourceFingerprint,status:'excluded',equivalenceEvidence:'Different variant, do not compare.'});assert.equal(f.prices.candidates()[0].status,'excluded');assert.equal(f.prices.overlay().product(candidate.sourceKey),null);
- f.approve();f.clock.at='2026-11-12T12:00:00Z';assert.equal(f.prices.overlay().quote(candidate.sourceKey).price.fresh,false);assert.equal(f.prices.overlay().members('tomatoes').filter(m=>m.eligible).length,0);
+ f.approve();f.clock.at='2026-12-02T12:00:00Z';assert.equal(f.prices.overlay().quote(candidate.sourceKey).price.fresh,false);assert.equal(f.prices.overlay().members('tomatoes').filter(m=>m.eligible).length,0);
 });
 test('unknown weight mode remains null and requires an explicit fixed-package review',()=>{
  const f=fixture();f.ingest(f.source({soldByWeight:null}));assert.equal(f.prices.candidates()[0].source.soldByWeight,null);
@@ -174,7 +174,7 @@ test('unknown weight mode remains null and requires an explicit fixed-package re
 test('pending is lightweight, omits parked receipts, and a compiled overlay is reused while freshness decays',()=>{
  const f=fixture();f.ingest();assert.deepEqual(Object.keys(f.prices.pending()[0]),['sourceKey','sourceFingerprint','name','familyIds','receiptAt','basisReviewNeeded','hasReviewedDonor']);assert.equal(f.prices.pending()[0].basisReviewNeeded,false);
  f.approve();assert.equal(f.prices.pending().length,0);const index=f.prices.overlay().index();assert.equal(f.prices.overlay().index(),index,'compiled compact index is reused across views');
- f.clock.at='2026-11-12T12:00:00Z';assert.equal(f.prices.overlay().index(),index);assert.equal(f.prices.overlay().quote('sesum:KIWI:123').price.fresh,false,'clock is applied per reader call');
+ f.clock.at='2026-12-02T12:00:00Z';assert.equal(f.prices.overlay().index(),index);assert.equal(f.prices.overlay().quote('sesum:KIWI:123').price.fresh,false,'clock is applied per reader call');
  const old=fixture();old.ingest(old.source({prices:[{storeCode:'KIWI',price:6,observedAt:'2026-01-01T12:00:00Z'}]}));assert.equal(old.prices.pending().length,0);
 });
 

@@ -5,6 +5,7 @@
 import {gzip} from 'node:zlib';
 import {promisify} from 'node:util';
 import {createHash} from 'node:crypto';
+import {CURRENT_PRICE_MS} from './price-freshness.mjs';
 
 const compress=promisify(gzip);
 export const EXPLORER_VERSION=1;
@@ -85,7 +86,7 @@ export function buildExplorerData(index,{imageRef,chainName,ownStores=[],active=
  }
  const own=new Set(ownStores);
  for(const store of stores)store.own=own.has(store.code);
- return {data:{version:EXPLORER_VERSION,...(index.familySource?{familySource:index.familySource}:{}),built:index.builtAt,nutrients:NUTRIENT_KEYS,freshHours:48,horizonDays,shelves,families,stores,qualityKeys,items},texts};
+ return {data:{version:EXPLORER_VERSION,...(index.familySource?{familySource:index.familySource}:{}),built:index.builtAt,nutrients:NUTRIENT_KEYS,freshHours:CURRENT_PRICE_MS/3600000,horizonDays,shelves,families,stores,qualityKeys,items},texts};
 }
 
 export function ingredientMatches(texts,term) {

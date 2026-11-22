@@ -15,9 +15,12 @@ export const CHECK_MIN_PCT=15;
 export const CHECK_MAX_PCT=60;
 // A few kroner is not worth reading about; it stays in the minor list.
 export const MIN_SAVING=15;
+// Cheaper than the household's own Oda product, without being a market low.
+export const SWITCH_MIN_PCT=10;
+export const CHECK_SWITCH_PCT=20;
 
 const round=n=>Math.round((n+Number.EPSILON)*100)/100;
-const TIER_WEIGHT={excellent:1.5,good:1,small:.2};
+const TIER_WEIGHT={excellent:1.5,good:1,switch:.7,small:.2};
 const score=row=>(row.saving??0)*(TIER_WEIGHT[row.tier]??1)*(row.reviewed?1:.6)+row.discountPct/100;
 
 // An unreviewed shelf row only shares a broad native category with the
@@ -77,23 +80,42 @@ export function hiddenBargain(hides,row,at) {
  return !!snooze&&snooze.unitPrice===row.unitPrice&&at-Date.parse(snooze.at)<14*86400000;
 }
 
+// A price is judged against the market first. Only a clear market low is a
+// good buy that may justify stocking up. Otherwise a price clearly below the
+// household's own Oda product is still worth knowing as a cheaper place to
+// buy, for the next trip only; that never makes it a campaign or a stock-up.
+function judge(c,f) {
+ const reference=c.reference?.price;
+ let market=null;
+ // A reviewed offer at the family's own price limit already passed its tier.
+ if(reference>0&&(c.unitPrice<reference||c.unitPrice===reference&&c.tier)){
+  const discountPct=round((reference-c.unitPrice)/reference*100);
+  const admitted=c.reviewed?discountPct>=(f.minDiscountPct??0):discountPct>=Math.max(CHECK_MIN_PCT,f.minDiscountPct??0)&&discountPct<=CHECK_MAX_PCT;
+  if(admitted)market={reference,referenceBasis:c.reference.basis,referenceStore:c.reference.storeName??null,discountPct,tier:c.tier??(discountPct<GOOD_PCT?'small':dealTier({unitPrice:c.unitPrice,excellentPrice:c.reviewed?f.excellentPrice:null,discountPct,referenceType:'market'}))};
+ }
+ if(market&&market.tier!=='small')return market;
+ const oda=c.odaPrice;
+ if(c.kind!=='offer'&&c.storeKey!=='oda'&&oda>0&&c.unitPrice<oda){
+  const discountPct=round((oda-c.unitPrice)/oda*100);
+  if(c.reviewed?discountPct>=SWITCH_MIN_PCT:discountPct>=CHECK_SWITCH_PCT&&discountPct<=CHECK_MAX_PCT)return {reference:oda,referenceBasis:'oda',referenceStore:'Oda',discountPct,tier:'switch'};
+ }
+ return market;
+}
+
 export function buildBargains({candidates,families,stores,hides={},at=Date.now()}) {
  const best=new Map(),minor=[],covered=[];let hidden=0;
  for(const c of candidates){
-  const f=families.get(c.watchId),reference=c.reference?.price;
-  // A reviewed offer at the family's own price limit already passed its tier.
-  if(!f||!(c.unitPrice>0)||!(reference>0)||c.unitPrice>reference||c.unitPrice===reference&&!c.tier)continue;
-  const discountPct=round((reference-c.unitPrice)/reference*100);
-  if(!c.reviewed&&(discountPct<Math.max(CHECK_MIN_PCT,f.minDiscountPct??0)||discountPct>CHECK_MAX_PCT))continue;
-  if(c.reviewed&&discountPct<(f.minDiscountPct??0))continue;
-  const tier=c.tier??(discountPct<GOOD_PCT?'small':dealTier({unitPrice:c.unitPrice,excellentPrice:c.reviewed?f.excellentPrice:null,discountPct,referenceType:'market'}));
-  const plan=planFor(c,f,tier,reference,at);
+  const f=families.get(c.watchId);
+  if(!f||!(c.unitPrice>0))continue;
+  const judged=judge(c,f);if(!judged)continue;
+  const {reference,referenceBasis,referenceStore,discountPct,tier}=judged;
+  const plan=planFor(c,f,tier==='switch'?'small':tier,reference,at);
   const option=plan?.options?.find(o=>o.key===plan.recommendedKey)??plan?.options?.at(-1)??null;
   const row={key:`${c.storeKey}|${c.watchId}|${c.kind}|${c.productKey??c.offerId??c.productName}`,watchId:c.watchId,familyName:f.name,unit:f.unit,storage:f.storage??null,
    storeKey:c.storeKey,storeId:c.storeId??null,storeName:c.storeName,oda:c.storeKey==='oda',online:c.online===true,
    kind:c.kind,reviewed:c.reviewed===true,productName:c.productName,productKey:c.productKey??null,offerId:c.offerId??null,odaProductId:c.odaProductId??null,
    unitPrice:round(c.unitPrice),packAmount:c.packAmount??null,packPrice:c.packPrice!=null?round(c.packPrice):null,bundlePacks:c.bundlePacks??1,maxPacks:c.maxPacks??null,
-   referencePrice:round(reference),referenceBasis:c.reference.basis,referenceStore:c.reference.storeName??null,discountPct,tier,
+   referencePrice:round(reference),referenceBasis,referenceStore,discountPct,tier,
    validFrom:c.validFrom??null,validTo:c.validTo??null,bestBefore:c.bestBefore??null,memberOnly:c.memberOnly===true,conditions:c.conditions??null,
    receiptAt:c.receiptAt??null,sourceUrl:c.sourceUrl??null,image:c.image??null,
    stock:f.stock,annualAmount:f.need?.amount==null?null:round(f.need.amount),quantityBasis:f.need?.basis??null,

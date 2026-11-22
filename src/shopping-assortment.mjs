@@ -19,7 +19,7 @@ const code=v=>{if(typeof v!=='string'||! /^[A-Z][A-Z0-9_]{1,63}$/.test(v))throw 
 const id=v=>{if(!/^[1-9]\d*$/.test(String(v))||!Number.isSafeInteger(Number(v)))throw Error('Invalid assortment native ID.');return String(v);};
 const alias=v=>({EXTRA:'COOP_EXTRA',MENY:'MENY_NO',SPAR:'SPAR_NO',ODA:'ODA_NO',EUROPRIS:'EUROPRIS_NO',OBS:'COOP_OBS',PRIX:'COOP_PRIX',MEGA:'COOP_MEGA',JOKER:'JOKER_NO',BUNNPRIS:'BUNNPRIS',COOP_MARKED:'MATKROKEN'}[v]??v);
 export function assortmentConfig(value={}){
- const priceHorizonDays=value.priceHorizonDays??14;
+ const priceHorizonDays=value.priceHorizonDays??21;
  if(!Number.isInteger(priceHorizonDays)||priceHorizonDays<1||priceHorizonDays>183)throw Error('Assortment priceHorizonDays must be 1–183.');
  const odaScope=value.odaScope??'household';if(!['household','all-current'].includes(odaScope))throw Error('Invalid Oda category scope.');
  const familySource=value.familySource??'reviewed-library';if(!['reviewed-library','sesum'].includes(familySource))throw Error('Invalid assortment familySource.');

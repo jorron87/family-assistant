@@ -107,7 +107,7 @@ test('one stale product keeps a group visible; a wholly stale group is reported'
  shop.market({watchId:flour.id,products:[{...p,id:1,store:'OTHER',lastChecked:'2026-11-07T00:00:00Z'},{...p,id:2,store:'THIRD',lastChecked:'2026-11-08T11:00:00Z'}]});
  clock.at='2026-11-09T10:00:00Z';shop.offer(offer(flour.id));
  assert.equal(shop.view().opportunities.length,1);
- clock.at='2026-11-10T23:00:00Z';shop.offer(offer(flour.id,{validTo:'2026-11-20'}));
+ clock.at='2026-11-30T23:00:00Z';shop.offer(offer(flour.id,{validTo:'2026-12-20'}));
  const view=shop.view();assert.equal(view.opportunities.length,0);assert.equal(view.heldOffers[0].reason,'stale-prices');
 });
 test('deals below a store trip threshold stay visible but out of the headline',()=>{

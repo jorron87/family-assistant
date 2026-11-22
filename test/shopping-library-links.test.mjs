@@ -96,7 +96,7 @@ test('a changed library group stops lending and asks for a new review; a decline
 
 test('fresh prices expire on their own without reloading, and links never cross units',t=>{
  const f=fixture(t);f.native(f.rows[0]);f.link();
- f.clock.at='2026-11-12T12:00:00Z';assert.equal(f.shop.familyView().items[0].prices.current,null);
+ f.clock.at='2026-12-02T12:00:00Z';assert.equal(f.shop.familyView().items[0].prices.current,null);
  const other=f.shop.watch({name:'Annen',unit:'l',storage:'pantry'});
  assert.throws(()=>f.shop.libraryLink({watchId:other.id,evidence:'x',links:[{groupId:f.g.id,groupFingerprint:groupMetadataFingerprint(f.g),evidence:'y'}]}),/enhet/);
 });
@@ -325,7 +325,7 @@ test('pills show relative nutrition and only mark products with both high qualit
  const meny=row.others.find(x=>x.storeName==='MENY');assert.equal(meny.pills.nutrition.level,'medium');assert.equal(meny.pills.value,null);
  const card=f.shop.productInfo({key:'kassal:ODA_NO:2'}),group=card.groups[0];
  assert.deepEqual(card.product.pills,by(2).pills);assert.equal(group.value.top,true);assert.deepEqual(group.nutrition.measures.map(x=>x.key),['sugars','salt']);
- f.clock.at='2026-11-12T12:00:00Z';assert.equal(f.shop.productInfo({key:'kassal:ODA_NO:2'}).product.pills.value,null,'a stale price cannot earn the value pill');
+ f.clock.at='2026-12-02T12:00:00Z';assert.equal(f.shop.productInfo({key:'kassal:ODA_NO:2'}).product.pills.value,null,'a stale price cannot earn the value pill');
 });
 
 test('a cheap product without an ingredient measure can never be called good value',t=>{

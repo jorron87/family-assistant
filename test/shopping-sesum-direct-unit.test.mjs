@@ -103,8 +103,8 @@ test('direct price evidence never supplies organic, brand, exact-family, group o
 });
 
 test('a newly captured label never refreshes an old actual receipt or creates calibrated unit history',t=>{
-  const f=fixture(t);f.ingest({observedAt:'2026-11-07T12:00:00Z'});f.register();f.link([f.A,f.B]);assert.equal(f.item().prices.current,200);assert.equal(f.item().prices.historyDays,0);assert.equal(f.item().prices.lowestSeen,null);assert.equal(f.state.shopping.watches[f.w.id].marketCalibration,null);
-  const source=f.shop.explorer.family(f.B.id).family.members.find(p=>p.key===SOURCE);assert.ok(source);assert.equal(source.fresh,false);assert.ok(source.lastChecked?.startsWith('2026-11-07')||source.receiptAt?.startsWith('2026-11-07'));
+  const f=fixture(t);f.ingest({observedAt:'2026-10-15T12:00:00Z'});f.register();f.link([f.A,f.B]);assert.equal(f.item().prices.current,200);assert.equal(f.item().prices.historyDays,0);assert.equal(f.item().prices.lowestSeen,null);assert.equal(f.state.shopping.watches[f.w.id].marketCalibration,null);
+  const source=f.shop.explorer.family(f.B.id).family.members.find(p=>p.key===SOURCE);assert.ok(source);assert.equal(source.fresh,false);assert.ok(source.lastChecked?.startsWith('2026-10-15')||source.receiptAt?.startsWith('2026-10-15'));
 });
 
 test('a source-only unit comparison leaves unknown household demand, stock and all buyable packs unknown',t=>{

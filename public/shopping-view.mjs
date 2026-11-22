@@ -33,7 +33,7 @@ function field(label,control) {
 
 const SHELF_CHOICES=[[1,'1 mnd'],[3,'3 mnd'],[6,'6 mnd'],[9,'9 mnd'],[12,'1 år']];
 const LOCATIONS=[['all','Alt'],['frozen','Fryser'],['pantry','Tørrvarer'],['chilled','Kjøl']];
-const TIER_LABEL={excellent:'Svært bra pris',good:'Bra pris',small:'Liten rabatt'};
+const TIER_LABEL={excellent:'Svært bra pris',good:'Bra pris',switch:'Billigere enn Oda',small:'Liten rabatt'};
 const BASIS_TEXT={'documented-purchases':'ut fra registrerte kjøp, også utenfor Oda','household-estimate':'etter det dere har oppgitt','planned-amount':'etter planlagt årsmengde','oda-lower-bound':'minst dette, ut fra kjøpene hos Oda','oda-share-estimate':'anslått ut fra Oda-kjøpene og hvor stor del av handelen de er'};
 const HELD_TEXT={member:'krever medlemskap vi ikke har registrert','needs-review':'venter på at en vare sjekkes','stale-prices':'venter på ferske priser','sesum-campaign-changed':'sjekkes på nytt','sesum-offer-needs-review':'har vilkår som ikke er avklart','stale-sesum-offer-proof':'venter på ny kontroll av tilbudet','sesum-offer-missing-primary-proof':'har vilkår som ikke er avklart'};
 
@@ -198,7 +198,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
   // ---- Kjøp nå ----
   // One card for every good buy, whether it is a flyer offer, an ordinary
   // shelf price or an Oda price. Unreviewed variants say so plainly.
-  const REF_TEXT={usual:'vanligvis',paid:'dere har betalt',target:'grensen er','chain-median':'vanlig i andre kjeder'};
+  const REF_TEXT={usual:'vanligvis',paid:'dere har betalt',target:'grensen er','chain-median':'vanlig i andre kjeder',oda:'Oda-varen deres koster'};
   const referenceText=row=>row.referenceBasis==='alternative'?(row.referenceStore?`${row.referenceStore} har ${price(row.referencePrice)}/${row.unit}`:`billigste ellers ${price(row.referencePrice)}/${row.unit}`):`${REF_TEXT[row.referenceBasis]??'vanligvis'} ${price(row.referencePrice)}/${row.unit}`;
   const rowOption=row=>row.options.find(x=>x.key===chosen.get(row.key))??row.options.find(x=>x.key===row.recommendedKey)??row.options.at(-1)??null;
   function addBargain(row,option) {
@@ -227,7 +227,9 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     text.append(badges,el('h4',row.familyName),el('p',[row.productName,row.packPrice!=null&&row.packAmount?`${price(row.packPrice)} for ${packLabel(row.packAmount,row.unit)}`:null].filter(Boolean).join(' · '),'shop-sub'));
     top.append(thumb(row.image),text);card.append(top);
     const line=el('p',undefined,'shop-price');
-    line.append(el('strong',`${price(row.unitPrice)}/${row.unit}`),el('span',` · ${referenceText(row)} · ${nf(0).format(row.discountPct)} % lavere`));
+    // A price can stay current for three weeks; past two days the page says when it was seen.
+    const seen=row.receiptAt&&Date.now()-Date.parse(row.receiptAt)>48*3600000?` · sist sett ${dayLabel(new Date(row.receiptAt).toLocaleDateString('en-CA',{timeZone:'Europe/Oslo'}))}`:'';
+    line.append(el('strong',`${price(row.unitPrice)}/${row.unit}`),el('span',` · ${referenceText(row)} · ${nf(0).format(row.discountPct)} % lavere${seen}`));
     card.append(line);
     if(row.options.length>1)card.append(chips(row.options.map(x=>[x.key,`${x.label} · ${x.packs} pk`]),option.key,key=>{chosen.set(row.key,key);render(true);},'Velg mengde'));
     if(option){
@@ -237,14 +239,15 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
       card.append(total);
     }
     const notes=[],item=data.items.find(x=>x.id===row.watchId);
-    if(row.tier==='good'&&option?.months===3)notes.push('Bra, men ikke et kupp, så vi foreslår 3 måneder.');
+    if(row.tier==='switch')notes.push('Vanlig markedspris, men billigere enn Oda-varen deres. Mengden gjelder neste tur.');
+    else if(row.tier==='good'&&option?.months===3)notes.push('Bra, men ikke et kupp, så vi foreslår 3 måneder.');
     else if(row.fullMonths!=null&&row.fullMonths<(row.tier==='excellent'?12:3)&&option?.months===row.fullMonths)notes.push(`Holder ca. ${monthsText(row.fullMonths)}, så vi foreslår ikke mer.`);
     if(row.stock?.known&&item)notes.push(`Dere har ${stockSummary(item)}.`);
     if(row.bestBefore)notes.push(`Best før ${dayLabel(row.bestBefore)}.`);
     if(row.maxPacks)notes.push(`Maks ${row.maxPacks} per ${row.oda?'bestilling':'kunde'}.`);
     if(row.bundlePacks>1)notes.push(`Kjøp ${row.bundlePacks} og ${row.bundlePacks}.`);
     if(row.memberOnly)notes.push('Krever medlemskap.');
-    if(!row.reviewed)notes.push('Ligger i samme varekategori, men varianten er ikke sjekket mot det dere pleier å kjøpe.');
+    if(!row.reviewed)notes.push('Samme varekategori, men varianten er ikke sjekket.');
     else if(row.kind!=='offer'&&!row.oda)notes.push('Kjedepris, så sjekk prisen i butikken.');
     if(notes.length)card.append(el('p',notes.join(' '),'shop-sub'));
     if(!row.stock?.known&&item&&row.reviewed){
@@ -270,7 +273,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     }
     card.append(actions);
     card.append(details('why:'+row.key,'Slik er det regnet',node=>{
-      const basis={usual:'Vanlig pris er medianen av de billigste sammenlignbare prisene over tid.',paid:'Det dere har betalt for samme vare er lavere enn vanlig markedspris, så det brukes.',alternative:'En annen butikk har nå en lavere pris enn vanlig, så besparelsen regnes mot den.',target:'Ingen markedspris ennå, så tilbudet holdes mot deres egen prisgrense.','chain-median':'Ingen gjennomgått pris finnes, så prisen holdes mot medianen av laveste pris i andre kjeder.'}[row.referenceBasis];
+      const basis={usual:'Vanlig pris er medianen av de billigste sammenlignbare prisene over tid.',paid:'Det dere har betalt for samme vare er lavere enn vanlig markedspris, så det brukes.',alternative:'En annen butikk har nå en lavere pris enn vanlig, så besparelsen regnes mot den.',target:'Ingen markedspris ennå, så tilbudet holdes mot deres egen prisgrense.',oda:'Prisen er ikke lav i markedet, så den holdes mot Oda-varen dere vanligvis kjøper. Besparelsen gjelder bare mengden til neste tur.','chain-median':'Ingen gjennomgått pris finnes, så prisen holdes mot medianen av laveste pris i andre kjeder.'}[row.referenceBasis];
       if(basis)node.append(el('p',basis,'shop-sub'));
       if(row.annualAmount!=null)node.append(el('p',`Årsbehov: ${amount(row.annualAmount,row.unit)}, ${BASIS_TEXT[row.quantityBasis]??''}.`,'shop-sub'));
       if(row.conditions)node.append(el('p',row.conditions,'shop-sub'));

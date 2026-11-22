@@ -3,9 +3,10 @@ import {readFileSync,statSync} from 'node:fs';
 import {isUtf8} from 'node:buffer';
 import {scoreProductQuality} from './product-quality.mjs';
 import {scoreFamilyNutrition} from './product-nutrition.mjs';
+import {CURRENT_PRICE_MS} from './price-freshness.mjs';
 
 const UNITS=new Set(['kg','l','stk','m']);
-const FRESH_MS=48*3600000;
+const FRESH_MS=CURRENT_PRICE_MS;
 const plain=value=>value!==null&&typeof value==='object'&&!Array.isArray(value)&&[Object.prototype,null].includes(Object.getPrototypeOf(value));
 const nonempty=value=>typeof value==='string'&&value.trim().length>0;
 const positive=value=>typeof value==='number'&&Number.isFinite(value)&&value>0;

@@ -2,6 +2,7 @@ import {existsSync,readFileSync,writeFileSync,renameSync} from 'node:fs';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {loadKey,encrypt,decrypt} from './crypto.mjs';
+import {CURRENT_PRICE_MS} from './price-freshness.mjs';
 
 // Prices are chain-level observations. Fetch time and product updated_at do not
 // establish price freshness, local availability, promotions or customer limits.
@@ -12,7 +13,7 @@ export function kassalQuotes(data,now=new Date()) {
   const lastChecked=(typeof current==='object'?current?.date:null)??p.price_history?.[0]?.date??null;
   const age=now.getTime()-Date.parse(lastChecked),weight=Number(p.weight),unit=String(p.weight_unit??'').toLowerCase();
   const pack=weight>0&&Number.isFinite(weight)&&['kg','g','l','ml','piece','stk'].includes(unit)?{amount:weight*(['g','ml'].includes(unit)?.001:1),unit:['g','kg'].includes(unit)?'kg':['ml','l'].includes(unit)?'l':'stk'}:null;
-  return {id:p.id,name:p.name,ean:p.ean??data?.data?.ean??null,store:p.store?.code??null,storeName:p.store?.name??null,url:p.url,price:Number.isFinite(price)&&price>0?price:null,pack,lastChecked,fresh:Number.isFinite(age)&&age>=-60000&&age<=48*3600000,scope:'chain',localAvailabilityVerified:false};
+  return {id:p.id,name:p.name,ean:p.ean??data?.data?.ean??null,store:p.store?.code??null,storeName:p.store?.name??null,url:p.url,price:Number.isFinite(price)&&price>0?price:null,pack,lastChecked,fresh:Number.isFinite(age)&&age>=-60000&&age<=CURRENT_PRICE_MS,scope:'chain',localAvailabilityVerified:false};
  });
 }
 

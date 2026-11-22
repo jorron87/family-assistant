@@ -94,8 +94,8 @@ test('duplicate identities, conflicting current receipts and duplicate membershi
 });
 
 test('price freshness uses the actual receipt boundary; future, unavailable and other-scope prices cannot win',()=>{
- const data=fixture(),p=data.products[1];data.prices[1]=price(p,1,{receiptAt:'2026-11-07T12:00:00Z'});assert.equal(createProductLibrary(data,{now:NOW}).compare('cashew').cheapest.unitPrice,2);
- for(const patch of [{receiptAt:'2026-11-07T11:59:59Z'},{receiptAt:'2026-11-09T12:00:01Z'},{available:false},{availabilityScope:'unknown'},{sourceUrl:null}]){
+ const data=fixture(),p=data.products[1];data.prices[1]=price(p,1,{receiptAt:'2026-10-19T12:00:00Z'});assert.equal(createProductLibrary(data,{now:NOW}).compare('cashew').cheapest.unitPrice,2);
+ for(const patch of [{receiptAt:'2026-10-19T11:59:59Z'},{receiptAt:'2026-11-09T12:00:01Z'},{available:false},{availabilityScope:'unknown'},{sourceUrl:null}]){
   data.prices[1]=price(p,1,patch);assert.deepEqual(createProductLibrary(data,{now:NOW}).compare('cashew').cheapest.productKeys,['kassal:CHAIN_A:1']);
  }
 });
