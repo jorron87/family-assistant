@@ -59,6 +59,9 @@ test('only enrolled devices can authorize, read or set savings rules; callback c
   const params={state:new URL(connect.url).searchParams.get('state'),code:'sample'};
   assert.equal((await call('second','/confirm',params)).status,422);
   assert.equal((await call('first','/confirm',params)).saved,true);
+  assert.equal((await call('first')).queued,true);
+  await finance.tick();
+  assert.equal((await call('first')).queued,false);
   assert.equal((await call('first','/confirm',params)).status,422);
   const {accounts:[account]}=await call('second');
   const choice={account:account.key,id:account.rows[0].id};

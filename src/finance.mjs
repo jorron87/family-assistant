@@ -20,7 +20,7 @@ function setupIssue(owner) {
 }
 export function createFinance({dataDir, config=settings, client=bankingClient, keyProvider=loadKey}) {
   const path=join(dataDir,'finance.enc');
-  let state,key,busy=false;
+  let state,key,busy=false,progress=null;
   const pending=new Map();
   function load() {
     if (!state) {
@@ -55,14 +55,16 @@ export function createFinance({dataDir, config=settings, client=bankingClient, k
     info.attempt=new Date().toISOString();
     const api=client(owner);
     const errors=[];
-    for (const link of info.links) {
-      try { next.accounts[link.key]=await readAccount(api,link,current.accounts[link.key]); }
-      catch (err) {
-        errors.push(link.name+': '+safeError(err));
+    progress={owner:owner.id,read:0,total:info.links.length};
+    try {
+      for (const link of info.links) {
+        try { next.accounts[link.key]=await readAccount(api,link,current.accounts[link.key]); }
+        catch (err) { errors.push(link.name+': '+safeError(err)); }
+        progress.read++;
       }
-    }
-    info.issue=errors.join(' · ')||null;
-    save(next);
+      info.issue=errors.join(' · ')||null;
+      save(next);
+    } finally {progress=null;}
   }
   function safeError(error) {
     if (/^(Enable Banking svarte HTTP \d{3}|Gjentatt side i transaksjonslisten\.|Ufullstendig transaksjonsliste\.|Banken leverte ingen saldo\.)$/.test(error.message)) return error.message;
@@ -87,7 +89,8 @@ export function createFinance({dataDir, config=settings, client=bankingClient, k
     const connections=owners.map(o=>{
       const c=s.owners[o.id];return {name:o.name||o.id,me:o.id===owner.id,setupIssue:setupIssue(o),expires:c?.expires||null,issue:c?.issue||null,attempt:c?.attempt||null};
     });
-    return {accounts,connections,saved,hasRule:Array.from(active).some(k=>!!s.targets[k]),goal:cfg.monthlySavingsNok??null};
+    const queued=owners.some(o=>{const c=s.owners[o.id];return c && !c.attempt && Date.parse(c.expires)>Date.now() && !setupIssue(o);});
+    return {accounts,connections,saved,queued,progress:progress?{read:progress.read,total:progress.total}:null,hasRule:Array.from(active).some(k=>!!s.targets[k]),goal:cfg.monthlySavingsNok??null};
   }
   async function route({device,path,req,res,send,json}) {
     const cfg=config(), owner=configuredOwners(cfg).find(o=>o.deviceId===device.id);
@@ -120,7 +123,9 @@ export function createFinance({dataDir, config=settings, client=bankingClient, k
           const links=accountLinks(session);
           const next=structuredClone(load());
           next.owners[owner.id]={expires:session.access.valid_until,links};save(next);
-          await syncOwner(owner,true);return {saved:true};
+          // The durable consent is enough for the normal scheduler to finish
+          // reading even if the phone disconnects or the server restarts.
+          return {saved:true};
         }
         if (path==='/send/api/finance/target') {
           const next=structuredClone(load());

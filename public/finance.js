@@ -15,13 +15,23 @@ function run(action){return async()=>{try {await action();}catch(error){el('stat
 function addAction(parent,label,action) {
   const button=append(parent,'button',label);button.type='button';button.onclick=run(action);
 }
+let refreshTimer,viewNumber=0;
 async function show(){
+  clearTimeout(refreshTimer);
+  const number=++viewNumber;
   const data=await request('?month='+encodeURIComponent(el('month').value));
+  if (number!==viewNumber) return;
   el('overview').hidden=false;
   el('status').textContent='Opplysningene er felles for de godkjente voksne.';
   const current=data.connections.find(c=>c.me);
   el('connect').disabled=!!current?.setupIssue;
   if (current?.setupIssue) el('status').textContent=current.setupIssue;
+  if (data.progress || data.queued) {
+    el('status').textContent=data.progress
+      ? 'Henter bankhistorikk. Behandlet '+data.progress.read+' av '+data.progress.total+' kontoer. Du kan lukke siden.'
+      : 'Samtykket er lagret. Innlesingen starter automatisk. Du kan lukke siden.';
+    refreshTimer=setTimeout(run(show),5000);
+  }
   el('connect').textContent=current?.expires?'Forny min DNB-tilkobling':'Koble mine DNB-kontoer til felles voksenvisning';
   el('savings').textContent=data.hasRule?money(data.saved)+(data.goal!=null?' av '+money(data.goal*100):'')+' registrert denne måneden.':'Velg en kjent Nordnet-overføring under egen konto for å kjenne igjen kommende innskudd.';
   if (data.hasRule && data.saved===0) el('savings').textContent+=' Ingen innbetaling til den bekreftede mottakeren er registrert i perioden. Sjekk kontodekning og siste synk.';
@@ -55,7 +65,7 @@ await run(async()=>{
   const query=new URLSearchParams(location.search);
   if (location.search) history.replaceState(null,'',location.pathname);
   if (query.has('code')) {
-    el('status').textContent='Henter kontoer og bokførte kjøp …';
+    el('status').textContent='Bekrefter samtykket hos banken …';
     await request('/confirm',{state:query.get('state'),code:query.get('code')});
   } else if (query.has('error')) throw Error('Banktilkoblingen ble avbrutt. Åpne økonomi på nytt for å prøve igjen.');
   await show();
