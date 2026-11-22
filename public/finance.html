@@ -1,6 +1,30 @@
 <!doctype html>
-<html lang="nb"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>Familieøkonomi</title><link rel="stylesheet" href="/send/phone.css"></head>
-<body><main><a href="/send/">← Familien</a><h1>Økonomi</h1><p id="status" role="status">Åpner økonomien …</p>
-<section id="overview" hidden><label>Måned <input id="month" type="month"></label><h2>Sparing til Nordnet</h2><p id="savings"></p>
-<h2>Banktilkoblinger</h2><div id="connections"></div><button id="connect">Koble mine DNB-kontoer til felles voksenvisning</button>
-<h2>Kontoer og kjøp</h2><div id="accounts"></div></section></main><script type="module" src="/send/finance.js"></script></body></html>
+<html lang="nb"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><meta name="robots" content="noindex,nofollow"><title>Familieøkonomi</title><link rel="stylesheet" href="finance.css"></head>
+<body><div class="wrap">
+<header class="top"><a id="home" href="/send/">← Familien</a><h1>Økonomi</h1>
+  <div class="top-actions"><label class="month">Måned <input id="month" type="month"></label><button id="lock" type="button" class="ghost" hidden>Lås</button></div></header>
+<p id="status" class="status" role="status">Åpner økonomien …</p>
+<section id="locked" class="lock" hidden>
+  <h2>Økonomien er låst</h2>
+  <p id="lock-text">Skriv inn din voksen-PIN for å åpne familieøkonomien.</p>
+  <form id="unlock"><input id="pin" type="password" inputmode="numeric" autocomplete="off" pattern="[0-9]{6,12}" maxlength="12" aria-label="PIN-kode" required><button>Lås opp</button></form>
+  <p id="device-id" class="muted small"></p>
+</section>
+<main id="app" hidden>
+  <nav class="tabs" role="tablist" aria-label="Økonomivisninger">
+    <button role="tab" data-tab="overview" aria-selected="true">Oversikt</button>
+    <button role="tab" data-tab="ideas">Forslag</button>
+    <button role="tab" data-tab="fixed">Faste trekk</button>
+    <button role="tab" data-tab="forecast">Prognose</button>
+    <button role="tab" data-tab="tx">Transaksjoner</button>
+    <button role="tab" data-tab="accounts">Kontoer</button>
+  </nav>
+  <section data-panel="overview"></section>
+  <section data-panel="ideas" hidden></section>
+  <section data-panel="fixed" hidden></section>
+  <section data-panel="forecast" hidden></section>
+  <section data-panel="tx" hidden></section>
+  <section data-panel="accounts" hidden></section>
+</main>
+<div id="tooltip" class="tooltip" hidden></div>
+</div><script type="module" src="finance.js"></script></body></html>

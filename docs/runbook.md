@@ -783,3 +783,25 @@ Hver tilkobling ber om lengst tilgjengelig historikk ved første lesing. Derette
 Sammenlign bare endringer i samme type bokført saldo og valuta. Første måling setter sammenligningsgrunnlaget. Disponibel saldo vises med bankens type og gir ingen avstemmingskvittering. Se faktisk eldste bokføring og siste lesetid per konto. Delte kontoer med samme stabile kontoidentitet teller én gang i voksenvisningen. Sparing viser identifiserte utgående overføringer i valgt måned. Dekning, oppdateringstid og registrert mottaker avgjør om null kan tolkes som manglende innbetaling.
 
 Økonomiregisteret finance.enc ligger separat i tjenestens datamappe med AES-GCM og tjenestens DPAPI-beskyttede nøkkel. Ved sikkerhetskopiering, ta med økonomiregister, nødvendige nøkler og privat oppsett i en tilgangsbegrenset sikkerhetskopi. Bankenheters tilgang og samtykker må gjennomgås ved gjenoppretting.
+
+Hver voksen kan koble til flere banker, også kredittkort og sparekontoer. Én bankfeil eller én uleselig postering stopper ikke de andre kontoene; antallet uleste posteringer vises på kontoen og fanges av saldoavstemmingen. Banklesing og familievalg skrives hver for seg på nyeste lagrede tilstand, så samtykke og valg kan gjøres mens en lang historikklesing pågår.
+
+## Økonomiagenten
+
+Økonomiagenten er en egen, avgrenset kjøring (scope «økonomi») som tjenesten starter når `agent.enabled` er sann i finance.json og agentoppsettet ellers er godkjent. Den starter tidligst seks timer etter forrige kjøring, eller etter et kvarter når familien har stilt et spørsmål eller bedt om en gjennomgang, og venter alltid på telefoninnsendinger, kalenderhandlinger og familieavklaringer. Den tar ikke kjøringslåsen.
+
+Oppgavene står i `duties` i `finance-digest`: `questions`, `requested`, `letter` (månedsbrev for forrige måned fra den tredje), `weekly-review`, `contract-review` (årlig gjennomgang av store avtaler) og `tax:ÅR` (januar–april). Kvitter bare faktisk fullførte oppgavetyper i `finance-done`.
+
+Les: `finance-digest` gir dekning, månedssummer, kategorier, faste trekk, dagligvarer per kjede, sparing, oppgjør mellom voksne, prognose, signaler, skattegrunnlag, forslag, avviste emner, regler og godkjente betalingsmottakere. `finance-transactions "month=2026-10&category=dagligvarer&q=tekst"` gir posteringer med rowId, merchantKey, kategori og type (bruk `offset` for flere sider).
+
+Skriv (UTF-8 JSON-fil):
+- `finance-suggest`: `{subject, kind, title, summary, steps[], draft?{kind,to,subject,body}, dataFingerprint, evidence:{rowIds[], reasoning, sources:[{url,observedAt,note}]}, estimate:{annualSavingsNok|null, basis}, baseline?{merchantKey}, action?{type:"oda-share",value}, priority, dueDate?}`. `subject` er en stabil nøkkel, for eksempel `contract:strom` eller `subscription:netflix`; samme emne oppdaterer forslaget. Et emne familien har avvist kan bare gjenåpnes etter 180 dager eller med en konkret `reopenReason`. `baseline` binder forslaget til et kjent fast trekk, og tjenesten registrerer faktisk besparelse først når senere bokførte trekk er lavere eller uteblir.
+- `finance-letter`: `{month, dataFingerprint, title, body, highlights[], rowIds[]}` – kort, konkret månedsbrev på norsk.
+- `finance-answer`: `{id, answer, rowIds[]}` for familiens spørsmål.
+- `finance-rule`: `{match:{merchantKey|counterparty|rowId}, set:{category?, kind?, shared?}, evidence}`. Familiens regler overstyrer alltid agentens.
+- `finance-account`: `{account, role, evidence}` for kontotype (checking, joint, savings, card, loan).
+- `finance-plan`: `{items:[{key, date, amountNok, label, category?, source:{kind, ref, evidence}}]}` for kjente framtidige utgifter fra kalender, dokumenter eller e-post.
+- `finance-payment`: `{key, ruleId, payee:{account, kid?, message?}, amountNok, dueDate, evidence:{source, reasoning}}`. Bare til mottakere familien har godkjent og innenfor deres maksbeløp. Familien betaler selv i banken; forslaget merkes betalt når trekket bokføres.
+- `finance-done`: `{completed[], outcome:"ok"|"partial", summary, blockers[]}`.
+
+Arbeidsmåte: Les faktiske posteringer før du konkluderer. Store faste avtaler vurderes mot offentlige primærkilder (Finansportalen for bank, lån og forsikring, Forbrukerrådets strømprisoversikt, leverandørenes egne prisider) med faktisk lesetidspunkt. Strøm vurderes mot faktisk forbruk når Home Assistant har målerdata. Dagligvarer kobles mot handlemodulen; foreslå `odaShare` bare fra minst et halvt års dekning. Skatteforberedelse er en sjekkliste med belegg (gaver til godkjente organisasjoner, fagforeningskontingent, foreldrefradrag for barnehage/SFO, renter) som familien kontrollerer i skattemeldingen. Lag utkast til oppsigelse eller reforhandling som familien selv sender. Ingen betaling, overføring, handel, innlogging, vilkårsaksept eller kontakt med leverandører, og ingen personlige investeringsråd.

@@ -112,22 +112,24 @@ Start the bounded household category plan with shopping-taxonomy and shopping-ta
 
 Starting full collection is explicit. shopping-assortment-start accepts a UTF-8 JSON file with validationReads:1 through 8 for a bounded live validation; its durable budget cannot turn into a full sweep on restart. Pause collection with shopping-assortment-pause. Resume an existing sweep only when the owner has authorized it. Enabling this config never enables an agent runtime, changes models/permissions or bypasses the dispatch pause.
 
-## Automatisk økonomiinnlesing fra DNB
+## Familieøkonomi: bankinnlesing, PC-tilgang og økonomiagent
 
-Åpne **Profiler → Familieøkonomi** på hver voksens egen, parede telefon. Noter enhets-ID-en der. Tilgangen følger den fysisk godkjente nettleseren. Bruk skjermlås og en privat telefon. Enhets-ID er ikke en innloggingskode.
+Familieøkonomien åpnes på hver voksens egen, parede telefon (**Profiler → Familieøkonomi**) eller i en nettleser med voksen-PIN: på PC-en på `http://127.0.0.1:4318/okonomi/`, og i andre parede nettlesere via mobiladressen. Kioskporten viser aldri økonomi, og lenken skjules på barnas telefoner. Bruk skjermlås, og la ikke barna bruke samme Windows-konto som tjenesten; registeret er beskyttet med tjenestebrukerens DPAPI-nøkkel.
 
-1. Hver kontoeier registrerer sin egen produksjonsapplikasjon hos [Enable Banking](https://enablebanking.com/docs/api/linked-accounts) for privat bruk. Registrer mobilnettstedets eksakte HTTPS-adresse med stien `/send/finance/` som returadresse, inkludert siste skråstrek. Velg kontoinformasjon (AIS) og knytt egne DNB-kontoer til applikasjonen. Kontoeieren godkjenner dette selv hos banken.
-2. Oppbevar den private RSA-nøkkelen i en tilgangsbegrenset mappe utenfor Git og nettsidens mapper. Bare eieren og tjenestens Windows-konto trenger lesetilgang. På vertsmaskinen, kjør `npm run finance:setup` én gang per voksen. Oppgi enhets-ID, applikasjons-ID og filstien til nøkkelen lokalt. Veiviseren oppdaterer den ignorerte finance.json. Konfigurasjonen leses på nytt uten omstart.
-3. Åpne økonomisiden igjen på samme telefon. Velg tilkobling, bekreft deling med de andre godkjente voksne og fullfør bankens samtykke i samme nettleser. Gjenta på den andre telefonen. Sjekk et utvalg faktiske bokførte kjøp og saldo på begge kontoer. Kontroller etter neste bokføring at den dukker opp uten filimport.
-4. Åpne en kjent utgående Nordnet-overføring og bekreft mottakeren. For denne kontoen regnes betalinger til samme mottakerkonto som sparing. Hvis bankdata mangler mottakerkonto, støttes eksakt betalingsmerkelapp som inneholder «Nordnet». En endret merkelapp trenger ny bekreftelse. Et valgfritt tall i `monthlySavingsNok` i lokal konfigurasjon viser felles månedlig mål.
+1. Hver kontoeier registrerer sin egen produksjonsapplikasjon hos [Enable Banking](https://enablebanking.com/docs/api/linked-accounts) for privat bruk. Registrer mobilnettstedets eksakte HTTPS-adresse med stien `/send/finance/` som returadresse, inkludert siste skråstrek. Velg kontoinformasjon (AIS) og knytt alle egne kontoer i alle banker til applikasjonen, også kredittkort og sparekontoer. Kontoeieren godkjenner dette selv hos banken.
+2. Oppbevar den private RSA-nøkkelen i en tilgangsbegrenset mappe utenfor Git og nettsidens mapper. På vertsmaskinen, kjør `npm run finance:setup` én gang per voksen. Oppgi eventuell telefonens enhets-ID, applikasjons-ID, filstien til nøkkelen og en PIN på 6–12 sifre. Veiviseren spør også om økonomiagenten skal slås på. Konfigurasjonen leses på nytt uten omstart.
+3. Åpne økonomisiden, gå til **Kontoer**, velg bank og koble til. Gjenta for hver bank og hver voksen. Kontroller et utvalg bokførte kjøp og saldo, og sett riktig kontotype (brukskonto, felleskonto, sparekonto, kredittkort, lån); kontotypen styrer hva som telles som sparing og overføring.
+4. Mål for månedlig sparing settes med `monthlySavingsNok` i lokal konfigurasjon.
 
-Ved ny telefon eller ny paring, verifiser den nye telefonens ID fysisk og kjør veiviseren igjen med samme stabile voksen-ID. Fjern en voksen fra lokal konfigurasjon for å avslutte enhetens tilgang. Trekk tilbake banksamtykket hos leverandøren/banken ved avslutning.
+Økonomiagenten (`agent.enabled`) leser alle tilkoblede økonomidata gjennom tjenestens lokale agentnøkkel (`finance-agent.token` i datamappen) og skriver forslag, månedsbrev, svar, regler, planlagte utgifter og betalingsforslag. Den betaler aldri; betalingsforslag går bare til mottakere familien har godkjent på siden, innenfor et maksbeløp, og familien betaler i banken med BankID. Slå den av igjen ved å sette `agent.enabled` til false.
+
+Ved ny telefon eller ny paring, verifiser den nye telefonens ID fysisk og kjør veiviseren igjen med samme stabile voksen-ID. Fjern en voksen fra lokal konfigurasjon for å avslutte tilgangen. **Koble fra** på siden trekker tilbake banksamtykket hos Enable Banking; kontroller også i banken ved avslutning.
 
 ### Personvern for familieøkonomi
 
 Familieøkonomi er en privat oversikt som drives av husstanden på egen maskin. Når en kontoeier gir samtykke hos banken, formidler Enable Banking kontoidentifikatorer, saldo og bokførte transaksjoner til løsningen. Opplysningene brukes til å vise kjøp, avstemme saldo og følge sparing. Kontoeierne velger selv kontoer i bankens godkjenningsflyt.
 
-Økonomiregisteret lagres kryptert på husstandens maskin. Enhetene som husstanden uttrykkelig har godkjent som voksentelefoner, har felles innsyn. Hver kontoeier kan trekke tilbake banktilgangen hos banken eller leverandøren. Tidligere innhentede opplysninger kan fortsatt ligge i registeret og i husstandens sikkerhetskopier. Spørsmål om innsyn, tilgang eller sletting rettes til den som administrerer husstandens installasjon, via kontaktadressen i registreringen hos Enable Banking.
+Økonomiregisteret lagres kryptert på husstandens maskin. Godkjente voksentelefoner og nettlesere som er låst opp med en voksen-PIN, har felles innsyn. Når husstanden slår på økonomiagenten, leser den valgte agentløsningen opplysningene for å lage oversikter og forslag. Hver kontoeier kan trekke tilbake banktilgangen hos banken eller leverandøren. Tidligere innhentede opplysninger kan fortsatt ligge i registeret og i husstandens sikkerhetskopier. Spørsmål om innsyn, tilgang eller sletting rettes til den som administrerer husstandens installasjon, via kontaktadressen i registreringen hos Enable Banking.
 
 ### Bruksvilkår for familieøkonomi
 

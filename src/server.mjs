@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { createStore, DATA_DIR } from "./store.mjs";
 import { refreshWaste } from './waste.mjs';
 import {createFinance} from './finance.mjs';
+import {launchLuna} from './phone-dispatch.mjs';
 import {phoneHandler} from './phone-server.mjs';
 import {createOdaCart} from './shopping-oda-cart.mjs';
 import {createImageFetcher,createSourceFetcher,flyerPage} from './shopping-source.mjs';
@@ -343,7 +344,20 @@ async function handle(req, res) {
       if(req.headers['x-family-request']!=='1'||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host))return send(res,403,{error:'Ugyldig avsender.'});
       const input=await json(req);return send(res,200,path.endsWith('/connect')?await homeAssistant.connect(input.token):await homeAssistant.command(input));
     }
-    if (path.startsWith('/send/finance') || path.startsWith('/send/api/finance')) return send(res,403,{error:'Familieøkonomi åpnes på den godkjente mobiladressen.'});
+    if (path.startsWith('/send/finance') || path.startsWith('/send/api/finance')) return send(res,403,{error:'Familieøkonomi åpnes på /okonomi/ på denne PC-en eller på den godkjente mobiladressen.'});
+    // Household PC: the finance page is locked behind an adult PIN. The kiosk port refuses it.
+    if(path==='/okonomi'&&method==='GET'){res.writeHead(302,{Location:'/okonomi/'});return res.end();}
+    const financeAsset={'/okonomi/':['finance.html','text/html; charset=utf-8'],'/okonomi/finance.js':['finance.js','text/javascript; charset=utf-8'],'/okonomi/finance.css':['finance.css','text/css; charset=utf-8']}[path];
+    if(financeAsset&&method==='GET'){
+      res.setHeader('Content-Security-Policy',"default-src 'self'; img-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+      res.setHeader('Referrer-Policy','no-referrer');
+      return send(res,200,readFileSync(join(root,'public',financeAsset[0])),financeAsset[1]);
+    }
+    if(path.startsWith('/api/finance/agent/'))return finance.agent({path,req,res,send,json});
+    if(path==='/api/finance'||path.startsWith('/api/finance/')){
+      if(method==='POST'&&(req.headers['x-family-request']!=='1'||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host)))return send(res,403,{error:'Ugyldig avsender.'});
+      return finance.desktop({path,req,res,send,json});
+    }
     if(path==='/send'||path.startsWith('/send/'))return mobileHandle(req,res);
     if(path==='/phone-setup'&&method==='GET')return send(res,200,readFileSync(join(root,'public','phone-admin.html')),'text/html; charset=utf-8');
     if(path==='/phone-admin.js'&&method==='GET')return send(res,200,readFileSync(join(root,'public','phone-admin.js')),'text/javascript; charset=utf-8');
@@ -580,7 +594,11 @@ async function handle(req, res) {
     return send(res, status, { error: error.message });
   }
 }
-const finance=createFinance({dataDir:DATA_DIR});
+const finance=createFinance({dataDir:DATA_DIR,
+  launchAgent:({prompt,onExit})=>launchLuna({root,prompt,onExit}),
+  shouldYield:()=>restarting||!!process.env.FAMILIEN_NO_DISPATCH||store.phone.list().some(i=>['queued','processing'].includes(i.status))||store.calendarActions().length>0||store.clarifications.ready().length>0,
+  applyOdaShare:value=>store.shopping.settings({odaShare:value})});
+try{finance.agentToken();}catch{console.error('Kunne ikke opprette økonomiagentens nøkkel.');}
 if (!process.env.FAMILIEN_NO_DISPATCH) setInterval(()=>{
   if (!restarting) trackHostWork('finance-sync',()=>finance.tick()).catch(()=>console.error('Kunne ikke lese økonomioppsettet.'));
 },60000).unref();
@@ -602,6 +620,7 @@ servers.at(-1).listen(port, host, () => console.log(`Familien: http://${host}:${
 // Family controls are available on the living-room display; ingestion stays private.
 servers.push(createServer((req,res) => {
   const kioskStock=new URL(req.url,`http://${host}`).pathname;
+  if(/^\/(?:okonomi|api\/finance|send\/finance|send\/api\/finance)(?:\/|$)/.test(kioskStock))return send(res,404,{error:'Ukjent endepunkt.'});
   if(kioskStock.startsWith('/api/clarifications/')&&kioskStock!=='/api/clarifications/answer')return send(res,req.method==='GET'?403:405,{error:'Agentens avklaringsarbeid er bare tilgjengelig på agentporten.'});
   if(req.method==='POST'&&kioskStock==='/api/clarifications/answer')return handle(req,res);
   if(kioskStock.startsWith('/api/shopping/stock-')){

@@ -16,6 +16,8 @@ export function phoneHandler({finance=null,odaCart=null,productImages=null,oda=n
         const assets={'/send/profile-editor.mjs':['profile-editor.mjs','text/javascript; charset=utf-8'],'/send/profile-editor.css':['profile-editor.css','text/css; charset=utf-8'],'/send/':['phone.html','text/html; charset=utf-8'],'/send/phone.js':['phone.js','text/javascript; charset=utf-8'],'/send/phone-family.js':['phone-family.js','text/javascript; charset=utf-8'],'/send/calendar-data.mjs':['calendar-data.mjs','text/javascript; charset=utf-8'],'/send/event-display.mjs':['event-display.mjs','text/javascript; charset=utf-8'],'/send/phone.css':['phone.css','text/css; charset=utf-8'],'/send/manifest.webmanifest':['phone.webmanifest','application/manifest+json'],'/send/icon.svg':['phone-icon.svg','image/svg+xml']};
         assets['/send/finance/']=['finance.html','text/html; charset=utf-8'];
         assets['/send/finance.js']=['finance.js','text/javascript; charset=utf-8'];
+        assets['/send/finance/finance.js']=['finance.js','text/javascript; charset=utf-8'];
+        assets['/send/finance/finance.css']=['finance.css','text/css; charset=utf-8'];
         assets['/send/dtf.mjs']=['dtf.mjs','text/javascript; charset=utf-8'];
         assets['/send/member-colors.mjs']=['member-colors.mjs','text/javascript; charset=utf-8'];
         assets['/send/celebrate.mjs']=['celebrate.mjs','text/javascript; charset=utf-8'];
@@ -37,6 +39,9 @@ export function phoneHandler({finance=null,odaCart=null,productImages=null,oda=n
         const origin=req.headers.origin;
         if(req.headers['x-family-request']!=='1' || (origin && new URL(origin).host!==req.headers.host))return send(res,403,{error:'Ugyldig avsender.'});
       }
+      // The bank returns to this public address, possibly in a browser that is not a paired
+      // phone (the household PC). The single-use state token from the started consent proves the flow.
+      if(finance&&path==='/send/api/finance/confirm'&&req.method==='POST')return await finance.confirmMobile({path,req,res,send,json});
       if(path==='/send/api/pair'&&req.method==='POST') {
         while(attempts[0]<Date.now()-3600000)attempts.shift();
         if(attempts.length>=100)return send(res,429,{error:'For mange innloggingsforsøk. Prøv senere.'});
@@ -49,7 +54,7 @@ export function phoneHandler({finance=null,odaCart=null,productImages=null,oda=n
       const token=String(req.headers.cookie??'').split(';').map(item=>item.trim()).find(item=>item.startsWith('familien_phone='))?.slice(15);
       const device=store.phone.authenticate(token);
       if(!device)return send(res,401,{error:'Åpne familielenken for å knytte denne telefonen til familien.'});
-      if (finance && (path==='/send/api/finance'||path.startsWith('/send/api/finance/'))) return await finance.route({device,path,req,res,send,json});
+      if (finance && (path==='/send/api/finance'||path.startsWith('/send/api/finance/'))) return await finance.mobile({device,path,req,res,send,json,adult:store.profile().members.some(m=>m.id===device.memberId&&m.role!=='child')});
       if(path==='/send/api/clarifications'&&req.method==='GET')return send(res,200,familyClarifications(store,new URL(req.url,'http://localhost').searchParams));
       if(path==='/send/api/clarifications/answer'&&req.method==='POST'){const result=answerClarification(store,await json(req));send(res,200,result);if(!result.replayed)queueMicrotask(onQueued);return;}
       if(path==='/send/api/family'&&req.method==='GET') {

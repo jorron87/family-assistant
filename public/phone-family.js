@@ -14,7 +14,7 @@ export function installFamily({api,post,status}) {
  let explorerReady;
  const explorerInstance=()=>explorerReady??=import('./library-explorer.mjs?v='+Date.now()).then(({installLibraryExplorer})=>installLibraryExplorer({panel:$('#family-explore'),base:'/send/api/shopping',compact:true,onBack:()=>setView('shopping')}));
  async function openExplorer(){try{(await explorerInstance()).open();}catch{explorerReady=null;$('#family-explore').textContent='Varene blir tilgjengelige når den pågående kjøringen er ferdig.';}}
- async function refreshProfile(){try{if(!editor){const {installProfileEditor}=await import('./profile-editor.mjs?v='+Date.now());editor=installProfileEditor($('#mobile-profile-cards'),{read:()=>api('/profile'),save:data=>post('/profile/edit',data),onSaved:()=>refresh()});}await editor.refresh();}catch{$('#mobile-profile-cards').textContent='Profilredigeringen blir tilgjengelig når den pågående kjøringen er ferdig.';}}
+ async function refreshProfile(){fetch('/send/api/finance/access',{cache:'no-store'}).then(r=>r.ok?r.json():{visible:false}).then(r=>{$('#finance-link').hidden=!r.visible;}).catch(()=>{});try{if(!editor){const {installProfileEditor}=await import('./profile-editor.mjs?v='+Date.now());editor=installProfileEditor($('#mobile-profile-cards'),{read:()=>api('/profile'),save:data=>post('/profile/edit',data),onSaved:()=>refresh()});}await editor.refresh();}catch{$('#mobile-profile-cards').textContent='Profilredigeringen blir tilgjengelig når den pågående kjøringen er ferdig.';}}
  let data={members:[],events:[]},person='all',view='home',mode='agenda',day=osloDay(),showLater=false,signature='',openedId=null;
  const colors=new Proxy({}, {get:(_,id)=>memberColor(data.members,id)});
  const expanded=new Set();

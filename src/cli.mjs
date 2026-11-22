@@ -1,6 +1,7 @@
 import {readConfig} from './config.mjs';
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { activityCoverage, validateActivityRun } from './activity-coverage.mjs';
 import { readJsonArg, slimCompletion, slimReviewQueue, slimResult, slimProfile, slimPhone, buildNext, shoppingOverview } from './cli-lib.mjs';
@@ -56,6 +57,20 @@ async function request(path, method = "GET", data) {
   return result;
 }
 
+// The finance agent surface needs the service's local agent key, so a browser on
+// the household PC cannot read bank data through the agent port.
+const financeKey = () => readFileSync(join(process.env.FAMILIEN_DATA_DIR ?? join(process.env.LOCALAPPDATA ?? homedir(), "Familien", "data"), "finance-agent.token"), "utf8").trim();
+async function financeRequest(path, method = "GET", data) {
+  const response = await fetch(`${base}/api/finance/agent${path}`, {
+    method, headers: { "x-finance-agent": financeKey(), ...(data === undefined ? {} : { "Content-Type": "application/json" }) },
+    body: data === undefined ? undefined : JSON.stringify(data)
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error ?? `HTTP ${response.status}`);
+  return result;
+}
+const financeQuery = (arg) => { const q = new URLSearchParams(arg ?? ""); return q.size ? "?" + q : ""; };
+
 const asList = (input) => Array.isArray(input) ? input : [input];
 const postEach = async (path, input) => {
   const results = [];
@@ -83,6 +98,17 @@ async function execute(command, args, flags) {
   if(command==='source-item'&&flags.has('--help'))return sourceItemHelp();
   let result;
   switch (command) {
+    case 'finance-digest': result=await financeRequest('/digest');break;
+    case 'finance-transactions': result=await financeRequest('/transactions'+financeQuery(args[0]));break;
+    case 'finance-suggestion': result=await financeRequest('/suggestion?id='+encodeURIComponent(args[0]??''));break;
+    case 'finance-suggest': result=await financeRequest('/suggestion','POST',json(args[0]));break;
+    case 'finance-letter': result=await financeRequest('/letter','POST',json(args[0]));break;
+    case 'finance-answer': result=await financeRequest('/answer','POST',json(args[0]));break;
+    case 'finance-rule': result=await financeRequest('/rule','POST',json(args[0]));break;
+    case 'finance-account': result=await financeRequest('/account','POST',json(args[0]));break;
+    case 'finance-plan': result=await financeRequest('/planned','POST',json(args[0]));break;
+    case 'finance-payment': result=await financeRequest('/payment','POST',json(args[0]));break;
+    case 'finance-done': result=await financeRequest('/done','POST',json(args[0]));break;
     case 'shopping': result=await request('/api/shopping');break;
     case 'shopping-assortment': result=await request('/api/shopping/assortment/status');break;
     case 'shopping-taxonomy': result=await request('/api/shopping/assortment/taxonomy-plan');break;
