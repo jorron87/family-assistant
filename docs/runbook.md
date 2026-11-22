@@ -759,6 +759,7 @@ Code collection runs independently of agent lanes: Sesum uses the existing brows
 Commands (UTF-8 JSON input files under tmp/agent):
 
 - shopping-assortment-start FILE: explicit first sweep, optionally {"validationReads":2}; not a worker action.
+- `shopping-assortment-validate FILE` can repair a product URL when the browser observed a permanent redirect during the existing job. Include its `jobIds`, bounded `validationReads`, and `productRedirects` containing `jobId`, `from`, the actual `location`, HTTP `httpStatus` (301 or 308) and `observedAt`. The destination must be a Sesum product page with the same native ID. The job keeps its retry time and still requires a successful product read.
 - shopping-assortment-pause / shopping-assortment-resume: collection lifecycle, independent of agent dispatch; resume only within the owner's current authorization.
 - shopping-assortment-step: at most one Kassal page or a local pending callback replay, with durable source-error backoff.
 - shopping-assortment-import FILE: bounded local replay of previously collected Sesum observations, {"offset":0,"limit":100}; continue nextOffset to actual end. Source/fetch/price dates remain unchanged.

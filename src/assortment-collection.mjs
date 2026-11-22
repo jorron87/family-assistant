@@ -74,9 +74,27 @@ export function createAssortmentCollection({dataDir,config={},kassal,receiveSesu
  }
  function pause(){load();state.paused=true;if(state.bootstrap)state.bootstrap.manuallyPaused=true;save();return status();}
  function resume(){load();if(!state.runId)throw Error('Start an explicit catalogue sweep first.');if(state.bootstrap&&state.bootstrap.status!=='collecting')throw Error('Selected catalogue collection has ended; start a new explicit selection.');state.paused=false;state.validationRemaining=null;if(state.bootstrap)delete state.bootstrap.manuallyPaused;save();return status();}
- function validate({validationReads=1,jobIds=[]}={}){
+ function validate({validationReads=1,jobIds=[],productRedirects=[]}={}){
   load();if(Date.parse(state.sesum.pauseUntil)>clock())throw Error('Wait for the active Sesum source pause.');if(!state.runId||!Number.isInteger(validationReads)||validationReads<1||validationReads>8||!Array.isArray(jobIds)||jobIds.length>8||jobIds.some(id=>!Object.hasOwn(state.sesum.jobs,id)||terminal(state.sesum.jobs[id])))throw Error('Select a bounded validation budget and explicit unfinished source jobs.');
-  const jobs=jobIds.map(id=>state.sesum.jobs[id]);for(const job of jobs){(job.retryHistory??=[]).push({at:new Date(clock()).toISOString(),error:job.error??null,errors:job.errors??[],attempts:job.attempts});job.status='pending';job.attempts=0;job.retryAt=null;job.deliveredUntil=null;}
+  const jobs=jobIds.map(id=>state.sesum.jobs[id]),redirects=new Map(),at=clock();
+  if(!Array.isArray(productRedirects)||productRedirects.length>jobs.length)throw Error('Unexpected product redirects.');
+  for(const {jobId,from,location,httpStatus,observedAt} of productRedirects){
+   const job=state.sesum.jobs[jobId];
+   if(!jobs.includes(job)||job.kind!=='product'||job.error!=='network_error'||job.url!==from||redirects.has(jobId)||
+      Date.parse(job.deliveredUntil)>at||job.pending||job.pendingUnavailable||![301,308].includes(httpStatus)||
+      typeof observedAt!=='string'||!Number.isFinite(Date.parse(observedAt))||Date.parse(observedAt)>at||
+      typeof location!=='string'||!location.trim())throw Error('Expected an observed permanent redirect for this unfinished product.');
+   const to=sesumUrl(new URL(location,from).href,'product');
+   if(to===from||new URL(to).pathname.match(/^\/produkt\/(\d+)/)[1]!==new URL(from).pathname.match(/^\/produkt\/(\d+)/)[1])throw Error('Product redirect must retain the native identity.');
+   redirects.set(jobId,{from,to,httpStatus,observedAt});
+  }
+  for(const job of jobs){
+   const redirect=redirects.get(job.id);
+   (job.retryHistory??=[]).push({at:new Date(at).toISOString(),error:job.error??null,errors:job.errors??[],attempts:job.attempts,...(redirect?{redirect}:{})});
+   if(redirect)job.url=redirect.to;
+   else job.retryAt=null;
+   job.status='pending';job.attempts=0;job.deliveredUntil=null;
+  }
   state.validationRemaining=validationReads;state.paused=false;state.sesum.pauseUntil=null;save(...jobs);return status();
  }
  function consumeRead(){if(state.validationRemaining!=null){state.validationRemaining=Math.max(0,state.validationRemaining-1);if(!state.validationRemaining)state.paused=true;}}

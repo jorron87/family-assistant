@@ -286,6 +286,29 @@ test('source delay and HTTP denial evidence survive a restart; local waits have 
   assert.throws(()=>reloaded.validate({jobIds:[j.id]}),/source pause/);
  }
 });
+test('repair a permanent same-product redirect without releasing its wait or granting a receipt',async t=>{
+ let time=new Date(at);const f=collectionFixture(t,{now:()=>time});
+ const from='https://www.sesum.no/produkt/11-old';
+ f.api.bootstrap({productUrls:[from]});
+ const work=f.api.work(),j=work.jobs.find(j=>j.kind==='product');
+ const index=work.jobs.find(j=>j.kind==='catalogue');
+ await f.api.receive({runId:work.runId,jobId:index.id,status:'ok',fetchedAt:at,result:{ok:true,kind:'catalogue',sourceUrl:index.url,categoryUrls:[],productUrls:[],nextUrls:[],endReached:true,filtersVerified:true,total:0}});
+ await f.api.receive({runId:work.runId,jobId:j.id,status:'error',error:{code:'network_error'},fetchedAt:at});
+ const retryAt=f.api.status().bootstrap.issues[0].retryAt;
+ const redirect={jobId:j.id,from,location:'/produkt/11-current',httpStatus:308,observedAt:at};
+ const repair=r=>f.api.validate({jobIds:[j.id],productRedirects:[r]});
+ for(const invalid of [{location:'/produkt/12-other'},{location:'https://example.com/produkt/11-other'},{location:'/login'},{httpStatus:403},{from:from+'-stale'}]){
+  assert.throws(()=>repair({...redirect,...invalid}));
+  assert.equal(f.api.status().bootstrap.issues[0].url,from);
+ }
+ repair(redirect);
+ const restored=createAssortmentCollection(f.settings),b=restored.status().bootstrap;
+ assert.equal(b.issues[0].retryAt,retryAt);assert.equal(b.products.complete,0);
+ assert.equal(b.issues[0].url,'https://www.sesum.no/produkt/11-current');
+ assert.ok(!restored.work({peek:true}).jobs.some(row=>row.id===j.id));
+ time=new Date(Date.parse(retryAt)+1);
+ assert.equal(restored.work({peek:true}).jobs.find(row=>row.id===j.id).url,b.issues[0].url);
+});
 test('selected category batches give different shelves early reads while retaining every product',async t=>{
  const f=collectionFixture(t,{config:{...config,familySource:'sesum'},receiveCategories:async()=>{}});
  f.api.bootstrap({leafSelection:true,categoryUrls:['https://www.sesum.no/kategori/12','https://www.sesum.no/kategori/13']});
