@@ -143,7 +143,6 @@ test('a household follows separate leaves without promoting their shared parent 
 
 test('a fresh, reviewed shop pack earns one stock-up alert against the chosen Oda product',async()=>{
  const {subcategoryPrices}=await import('../src/shopping-subcategories.mjs');
- const {storeBasket}=await import('../public/shopping-view.mjs');
  const url='https://oda.com/no/products/10-synthetic/',cat={id:'284',name:'And',groupId:'sesum-category:284'};
  const base={watchId:'duck',kind:'catalog',unit:'kg',packAmount:1,lastChecked:at};
  const options={reader:{members:()=>[{productKey:'sesum:KIWI:9',product:{name:'Different variant',store:'KIWI',unit:'kg',available:true,packKnown:true,pack:1},price:{reasons:[],fresh:true,grossPackPrice:1,receiptAt:at}}]},
@@ -159,15 +158,11 @@ test('a fresh, reviewed shop pack earns one stock-up alert against the chosen Od
  const trip=result.storeFindings[0];
  assert.deepEqual(trip.totals,{count:1,cost:180,odaSaving:120,saving:90});
  assert.equal(trip.worthTrip,true);
- assert.equal(storeBasket(trip).saving,120);
- assert.equal(storeBasket(trip).confirmedTripSaving,90);
  assert.equal(trip.families[0].items.find(p=>p.identity===trip.families[0].plannedIdentity).estimate.packs,3);
  const uncertain=subcategoryPrices({...options,planning:()=>({...options.planning(),stock:{amount:null,known:false}})}).storeFindings[0];
  assert.equal(uncertain.totals.count,0);assert.equal(uncertain.checkStock.odaSaving,120);
- assert.equal(storeBasket(uncertain).saving,120);assert.equal(storeBasket(uncertain).confirmedTripSaving,0);
  const stocked=subcategoryPrices({...options,planning:()=>({...options.planning(),stock:{amount:12,known:true}})}).storeFindings[0];
  assert.equal(stocked.totals.count,0);assert.equal(stocked.families[0].items.find(p=>p.reviewed).estimate.status,'covered');
- assert.deepEqual(storeBasket(stocked).rows,[]);
  assert.deepEqual(subcategoryPrices({...options,choice:()=>11}).alerts,[]);
  assert.deepEqual(subcategoryPrices({...options,planning:()=>({...options.planning(),stock:{amount:12,known:true}})}).alerts,[]);
  assert.deepEqual(subcategoryPrices({...options,stores:[{...options.stores[0],minSavings:100}]}).alerts,[]);
@@ -187,8 +182,6 @@ test('a fresh, reviewed shop pack earns one stock-up alert against the chosen Od
  const fourMonths=subcategoryPrices(mincePlan).storeFindings[0].families[0].items[0].estimate;
  assert.equal(fourMonths.packs,20);assert.equal(fourMonths.odaSaving,500);
  const minceTrip=subcategoryPrices(mincePlan).storeFindings[0];
- const doubled=storeBasket({...minceTrip,families:[...minceTrip.families,{...minceTrip.families[0],watchId:'overlapping-watch'}]});
- assert.equal(doubled.rows.length,1);assert.equal(doubled.rows[0].estimate.packs,20);assert.equal(doubled.saving,500);assert.equal(doubled.confirmedTripSaving,0);
  const smallDiscount={...mincePlan,planning:()=>({...mincePlan.planning(),need:{amount:2.4},shelfMonths:12}),reader:{members:()=>[shelfRow(8,'KIWI',157)]}};
  assert.equal(subcategoryPrices(smallDiscount).storeFindings[0].families[0].items[0].estimate.packs,1,'a long-lived pack can be used after the next shopping trip');
  const evidence='abc',withPrior={...shelf,families:[{...shelf.families[0],products:[{productKey:lead.productKey,reviewCurrent:true,unit:'kg',canonicalPackAmount:0.4,sourceFingerprint:evidence}]}]};
@@ -217,9 +210,7 @@ test('a fresh, reviewed shop pack earns one stock-up alert against the chosen Od
  const medianStore=subcategoryPrices(market).storeFindings.find(s=>s.storeId==='shop');
  const [{identity,estimate,...medianFinding}]=medianStore.medianFindings;
  assert.deepEqual(medianFinding,marketSignal);assert.equal(identity,lead.productKey);
- const medianBasket=storeBasket(medianStore);
- assert.equal(medianBasket.rows[0].reference,'Median');assert.ok(estimate.packs>0);
- assert.equal(medianBasket.saving,estimate.referenceSaving);assert.equal(medianBasket.confirmedTripSaving,0);
+ assert.ok(estimate.packs>0);
  assert.equal(medianStore.totals.count,0);
  assert.equal(marketSignal.oda,null);
  assert.equal(marketSignal.referenceBasis,'chain-median');
@@ -244,7 +235,7 @@ test('a fresh, reviewed shop pack earns one stock-up alert against the chosen Od
   quotes:[options.quotes[0],{...options.quotes[1],productKey:'reviewed-shop-key'}]};
  const siblingResult=subcategoryPrices(multi);
  const multiTrip=subcategoryPrices({...multi,reader:{members:k=>k===sibling.groupId?[odaRow(12,120)]:rows[k]}}).storeFindings[0];
- assert.deepEqual(storeBasket(multiTrip).rows[0].categories,[{id:cat.id,name:cat.name}]);
+ assert.deepEqual(multiTrip.families[0].items[0].categories,[{id:cat.id,name:cat.name}]);
  assert.equal(siblingResult.comparisons[0].oda.unitPrice,100);
  assert.equal(siblingResult.comparisons[1].oda.unitPrice,45);
  assert.deepEqual(siblingResult.alerts,[]);assert.deepEqual(siblingResult.signals,[]);

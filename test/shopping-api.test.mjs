@@ -39,6 +39,8 @@ test('shopping stays private, kiosk actions are limited, and order state survive
   assert.equal((await fetch(mobile+'/send/shopping-view.mjs')).status,200);
   const family=await (await fetch(kiosk+'/api/shopping/family')).json();assert.deepEqual(family.deals,[]);assert.equal(family.analysis.orderCount,1);assert.ok(typeof family.rev==='string');
   assert.equal((await post(kiosk+'/api/shopping/pantry',{watchId:'missing',amount:1})).status,422);
+  assert.ok(Array.isArray(family.bargains.rows));
+  assert.equal((await post(kiosk+'/api/shopping/bargain',{action:'mismatch',keys:{mismatch:'missing|name:x'}})).status,422,'the living-room display can hide a suggestion');
   for(const path of ['/shopping-view.mjs','/shopping.css'])assert.equal((await fetch(kiosk+path)).status,200);
   assert.equal((await post(kiosk+'/api/shopping/watch',{name:'Følg pris',productKeys:[],unit:'stk',storage:'other',targetPrice:100})).status,200);
   const catalogWatch=await(await post(base+'/api/shopping/watch',{name:'Synthetic plain grains',unit:'kg',storage:'pantry'})).json();

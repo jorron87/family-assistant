@@ -231,3 +231,11 @@ body.kiosk .main-nav button { padding-left: 13px; padding-right: 13px; }
 .shop-quality-peer.own{font-weight:700}
 .shop-quality-peer-score{text-align:right}
 .shop-pills{margin-top:4px}
+/* One list of good buys: offers, shelf prices and Oda alike. */
+.shop-bargain .shop-steady { align-items: flex-start; }
+.shop-bargain .shop-badges { margin-bottom: 2px; }
+.shop-badge.offer { background: var(--s-gold-soft); color: var(--s-gold); }
+.shop-badge.check { background: transparent; border: 1px dashed var(--s-gold); color: var(--s-gold); font-weight: 500; }
+.shop-bargain.check h4 { font-weight: 500; }
+.shop-bargain .shop-actions { flex-wrap: wrap; }
+.shop-bargain .shop-actions .primary { flex: 1 1 150px; }
