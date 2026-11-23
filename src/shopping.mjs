@@ -238,7 +238,11 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   const sesumCatalogue=createSesumCatalogue(s.sesumCatalogue,{save,now,horizonDays:()=>libraryPrices?.horizonDays??libraryPrices?.reader?.()?.horizonDays??183,knownOwnReceipts:source=>Object.values(s.sesumPrices.products??{}).filter(row=>row.source.id===source.id).map(row=>({source:row.source,price:row.receipt}))});
   const discovery=createSesumDiscovery(s.sesumDiscovery,{save,now,reader:baseLibraryReader,source:key=>{const row=sesumPrices?.sourceRecord(key);return row&&sesumCatalogue.current(row.source)?row:null;}});
   const reviewedReader=()=>readValue('reviewed-library-reader',()=>discovery.overlay(baseLibraryReader()));
-  sesumPrices=createSesumPrices(s.sesumPrices,{save,now,reader:reviewedReader,nativeEntries:()=>catalog.entries(),sourceCurrent:source=>sesumCatalogue.current(source)});
+  sesumPrices=createSesumPrices(s.sesumPrices,{save,now,reader:reviewedReader,nativeEntries:()=>catalog.entries(),sourceCurrent:source=>sesumCatalogue.current(source),laterReceipt:sourceKey=>{
+    // The whole-assortment sweep keeps the newest actual receipt per chain row.
+    const [,store,id]=String(sourceKey).split(':'),row=(assortmentRepository?.state??s.assortment)?.products?.['sesum:CATALOGUE:'+id],receipt=row?.prices?.find(p=>p.store===store);
+    return receipt?{name:row.metadata?.name??null,receipt}:null;
+  }});
   const orders=()=>Object.values(s.orders);
   const freshPrice=(time,at=now().getTime())=>currentPriceReceipt(time,at);
   // A new actual read (a primary campaign proof, an Oda read) must be recent;

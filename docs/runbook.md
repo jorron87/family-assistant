@@ -261,6 +261,8 @@ Rader med samme strekkode vises som ett varekort, men det er bare visning. Hver 
 
 ### Parkerte varer med gamle priser
 
+En godkjent Sesum-kobling følger alltid den nyeste faktiske kvitteringen for samme vare og kjede, også når den kommer fra sortimentsinnsamlingen og ikke fra familieinnsamlingen. En nyere vanlig pris av samme slag erstatter den gamle, gitt uendret produkttekst. Det gjelder pakkepris, eller en verifisert kr/kg-etikett for løsvekt. Er den nyere kvitteringen uten brukbar pris, med kampanjevilkår eller med endret tekst, holdes koblingen (`superseded-price-receipt`) til den er vurdert. En gammel enkeltkvittering, for eksempel en nedsatt ostebit eller en app-pris, kan dermed ikke leve videre i 21 dager etter at samme hylle er sett igjen.
+
 En vare er parkert når nyeste faktiske priskvittering er eldre enn 183 dager, eller `priceHorizonDays` i `config/shopping-library.json`. Parkerte varer vises ikke i Varer, i varefamilier eller i sammenligninger, og de skaper ikke `shopping-product-review`, `shopping-library-link` eller `shopping-library-audit`. Ikke bruk tid på å gjennomgå eller researche dem. Biblioteket beholder varen, vurderingene og prisene, så en nyere kvittering henter den tilbake uten ny godkjenning. Gjennomgangsstatus endres aldri av at en vare parkeres.
 
 Kundeaviser leses som før for alle valgte butikker, også kjeder der alle bibliotekpriser er parkert, som Coop, KIWI og REMA. `shopping-review` påvirkes ikke, og et tilbud registrert med `shopping-offer` trenger ingen fersk bibliotekpris. Gjeldende sammenlignbare tilbud på varefamilier med gyldig bibliotekkobling vises i varefamilien med egen rad og butikkolonne (`explore-offers`). Tilbud på varefamilier uten kobling vises bare under Handel.

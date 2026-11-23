@@ -199,7 +199,23 @@ function chooseQuote(previous,incoming){
 /** Explicit reviewed bridges from Sesum public prices to compact library SKUs.
  * Source text is data. Nothing here approves a family watch or changes a cart.
  */
-export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=()=>null,nativeEntries=()=>[],sourceCurrent=()=>true}={}){
+export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=()=>null,nativeEntries=()=>[],sourceCurrent=()=>true,laterReceipt=()=>null}={}){
+ // Another collection (the whole-assortment sweep) can hold a newer actual
+ // receipt for the same product and chain. The newer receipt then decides:
+ // an ordinary price of the same kind (a pack price, or a verified own-chain
+ // kr/kg label for a reviewed variable-weight bridge) replaces the old one,
+ // and anything it cannot prove (no usable price, a campaign, changed product
+ // text) holds the bridge. An old one-off receipt (a marked-down piece, an app
+ // price) never outlives a later sighting of the same shelf.
+ const laterOf=sourceKey=>{const later=laterReceipt(sourceKey),at=Date.parse(later?.receipt?.receiptAt??'');return Number.isFinite(at)?{...later,at}:null;};
+ const ownQuote=(row,bridge)=>{
+  const quote=quoteOf(row,bridge),later=laterOf(row.sourceKey),own=Date.parse(quote.receiptAt);
+  if(!later||Number.isFinite(own)&&later.at<=own)return quote;
+  const r=later.receipt,receiptAt=new Date(later.at).toISOString(),ordinary=later.name===row.source.name&&!r.isPromo&&!r.promotion;
+  if(ordinary&&bridge.priceBasis==='direct-unit'&&positive(r.grossUnitPrice)&&r.unit===bridge.unit&&quote.reasons.every(x=>x==='superseded-price-receipt'))return {...quote,grossUnitPrice:r.grossUnitPrice,directUnitVerified:true,receiptAt,unitPriceEvidence:`${bridge.unitPriceEvidence} ${r.unitPriceEvidence??''}; ${bridge.vatEvidence}`,laterReceipt:true};
+  if(ordinary&&bridge.priceBasis!=='direct-unit'&&positive(r.grossPackPrice))return {...quote,grossPackPrice:r.grossPackPrice,receiptAt,laterReceipt:true};
+  return {...quote,grossPackPrice:null,grossUnitPrice:null,directUnitVerified:false,reasons:[...new Set([...quote.reasons,'superseded-price-receipt'])],supersededAt:receiptAt};
+ };
  if(!plain(state))throw Error('Sesum price state must be a plain map.');
  state.version??=1;if(state.version!==1)throw Error('Unsupported Sesum price state.');
  state.products??={};state.bridges??={};state.revision??=0;
@@ -359,14 +375,14 @@ export function createSesumPrices(state,{save=()=>{},now=()=>new Date(),reader=(
     group={donor:anchor,productKey:anchorKey,store:row.source.store,selected,nativeQuotes:quotes,explicitNativeIdentity:!!identity};peers.set(key,group);
    }
    if(identity)group.explicitNativeIdentity=true;
-   group.selected=chooseQuote(group.selected,quoteOf(row,bridge));
+   group.selected=chooseQuote(group.selected,ownQuote(row,bridge));
   }
-  const validation=hash([...peers.values()].map(group=>[group.productKey,group.store,sesumDonorFingerprint(group.donor),group.donor.quote,group.nativeQuotes,group.donor.available,currentGroups(base,group.productKey).map(m=>[m.groupId,base.group(m.groupId).fingerprint,m.q,m.n])]));
+  const validation=hash([[...peers.values()].map(group=>[group.productKey,group.store,sesumDonorFingerprint(group.donor),group.donor.quote,group.nativeQuotes,group.donor.available,currentGroups(base,group.productKey).map(m=>[m.groupId,base.group(m.groupId).fingerprint,m.q,m.n])]),active.map(bridge=>[bridge.sourceKey,laterOf(bridge.sourceKey)])]);
   if(overlayIndex===index&&overlayRevision===state.revision&&overlayValidation===validation&&overlayFactory)return versioned(overlayFactory(clock().getTime()),index,validation);
   const out={...index,products:{...index.products},members:Object.fromEntries(Object.entries(index.members).map(([key,rows])=>[key,[...rows]]))};
   for(const bridge of active){
    const row=sourceRow(bridge.sourceKey);
-   const donor=base.product(bridge.productKey),identity=boundNativeIdentity(donor,base,row.source.store),group=peers.get((identity?.key??bridge.productKey)+'|'+row.source.store),original=quoteOf(row,bridge),selected=group.selected;
+   const donor=base.product(bridge.productKey),identity=boundNativeIdentity(donor,base,row.source.store),group=peers.get((identity?.key??bridge.productKey)+'|'+row.source.store),original=ownQuote(row,bridge),selected=group.selected;
    let quote=identity?selected:original;
    const ownTime=Date.parse(original.receiptAt),selectedTime=Date.parse(selected?.receiptAt);
    if(!identity&&Number.isFinite(ownTime)&&Number.isFinite(selectedTime)){

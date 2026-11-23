@@ -13,12 +13,12 @@ function fixture({store='KIWI',old=false}={}){
  const index={builtAt:NOW,groups:{tomatoes:{name:'Hakkede tomater',unit:'kg',fingerprint:'a'.repeat(64)}},members:{tomatoes:[{k:productKey,s:'approved',r:true,u:15/.39,q:{score:100,key:'tomato-share',label:'Tomatandel'},n:null}]},products:{[productKey]:p},qualityNotes:{}};
  const state={},clock={at:NOW},native=[];let saves=0;
  const reader=()=>createIndexReader(index)(Date.parse(clock.at));
- const prices=createSesumPrices(state,{reader,save:()=>{saves++;},now:()=>new Date(clock.at),nativeEntries:()=>native});
+ const later=new Map(),prices=createSesumPrices(state,{reader,save:()=>{saves++;},now:()=>new Date(clock.at),nativeEntries:()=>native,laterReceipt:key=>later.get(key)??null});
  const source=(overrides={})=>({id:'123',name:p.name,brand:p.brand,vendor:'Synthetic vendor',ean:[p.ean],weight:390,weightUnit:'g',soldByWeight:false,sourceUrl:'https://www.sesum.no/produkt/123-hakkede-tomater',prices:[{storeCode:store==='COOP_NO'?'COOP_EXTRA':store,price:7.9,rawUnitPrice:7.9,source:'RECEIPT',observedAt:RECEIPT,isPromo:false,promotion:null}],...overrides});
  const ingest=(input=source())=>prices.ingest({familyIds:['family:tomatoes'],products:[input],fetchedAt:clock.at});
  const approve=(patch={})=>{const c=prices.candidates()[0];return prices.review({sourceKey:c.sourceKey,sourceFingerprint:c.sourceFingerprint,productKey,productFingerprint:sesumDonorFingerprint(p),status:'approved',packAmount:.39,unit:'kg',equivalenceEvidence:'Exact reviewed native variant, brand, EAN and contents; source package matched to label.',packEvidence:'Sesum 390 g and the original 390 g donor label agree.',...patch});};
  const nativeEntry=(patch={})=>({watchId:'family:tomatoes',store:p.store,id:p.id,status:'approved',name:p.name,ean:p.ean,brand:p.brand,ingredients:p.ingredients,description:p.description,sourceUrl:p.sourceUrl,weight:390,weightUnit:'g',packAmount:.39,unit:'kg',lastChecked:'2026-11-09T12:06:00Z',currentPrice:12,...patch});
- return {prices,state,clock,index,p,productKey,reader,source,ingest,approve,native,nativeEntry,saves:()=>saves};
+ return {prices,state,clock,index,p,productKey,reader,source,ingest,approve,native,nativeEntry,later,saves:()=>saves};
 }
 test('matching names, EAN and brand only suggest donors; they never approve a source',()=>{
  const f=fixture();f.ingest();const [candidate]=f.prices.candidates('family:tomatoes');
@@ -349,4 +349,21 @@ test('explorer bundles invalidate on bridge review, actual price change, exclusi
  f.p.ingredients='Changed source label';f.p.textHash=productTextHash(f.p);
  const changed=await explorer.bundle();assert.equal(f.prices.revision(),revision,'the donor can change without a new Sesum observation');assert.notEqual(changed.key,restored.key);assert.equal(hasSource(changed),false);assert.equal(changed.built,originalBuilt);
  assert.equal(f.state.products[sourceKey].receipt.observedAt,'2026-11-09T12:06:00.000Z','cache revisions never manufacture newer price receipts');
+});
+
+test('a newer receipt from another collection replaces an old bridged price, or holds it when it cannot be proven',()=>{
+ const f=fixture();f.ingest();f.approve();const key=f.prices.candidates()[0].sourceKey;
+ assert.equal(f.prices.overlay().quote(key).price.grossPackPrice,7.9);
+ const newer='2026-11-09T12:08:00Z',ordinary={store:'KIWI',grossPackPrice:8.9,receiptAt:newer,isPromo:false,promotion:null};
+ f.later.set(key,{name:f.p.name,receipt:ordinary});
+ let q=f.prices.overlay().quote(key).price;
+ assert.equal(q.grossPackPrice,8.9,'the later ordinary shelf price is the current price');assert.equal(q.receiptAt,new Date(newer).toISOString());
+ f.later.set(key,{name:f.p.name,receipt:{...ordinary,grossPackPrice:null}});
+ q=f.prices.overlay().quote(key).price;assert.equal(q.grossPackPrice,null,'a later receipt without a usable price holds the old one');assert.ok(q.reasons.includes('superseded-price-receipt'));
+ f.later.set(key,{name:f.p.name,receipt:{...ordinary,isPromo:true}});
+ assert.equal(f.prices.overlay().quote(key).price.grossPackPrice,null,'a later campaign needs its own review');
+ f.later.set(key,{name:'Another name',receipt:ordinary});
+ assert.equal(f.prices.overlay().quote(key).price.grossPackPrice,null,'changed product text needs a new review');
+ f.later.set(key,{name:f.p.name,receipt:{...ordinary,grossPackPrice:5,receiptAt:'2026-11-09T12:00:00Z'}});
+ assert.equal(f.prices.overlay().quote(key).price.grossPackPrice,7.9,'an older receipt elsewhere changes nothing');
 });
