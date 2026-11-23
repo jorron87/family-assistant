@@ -357,3 +357,9 @@ body.lx-wide main { max-width: 1560px; }
 @media (prefers-reduced-motion: reduce) {
   .lx *, .lx *::before, .lx *::after { animation: none !important; transition: none !important; }
 }
+
+.lx-away { display: grid; gap: 6px; margin: 10px 0 18px; }
+.lx-away h3 { margin: 14px 0 4px; font-size: 15px; }
+.lx-away-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 8px; border-radius: 12px; background: var(--lx-card); }
+.lx-away-row.away, .lx-member.away { opacity: .55; }
+.lx-away-row.away .lx-card-name, .lx-member.away .lx-card-name { text-decoration: line-through; }

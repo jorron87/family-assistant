@@ -16,7 +16,7 @@ import {createShoppingAssortment} from './shopping-assortment.mjs';
 import {searchAssortmentFamilies} from './assortment-family-search.mjs';
 import {subcategoryPrices} from './shopping-subcategories.mjs';
 import {currentPriceReceipt,RECENT_PRICE_MS} from './price-freshness.mjs';
-import {buildBargains,bargainHideKeys,fitsFamily} from './shopping-bargains.mjs';
+import {buildBargains,bargainHideKeys,fitsFamily,normalName} from './shopping-bargains.mjs';
 import {createSesumTaxonomy} from './sesum-taxonomy.mjs';
 import {sesumCollectionCompletion} from './sesum-completion.mjs';
 import {createResearchScope,groupPlacementWork,placementProof,placementDelta,familyBasisIndex} from './sesum-research-scope.mjs';
@@ -174,6 +174,17 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   s.marketCatalog??={};
   s.dealDecisions??={};
   s.bargainHides??={};
+  // Variants the household never wants for a family ("Ikke for oss"). This is a
+  // household preference: it removes the variant from the family's suggestions,
+  // category comparisons and current prices, and never changes a catalogue
+  // review, equivalence or another family.
+  s.familyUnwanted??={};
+  for(const [key,hide] of Object.entries(s.bargainHides)){
+    const at=key.indexOf('|name:');if(hide?.kind!=='mismatch'||at<0)continue;
+    const watchId=key.slice(0,at),name=key.slice(at+6);
+    if(s.watches?.[watchId]&&name){s.familyUnwanted[watchId]??={};s.familyUnwanted[watchId]['name:'+name]??={id:'name:'+name,label:name,brand:null,keys:[],names:[name],ean:null,source:'bargain',at:hide.at??null};}
+    delete s.bargainHides[key];
+  }
   s.purchases??=[];
   s.priceHistory??={};
   s.priceHistoryBasis??={};
@@ -317,7 +328,18 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     }
     return Object.defineProperty({entries:[...native.values()],reviewedNative:entries,quotes,libraryStatus:library.status,reader,campaigns,excluded:new Set([...native.values()].filter(e=>e.status==='excluded').map(key))},priceContextExclusions,{value:exclusionsFor});
   }
-  const quotesFor=(w,prices=currentPrices())=>prices.quotes.filter(p=>p.watchId===w.id&&p.unit===w.unit).sort((a,b)=>a.unitPrice-b.unitPrice||String(a.storeName).localeCompare(String(b.storeName)));
+  let unwantedCache=null;
+  const plainEan=ean=>ean?String(ean).replace(/D/g,'').replace(/^0+/,''):'';
+  function unwantedMatch(watchId) {
+    unwantedCache??=new Map();
+    if(!unwantedCache.has(watchId)){
+      const list=Object.values(s.familyUnwanted[watchId]??{});
+      const keys=new Set(list.flatMap(e=>e.keys??[])),names=new Set(list.flatMap(e=>e.names??[])),eans=new Set(list.map(e=>plainEan(e.ean)).filter(Boolean));
+      unwantedCache.set(watchId,list.length?({key,name,ean})=>(key!=null&&keys.has(key))||(name!=null&&names.has(normalName(name)))||(!!ean&&eans.has(plainEan(ean))):null);
+    }
+    return unwantedCache.get(watchId);
+  }
+  const quotesFor=(w,prices=currentPrices())=>prices.quotes.filter(p=>p.watchId===w.id&&p.unit===w.unit&&!unwantedMatch(w.id)?.({key:catalogKey(p),name:p.name,ean:p.ean})).sort((a,b)=>a.unitPrice-b.unitPrice||String(a.storeName).localeCompare(String(b.storeName)));
   function comparisonReference(w,a,candidate,prices=currentPrices()) {return referenceDetail(w,a,candidate,prices)?.price??null;}
   // The lowest of the usual market price, what the household paid and fresh
   // alternatives, with the basis that set it so a page can say "usually".
@@ -769,7 +791,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const comparisons=taxonomy?subcategoryPrices({at,reader:taxReader,families,links:taxonomy.watchLinks(families),quotes:found.prices.quotes,nativeEntries:found.prices.reviewedNative,retainReviewed:(entry,key)=>{
       const original=reviewedReader()?.product(key);
       return !!original&&!nativeHoldsMember(original,key,entry.watchId,[entry]);
-    },stores:s.settings.stores,choice:id=>s.odaChoices[id],excluded:(id,p,k)=>scopedProductHeld(found.prices[priceContextExclusions](s.watches[id]),p,k)||found.prices.excluded.has(id+'|'+k),skipAlerts:new Set(main.map(d=>d.watchId)),planning:id=>{
+    },stores:s.settings.stores,choice:id=>s.odaChoices[id],excluded:(id,p,k)=>scopedProductHeld(found.prices[priceContextExclusions](s.watches[id]),p,k)||found.prices.excluded.has(id+'|'+k)||unwantedMatch(id)?.({key:k,name:p.name,ean:p.ean})===true,skipAlerts:new Set(main.map(d=>d.watchId)),planning:id=>{
       const w=s.watches[id],need=needOf(w,a),paid=needRows(w,a).filter(p=>p.baselineAmount>0).map(p=>p.baselineTotal/p.baselineAmount);
       const limits=[...paid,w.marketCalibration?.referencePrice,w.priceGuide?.referencePrice,freshPrice(w.referenceCeiling?.checkedAt,at)?w.referenceCeiling.price:null].filter(n=>n>0);
       return {need,stock:estimateStock(w,rateOf(need),at),shelfMonths:shelfLifeMonths(w),excellentPrice:w.excellentPrice,maxPacks:w.maxPacks,minDiscountPct:w.minDiscountPct,referenceFor:p=>comparisonReference(w,a,p,found.prices),referenceCap:limits.length?Math.min(...limits):null};
@@ -807,9 +829,59 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   }
   // A family choice about one suggested buy. It hides a suggestion only; it
   // never changes a product review, a price or another family's options.
+  // The library's "Ikke for oss": one physical product, by every chain's key,
+  // name and barcode, chosen away for the families that follow its category.
+  function unwantedAction(input) {
+    const watchIds=[...new Set(Array.isArray(input?.watchIds)?input.watchIds:[])].filter(id=>typeof id==='string'&&Object.hasOwn(s.watches,id));
+    if(!watchIds.length||watchIds.length>10)throw Error('Velg en varefamilie dere følger.');
+    if(input.action==='remove'){
+      const id=String(input.id??'');if(!id||id.length>400)throw Error('Ugyldig valg.');
+      return update(()=>{let removed=0;for(const w of watchIds)if(s.familyUnwanted[w]?.[id]){delete s.familyUnwanted[w][id];removed++;}unwantedCache=null;return {saved:true,removed};});
+    }
+    if(input.action!=='add')throw Error('Ugyldig valg.');
+    const strings=(list,max,len)=>[...new Set((Array.isArray(list)?list:[]).filter(x=>typeof x==='string'&&x.trim()&&x.length<=len))].slice(0,max);
+    const keys=strings(input.keys,50,300),names=strings(input.names,20,300).map(normalName),ean=plainEan(input.ean)||null,label=String(input.label??names[0]??'').trim().slice(0,200);
+    if(!keys.length&&!names.length&&!ean||!label)throw Error('Mangler varen som skal velges bort.');
+    const id=ean?'ean:'+ean:keys.length?'key:'+keys[0]:'name:'+names[0];
+    return update(()=>{
+      for(const w of watchIds){s.familyUnwanted[w]??={};s.familyUnwanted[w][id]={id,label,brand:typeof input.brand==='string'?input.brand.slice(0,100):null,keys,names:[...new Set(names)],ean,source:'library',at:now().toISOString()};}
+      unwantedCache=null;return {saved:true,id};
+    });
+  }
+  function unwantedFor(watchIds) {
+    return watchIds.flatMap(watchId=>Object.values(s.familyUnwanted[watchId]??{}).map(e=>({...e,watchId}))).sort((a,b)=>a.label.localeCompare(b.label,'nb'));
+  }
+  // Families the household follows that a library family or category feeds.
+  function explorerFollowers(id) {
+    if(id.startsWith('followed:')){const w=s.watches[id.slice(9)];return w?[{watchId:w.id,name:w.name}]:[];}
+    if(taxonomy)return taxonomy.watchLinks(sesumFamilies()).filter(f=>f.categories.some(c=>c.groupId===id)).map(f=>({watchId:f.watchId,name:f.name}));
+    const reader=libReader();
+    return reader?Object.values(s.watches).filter(w=>w.enabled!==false&&linkStates(w,reader).some(l=>l.state==='ok'&&l.groupId===id)).map(w=>({watchId:w.id,name:w.name})):[];
+  }
+  // The family's own reviewed products with current prices, chosen away or not,
+  // so the library can offer "Ikke for oss" on them too.
+  function ownVariants(watchIds) {
+    const seen=new Set(),rows=[];
+    for(const p of currentPrices().quotes){
+      if(!watchIds.includes(p.watchId)||p.kind!=='catalog'||!(p.unitPrice>0))continue;
+      const key=catalogKey(p);if(seen.has(key))continue;seen.add(key);
+      rows.push({key,name:p.name,brand:p.brand??null,ean:p.ean??null,store:p.storeName??null,unitPrice:round(p.unitPrice),unit:p.unit??null,packAmount:p.packAmount??null});
+    }
+    return rows;
+  }
   function bargainAction(input) {
     const keys=input.keys??{};
-    if(input.action==='undo')return update(()=>{for(const key of [keys.mismatch,keys.snooze])if(typeof key==='string')delete s.bargainHides[key];return {saved:true};});
+    // "Passer ikke" is the same household choice as "Ikke for oss" in the library.
+    const named=typeof keys.mismatch==='string'&&keys.mismatch.indexOf('|name:')>0?{watchId:keys.mismatch.slice(0,keys.mismatch.indexOf('|name:')),name:keys.mismatch.slice(keys.mismatch.indexOf('|name:')+6)}:null;
+    if(input.action==='undo')return update(()=>{for(const key of [keys.mismatch,keys.snooze])if(typeof key==='string')delete s.bargainHides[key];if(named)delete s.familyUnwanted[named.watchId]?.['name:'+named.name];unwantedCache=null;return {saved:true};});
+    if(input.action==='mismatch'){
+      if(!named||!named.name||named.name.length>300||!s.watches[named.watchId])throw Error('Ugyldig valg.');
+      return update(()=>{
+        s.familyUnwanted[named.watchId]??={};
+        s.familyUnwanted[named.watchId]['name:'+named.name]={id:'name:'+named.name,label:String(input.label??named.name).slice(0,200),brand:null,keys:typeof input.productKey==='string'&&input.productKey.length<=300?[input.productKey]:[],names:[named.name],ean:null,source:'bargain',at:now().toISOString()};
+        unwantedCache=null;return {saved:true};
+      });
+    }
     const kind=input.action==='mismatch'?'mismatch':input.action==='snooze'?'snooze':null;
     const key=kind&&keys[kind];
     if(!kind||typeof key!=='string'||key.length>400||!s.watches[key.split('|')[0]])throw Error('Ugyldig valg.');
@@ -1335,7 +1407,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       for(const m of sf.medianFindings??[])shelfRow(sf,m.watchId,{...m.store,identity:m.identity,pack:m.pack},{median:m.median,reviewed:m.reviewed});
     }
     for(const c of candidates)c.odaPrice=odaPrice.get(c.watchId)??null;
-    const result=buildBargains({candidates,families,stores,hides:s.bargainHides,at});
+    const result=buildBargains({candidates,families,stores,hides:s.bargainHides,unwanted:c=>unwantedMatch(c.watchId)?.({key:c.productKey,name:c.productName})===true,at});
     const listed=onList.filter(e=>!e.checkedAt);
     const mark=row=>({...row,hideKeys:bargainHideKeys(row),onList:listed.some(e=>row.offerId?e.offerId===row.offerId:e.watchId===row.watchId&&(row.oda?e.storeName==='Oda':e.storeName===row.storeName||e.storeId===row.storeId))});
     return {...result,rows:result.rows.map(mark),minor:result.minor.map(mark)};
@@ -1568,7 +1640,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   // share the reader already selected for the family, rather than rebuilding
   // the complete catalogue once per source and watch. The context ends before
   // returning, so a later request sees changed receipts and review decisions.
-  const explorer={...rawExplorer,family:id=>inReadContext(()=>rawExplorer.family(id)),offers:()=>inReadContext(()=>rawExplorer.offers())};
+  const explorer={...rawExplorer,family:id=>inReadContext(()=>{const result=rawExplorer.family(id);if(!result?.family)return result;const followers=explorerFollowers(String(id??''));return {...result,family:{...result.family,followers,unwanted:unwantedFor(followers.map(f=>f.watchId)),own:ownVariants(followers.map(f=>f.watchId))}};}),offers:()=>inReadContext(()=>rawExplorer.offers())};
   function librarySearch(...args){return inReadContext(()=>librarySearchInContext(...args));}
   function librarySearchInContext(query,limit=30) {
     const reader=libReader();if(!reader)throw Error('Produktbiblioteket er ikke tilgjengelig.');
@@ -2084,5 +2156,5 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   });
   return {assortment,taxonomy,taxonomyBootstrapPlan:()=>inReadContext(()=>{
       const families=sesumFamilies(),native=catalog.entries();return {familyCount:families.length,families:families.map(f=>({...f,products:f.products.filter(p=>p.reviewCurrent),odaTargets:native.filter(e=>e.watchId===f.familyId&&e.store==='ODA_NO'&&e.status==='approved').map(e=>({odaProductId:odaProductIdFromUrl(e.sourceUrl),name:e.name,sourceUrl:e.sourceUrl,productKey:catalogKey(e)})).filter(p=>p.odaProductId).map(p=>{const row=assortmentState.products?.['oda:ODA_NO:'+p.odaProductId];return {...p,imported:!!row,available:row?.available??null,actualReceiptAt:row?.prices?.[0]?.receiptAt??null};})})),watchLinks:taxonomy?.watchLinks(families)??[]};
-    }),agentGroupSearch:(query,options)=>inReadContext(()=>taxonomy?taxonomy.search(query,options):searchAssortmentFamilies(libReader()?.index(),query,options)),agentPlacement,agentPlacementAsync,agentProgressSince,agentContext,agentContexts,agentProduct,agentLibrarySearch,agentGroup:id=>inReadContext(()=>{const category=taxonomy&&String(id).startsWith('sesum-category:')?taxonomy.definition(String(id).slice(15)):null;const group=category?{...category,groupId:id,fingerprint:category.fingerprint}:libReader()?.group(id);return group?{groupId:id,...structuredClone(group)}:null;}),agentFamilyBasis:()=>inReadContext(()=>agentFamilyBasis(sesumPlacementFamilies().families)),marketRefreshPlan,odaRefreshPlan,odaRefreshReceive,sesumFamilies,sesumPlacement,sesumReceivePrices,sesumReceiveMetadata:input=>sesumCatalogue.ingest(input),sesumCandidates,sesumRegister,sesumPriceReview,sesumOfferCandidates,sesumOfferReview,sesumPriceStatus:()=>inReadContext(()=>({...sesumPrices.status(),discovery:discovery.status(),catalogue:sesumCatalogue.status()})),familyReopen,listFamily,listFamilyWork,explorer,productInfo,libraryAudit,libraryAuditAck,libraryLink,libraryLinkCandidates,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,bargainAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
+    }),agentGroupSearch:(query,options)=>inReadContext(()=>taxonomy?taxonomy.search(query,options):searchAssortmentFamilies(libReader()?.index(),query,options)),agentPlacement,agentPlacementAsync,agentProgressSince,agentContext,agentContexts,agentProduct,agentLibrarySearch,agentGroup:id=>inReadContext(()=>{const category=taxonomy&&String(id).startsWith('sesum-category:')?taxonomy.definition(String(id).slice(15)):null;const group=category?{...category,groupId:id,fingerprint:category.fingerprint}:libReader()?.group(id);return group?{groupId:id,...structuredClone(group)}:null;}),agentFamilyBasis:()=>inReadContext(()=>agentFamilyBasis(sesumPlacementFamilies().families)),marketRefreshPlan,odaRefreshPlan,odaRefreshReceive,sesumFamilies,sesumPlacement,sesumReceivePrices,sesumReceiveMetadata:input=>sesumCatalogue.ingest(input),sesumCandidates,sesumRegister,sesumPriceReview,sesumOfferCandidates,sesumOfferReview,sesumPriceStatus:()=>inReadContext(()=>({...sesumPrices.status(),discovery:discovery.status(),catalogue:sesumCatalogue.status()})),familyReopen,listFamily,listFamilyWork,explorer,productInfo,libraryAudit,libraryAuditAck,libraryLink,libraryLinkCandidates,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,bargainAction,unwantedAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
 }

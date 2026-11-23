@@ -213,7 +213,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
   }
   function hideBargain(row,action) {
     const undo=()=>act(()=>api('/bargain',{action:'undo',keys:row.hideKeys}),'Angret.');
-    act(()=>api('/bargain',{action,keys:row.hideKeys,unitPrice:row.unitPrice}),action==='mismatch'?`${row.productName} vises ikke lenger for ${row.familyName}.`:'Skjult til prisen endrer seg.',undo);
+    act(()=>api('/bargain',{action,keys:row.hideKeys,unitPrice:row.unitPrice,productKey:row.productKey,label:row.productName}),action==='mismatch'?`${row.productName} vises ikke lenger for ${row.familyName}. Kan angres under «Velg bort» i produktbiblioteket.`:'Skjult til prisen endrer seg.',undo);
   }
   const bestAtText=row=>{const at=row.bestAt;return at.unitPrice<row.unitPrice?`${price(at.unitPrice)}/${row.unit} hos ${at.storeName}${at.reviewed?'':' (sjekk varianten)'}`:at.unitPrice===row.unitPrice?`samme pris hos ${at.storeName}`:`sjekket vare ${price(at.unitPrice)}/${row.unit} hos ${at.storeName}`;};
   function bargainCard(row) {

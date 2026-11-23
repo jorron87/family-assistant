@@ -88,6 +88,7 @@ export function phoneHandler({finance=null,odaCart=null,productImages=null,oda=n
       if(req.method==='POST'&&path==='/send/api/shopping/item')return send(res,200,store.shopping.item(await json(req)));
       if(req.method==='POST'&&path==='/send/api/shopping/deal')return send(res,200,store.shopping.dealAction(await json(req)));
       if(req.method==='POST'&&path==='/send/api/shopping/bargain')return send(res,200,store.shopping.bargainAction(await json(req)));
+      if(req.method==='POST'&&path==='/send/api/shopping/unwanted')return send(res,200,store.shopping.unwantedAction(await json(req)));
       if(req.method==='POST'&&path==='/send/api/shopping/oda/review'&&oda)return send(res,200,store.shopping.cartReview(await oda.cart()));
       if(req.method==='POST'&&path==='/send/api/shopping/oda/search'&&oda)return send(res,200,await oda.search(await json(req)));
       if(req.method==='POST'&&path==='/send/api/shopping/oda/add'&&oda)return send(res,200,await oda.addToCart(await json(req)));

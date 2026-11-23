@@ -152,3 +152,33 @@ test('at the same chain price the store with more to gain anyway is the best pla
  const result=build([row(),row({storeKey:'rema',storeName:'REMA 1000',productKey:'r1'}),row({watchId:'other',storeKey:'rema',storeName:'REMA 1000',productKey:'r2',productName:'Grillpølser'})],families);
  assert.equal(result.rows.find(r=>r.watchId==='mince'&&r.best).storeKey,'rema');
 });
+
+test('a variant the household chose away leaves the family suggestions and prices, and can be undone',()=>{
+ const state={},shop=shoppingStore(state,{save(){},now:()=>new Date('2026-11-08T12:00:00Z')});
+ shop.settings({historyFrom:'2025-11-08',monitoringEnabled:true,stores:[{id:'near',name:'Nærbutikk',url:'https://example.com/near',minSavings:0,chainCode:'NEAR'}]});
+ const w=shop.watch({name:'Mel',unit:'kg',storage:'pantry',maxPacks:100,purchaseAmount:12,priceGuide:{referencePrice:30,checkedAt:'2026-11-08T10:00:00Z',evidence:'Vanlig pris'}});
+ const seen=shop.catalogObserve({watchId:w.id,products:[{id:1,store:'ODA_NO',name:'Hvetemel 1 kg',sourceUrl:'https://oda.com/no/products/123-hvetemel/',currentPrice:20,lastChecked:'2026-11-08T10:00:00Z'}]});
+ shop.catalogReview({watchId:w.id,id:1,store:'ODA_NO',fingerprint:seen.entries[0].fingerprint,status:'approved',packAmount:1,unit:'kg',equivalenceEvidence:'Samme mel'});
+ const before=shop.familyView();
+ assert.equal(before.bargains.rows.length,1);assert.equal(before.items.find(x=>x.id===w.id).prices.current,20);
+ assert.throws(()=>shop.unwantedAction({action:'add',watchIds:['nope'],names:['x']}),/varefamilie/);
+ const {id}=shop.unwantedAction({action:'add',watchIds:[w.id],names:['Hvetemel  1 KG'],label:'Hvetemel 1 kg'});
+ const after=shop.familyView();
+ assert.equal(after.bargains.rows.length,0,'never suggested');
+ assert.equal(after.items.find(x=>x.id===w.id).prices.current,null,'and no longer the family current price');
+ shop.unwantedAction({action:'remove',watchIds:[w.id],id});
+ assert.equal(shop.familyView().bargains.rows.length,1);
+ // "Passer ikke" on a suggestion is the same household choice, kept with the family.
+ const [r]=shop.familyView().bargains.rows;
+ shop.bargainAction({action:'mismatch',keys:r.hideKeys,productKey:r.productKey,label:r.productName});
+ assert.equal(state.shopping.familyUnwanted[w.id]['name:hvetemel 1 kg'].source,'bargain');
+ assert.equal(shop.familyView().bargains.rows.length,0);
+ shop.bargainAction({action:'undo',keys:r.hideKeys});
+ assert.equal(shop.familyView().bargains.rows.length,1);
+ // An older stored "Passer ikke" moves into the family's list when the store loads.
+ const old={shopping:{...structuredClone(state.shopping),bargainHides:{[w.id+'|name:hvetemel 1 kg']:{kind:'mismatch',at:'2026-11-01T00:00:00Z'}},familyUnwanted:{}}};
+ const reopened=shoppingStore(old,{save(){},now:()=>new Date('2026-11-08T12:00:00Z')});
+ assert.deepEqual(old.shopping.bargainHides,{});
+ assert.equal(old.shopping.familyUnwanted[w.id]['name:hvetemel 1 kg'].names[0],'hvetemel 1 kg');
+ assert.equal(reopened.familyView().bargains.rows.length,0);
+});

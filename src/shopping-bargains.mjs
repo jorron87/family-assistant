@@ -74,7 +74,7 @@ function planFor(c,f,tier,reference,at) {
 // "Passer ikke" removes a product name from one family's suggestions in every
 // store; "Ikke nå" hides one store's row until its price changes or for two
 // weeks. Neither approves or excludes anything for prices or other families.
-const normalName=name=>String(name??'').toLocaleLowerCase('nb-NO').replace(/\s+/g,' ').trim();
+export const normalName=name=>String(name??'').toLocaleLowerCase('nb-NO').replace(/\s+/g,' ').trim();
 export const bargainHideKeys=row=>({mismatch:`${row.watchId}|name:${normalName(row.productName)}`,snooze:`${row.watchId}|${row.storeKey}|${row.productKey??row.offerId??normalName(row.productName)}`});
 export function hiddenBargain(hides,row,at) {
  const keys=bargainHideKeys(row),snooze=hides?.[keys.snooze];
@@ -104,11 +104,13 @@ function judge(c,f) {
  return market;
 }
 
-export function buildBargains({candidates,families,stores,hides={},at=Date.now()}) {
+export function buildBargains({candidates,families,stores,hides={},unwanted=null,at=Date.now()}) {
  const best=new Map(),minor=[],covered=[];let hidden=0;
  for(const c of candidates){
   const f=families.get(c.watchId);
   if(!f||!(c.unitPrice>0))continue;
+  // A variant the household chose away is never suggested, offers included.
+  if(unwanted?.(c)){hidden++;continue;}
   const judged=judge(c,f);if(!judged)continue;
   const {reference,referenceBasis,referenceStore,discountPct,tier}=judged;
   const plan=planFor(c,f,tier==='switch'?'small':tier,reference,at);

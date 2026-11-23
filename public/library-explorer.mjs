@@ -6,6 +6,8 @@ const nf=digits=>new Intl.NumberFormat('nb-NO',{maximumFractionDigits:digits});
 const money=value=>nf(2).format(value)+' kr';
 const whole=value=>nf(0).format(value);
 const short=value=>nf(value<10?1:0).format(value);
+const norm=name=>String(name??'').toLocaleLowerCase('nb-NO').replace(/s+/g,' ').trim();
+const plain=ean=>ean?String(ean).replace(/D/g,'').replace(/^0+/,''):'';
 function el(tag,text,cls) {
   const node=document.createElement(tag);
   if(text!==undefined&&text!==null)node.textContent=text;
@@ -59,6 +61,12 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
   panel.classList.add('lx');
   if(compact)document.body.classList.add('lx-compact');
 
+  async function post(path,body) {
+    const response=await fetch(base+path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Family-Request':'1'},body:JSON.stringify(body),signal:AbortSignal.timeout(45000)});
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok)throw Error(data.error??'Kunne ikke lagre valget.');
+    return data;
+  }
   async function api(path) {
     const response=await fetch(base+path,{credentials:'same-origin',signal:AbortSignal.timeout(45000)});
     const body=await response.json();
@@ -837,7 +845,8 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
       tabs.append(button(`${label} (${groups[key].length})`,()=>{entry.tab=key;draw();},''));
     }
     const modes=el('div',undefined,'lx-row');
-    const modeButtons=[['grid','Prisrutenett'],['list','Rangering']].map(([key,label])=>{const b=button(label,()=>{entry.mode=key;draw();},'lx-chip small');b.dataset.mode=key;modes.append(b);return b;});
+    const followers=found.followers??[];
+    const modeButtons=[['grid','Prisrutenett'],['list','Rangering'],...(followers.length?[['away','Velg bort']]:[])].map(([key,label])=>{const b=button(label,()=>{entry.mode=key;draw();},'lx-chip small');b.dataset.mode=key;modes.append(b);return b;});
     const sortRow=el('div',undefined,'lx-row');
     if(found.sharedKey)sortRow.append(button('Pris',()=>{entry.byQuality=false;draw();},'lx-chip small'),button('Råvarescore',()=>{entry.byQuality=true;draw();},'lx-chip small'));
     const list=el('div',undefined,'lx-member-list');
@@ -853,6 +862,8 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
       [...tabs.children].forEach((b,i)=>{const key=['approved','unknown','excluded'].filter(k=>groups[k].length)[i];b.classList.toggle('on',key===entry.tab);});
       [...sortRow.children].forEach((b,i)=>b.classList.toggle('on',i===(entry.byQuality?1:0)));
       for(const b of modeButtons)b.classList.toggle('on',b.dataset.mode===entry.mode);
+      for(const m of found.members)m.away=awayEntry(identity(m));
+      if(entry.mode==='away'){sortRow.hidden=true;list.replaceChildren(awayList());return;}
       const showGrid=entry.tab==='approved'&&entry.mode==='grid';
       modes.hidden=entry.tab!=='approved';
       sortRow.hidden=entry.tab!=='approved'||!found.sharedKey||showGrid;
@@ -864,6 +875,62 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
       });
       const fresh=rows.filter(m=>m.fresh&&m.unitPrice!==null).map(m=>m.unitPrice),lo=Math.min(...fresh),hi=Math.max(...fresh);
       list.replaceChildren(...rows.map((m,i)=>memberRow(m,i,lo,hi,found,now)));
+    }
+    // "Ikke for oss": the household's own choice for the families it follows.
+    // It hides the variant from suggestions and prices for those families only.
+    // One row per physical product: every chain's copy, and the family's own
+    // reviewed products, which may come from another source than the category.
+    function identity(m) {
+      const item=model.byPost.get(m.key);
+      return {keys:[m.key,...(item?.posts.map(p=>p.key)??[])].filter(Boolean),names:[m.name,item?.name].filter(Boolean),ean:item?.ean??m.ean??null,brand:m.brand??item?.brand??null,group:item?'i'+item.id:'n'+norm(m.name)};
+    }
+    function awayEntry(id) {
+      const keys=new Set(id.keys),names=new Set(id.names.map(norm)),ean=plain(id.ean);
+      return (found.unwanted??[]).find(e=>e.keys.some(k=>keys.has(k))||e.names.some(n=>names.has(n))||ean&&plain(e.ean)===ean)??null;
+    }
+    function variants() {
+      const byGroup=new Map(),byName=new Map(),byEan=new Map();
+      const add=(id,{name,store,unitPrice,unit,pack,own=false})=>{
+        let v=byGroup.get(id.group)??byName.get(norm(name))??(plain(id.ean)?byEan.get(plain(id.ean)):undefined);
+        if(!v){v={label:name,brand:id.brand,unit,pack,keys:new Set(),names:new Set(),ean:id.ean,stores:new Set(),price:null,own:false};byGroup.set(id.group,v);}
+        for(const k of id.keys)v.keys.add(k);for(const n of id.names)v.names.add(n);v.ean??=id.ean;v.brand??=id.brand;
+        if(store)v.stores.add(store);if(own)v.own=true;
+        if(unitPrice>0&&(v.price===null||unitPrice<v.price)){v.price=unitPrice;v.unit=unit;}
+        byName.set(norm(name),v);if(plain(id.ean))byEan.set(plain(id.ean),v);
+      };
+      for(const m of groups[entry.tab])add(identity(m),{name:m.name,store:m.store,unit:m.unit??found.unit,pack:m.pack,unitPrice:m.fresh?m.unitPrice??(m.packPrice>0&&m.pack>0?m.packPrice/m.pack:null):null});
+      for(const o of found.own??[])add({keys:[o.key],names:[o.name],ean:o.ean,brand:o.brand,group:'o'+o.key},{name:o.name,store:o.store,unit:o.unit??found.unit,pack:o.packAmount,unitPrice:o.unitPrice,own:true});
+      const list=[...new Set(byGroup.values())];
+      for(const v of list)v.away=awayEntry({keys:[...v.keys],names:[...v.names],ean:v.ean});
+      return list.sort((a,b)=>Number(!!a.away)-Number(!!b.away)||(a.price??Infinity)-(b.price??Infinity)||a.label.localeCompare(b.label,'nb'));
+    }
+    async function choose(v,away) {
+      const watchIds=followers.map(f=>f.watchId);
+      try{
+        if(away)await post('/unwanted',{action:'remove',watchIds,id:away.id});
+        else await post('/unwanted',{action:'add',watchIds,keys:[...v.keys].slice(0,50),names:[...v.names].slice(0,20),ean:v.ean??null,label:v.label,brand:v.brand??null});
+        found.unwanted=(await api('/explore-family?id='+encodeURIComponent(family.id))).family?.unwanted??[];
+      }catch(error){if(body.isConnected){draw();list.prepend(el('p',error.message,'lx-note'));}return;}
+      if(body.isConnected)draw();
+    }
+    function awayList() {
+      const box=el('div',undefined,'lx-away'),rows=variants();
+      box.append(el('p',`Varer dere aldri vil ha, foreslås ikke for ${followers.map(f=>f.name).join(' og ')} og teller ikke i prisene deres. Valget endrer ikke produktbiblioteket.`,'lx-note'));
+      for(const v of rows){
+        const row=el('div',undefined,'lx-away-row'+(v.away?' away':'')),text=el('span',undefined,'lx-member-text');
+        const stores=[...v.stores];
+        text.append(el('span',v.label,'lx-card-name'),el('span',[v.brand,packText(v.pack,v.unit),v.price!==null?'fra '+money(v.price)+'/'+v.unit:null,v.own?'godkjent for dere':null].filter(Boolean).join(' · '),'lx-card-sub'));
+        if(stores.length)text.append(el('span',stores.length>4?stores.slice(0,4).join(', ')+` og ${stores.length-4} til`:stores.join(', '),'lx-card-sub'));
+        row.append(text,button(v.away?'Angre':'Ikke for oss',()=>choose(v,v.away),v.away?'lx-chip small':'lx-ghost small'));
+        box.append(row);
+      }
+      // Choices made elsewhere, such as "Passer ikke" on a suggestion.
+      const elsewhere=(found.unwanted??[]).filter(e=>!rows.some(v=>v.away?.id===e.id));
+      if(elsewhere.length){
+        box.append(el('h3','Valgt bort fra før'));
+        for(const e of elsewhere){const row=el('div',undefined,'lx-away-row away');row.append(el('span',e.label+(e.source==='bargain'?' · fra Kjøp nå':''),'lx-card-name'),button('Angre',()=>choose(null,e),'lx-chip small'));box.append(row);}
+      }
+      return box;
     }
     draw();
   }
@@ -929,6 +996,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     text.append(el('span',m.name,'lx-card-name'),el('span',[m.store,m.brand,packText(m.pack,m.unit)].filter(Boolean).join(' · '),'lx-card-sub'));
     if(m.note)text.append(el('span',m.note.length>190?m.note.slice(0,190)+' …':m.note,'lx-note'));
     const side=el('span',undefined,'lx-member-side');
+    if(m.away){row.classList.add('away');side.append(el('span','Ikke for oss','lx-badge'));}
     if(m.quality&&m.quality.key===found.sharedKey)side.append(el('span',`${m.quality.label} ${whole(m.quality.score)}`,'lx-badge strong'));
     if(m.value?.top)side.append(el('span','Kvalitet for pengene','lx-badge strong'));
     if(m.unitPrice!==null&&m.fresh){
