@@ -29,8 +29,8 @@ test('Oda is a store like any other: a cheap Oda price surfaces with delivery, n
 });
 
 test('unreviewed shelf variants are marked, need a clear gap, and never count as reviewed savings',()=>{
- const check=row({reviewed:false,storeKey:'rema',storeName:'REMA 1000'});
- const result=build([row(),check]);
+ const check=row({reviewed:false,storeKey:'rema',storeName:'REMA 1000',watchId:'other',productKey:'r1'});
+ const result=build([row(),check],new Map([['mince',family()],['other',family({name:'Annen kjøttdeig'})]]));
  assert.equal(result.rows.length,2);
  assert.equal(result.rows[0].reviewed,true,'reviewed buys come first');
  const rema=result.stores.find(s=>s.key==='rema');
@@ -131,15 +131,20 @@ test('the overview sends each need to the cheapest place, not to a checked but d
  assert.equal(picked.length,1);assert.equal(picked[0].storeKey,'kiwi');
  assert.deepEqual(picked[0].checkedAlternative,{storeName:'Europris',unitPrice:189,productName:'Kaffebønner 1000 g'});
  const dear=result.rows.find(r=>r.storeKey==='europris');
- assert.equal(dear.best,false);assert.deepEqual(dear.cheaperAt,{storeName:'KIWI',unitPrice:155.8,reviewed:false});
+ assert.equal(dear.best,false);assert.deepEqual(dear.bestAt,{storeName:'KIWI',unitPrice:155.8,reviewed:false});
  assert.equal(result.top.storeKey,'kiwi','the banner names the cheapest place too');
  // An unchecked variant only a little cheaper does not displace a checked price.
  const close=build([europris,{...kiwi,unitPrice:185,packPrice:92.5}],families);
  assert.equal([...close.rows,...close.minor].find(r=>r.best).storeKey,'europris');
  // A store's trip saving leaves out a need that a checked price elsewhere covers more cheaply.
+ // A store's view, chip and trip saving hold only the needs it is the best place for.
  const checked=build([europris,{...kiwi,reviewed:true}],families);
- assert.equal(checked.stores.find(s=>s.key==='europris').saving,0);
- assert.ok(checked.stores.find(s=>s.key==='kiwi').saving>0);
+ assert.equal(checked.stores.find(s=>s.key==='europris'),undefined,'Europris has nothing that is cheapest there');
+ const kiwiStore=checked.stores.find(s=>s.key==='kiwi');
+ assert.equal(kiwiStore.count,1);assert.ok(kiwiStore.saving>0);
+ assert.equal(checked.total,kiwiStore.saving,'the headline counts the best place only');
+ assert.equal(result.stores.find(s=>s.key==='europris'),undefined);
+ assert.equal(result.total,0,'an unchecked best place adds nothing certain to the headline');
 });
 
 test('at the same chain price the store with more to gain anyway is the best place',()=>{

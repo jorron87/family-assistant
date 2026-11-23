@@ -158,23 +158,27 @@ export function buildBargains({candidates,families,stores,hides={},at=Date.now()
   const checked=cheapestChecked.get(watchId);
   const winner=!list[0].reviewed&&checked&&checked.unitPrice<=list[0].unitPrice*(1+CHECK_CLEARLY_CHEAPER_PCT/100)?checked:list[0];
   for(const r of list){
-   r.best=r===winner&&shownFamilies.has(watchId);
-   if(r!==winner&&winner.unitPrice<r.unitPrice)r.cheaperAt={storeName:winner.storeName,unitPrice:winner.unitPrice,reviewed:winner.reviewed};
+   r.cheapest=r===winner;
+   r.best=r.cheapest&&shownFamilies.has(watchId);
+   if(r!==winner)r.bestAt={storeName:winner.storeName,unitPrice:winner.unitPrice,reviewed:winner.reviewed};
   }
   if(!winner.reviewed&&checked)winner.checkedAlternative={storeName:checked.storeName,unitPrice:checked.unitPrice,productName:checked.productName};
  }
- // A store's trip saving leaves out needs a checked price elsewhere covers more cheaply.
- const tripSaving=r=>r.reviewed&&!(cheapestChecked.get(r.watchId)?.unitPrice<r.unitPrice&&cheapestChecked.get(r.watchId).storeKey!==r.storeKey)?r.saving??0:0;
+ // Every store view, chip count, trip saving and the headline hold only the
+ // needs that store is the best place for. A dearer row stays in the payload
+ // with bestAt, so a store's view can mention it without inviting the buy.
+ const picks=[...rows,...minorRows].filter(r=>r.best);
  const storeRows=stores.map(s=>{
-  const list=rows.filter(r=>r.storeKey===s.key),sure=list.filter(r=>r.reviewed),check=list.filter(r=>!r.reviewed);
-  const saving=round(sure.reduce((n,r)=>n+tripSaving(r),0)),checkSaving=round(check.reduce((n,r)=>n+(r.saving??0),0));
+  const list=picks.filter(r=>r.storeKey===s.key),sure=list.filter(r=>r.reviewed),check=list.filter(r=>!r.reviewed);
+  const saving=round(sure.reduce((n,r)=>n+(r.saving??0),0)),checkSaving=round(check.reduce((n,r)=>n+(r.saving??0),0));
   return {key:s.key,name:s.name,oda:s.oda===true,online:s.online===true,minSavings:s.minSavings??0,count:sure.length,checkCount:check.length,saving,checkSaving,
-   worthTrip:s.oda?null:saving>0&&saving>=(s.minSavings??0)};
+   dearerCount:rows.filter(r=>r.storeKey===s.key&&!r.best).length,worthTrip:s.oda?null:saving>0&&saving>=(s.minSavings??0)};
  }).filter(s=>s.count||s.checkCount).sort((a,b)=>b.saving-a.saving||b.checkSaving-a.checkSaving||a.name.localeCompare(b.name,'nb'));
- // A family's need is bought once, so the headline takes its best store only.
- const perFamily=new Map();
- for(const r of rows)if(r.reviewed&&(r.saving??0)>(perFamily.get(r.watchId)??0))perFamily.set(r.watchId,r.saving);
- const total=round([...perFamily.values()].reduce((n,x)=>n+x,0));
- const picks=[...rows,...minorRows].filter(r=>r.best).sort((a,b)=>Number(b.reviewed)-Number(a.reviewed)||score(b)-score(a));
- return {rows,stores:storeRows,minor:minorRows,covered,total,hidden,top:picks[0]??null};
+ // A family's need is bought once, at its best place.
+ const total=round(picks.filter(r=>r.reviewed).reduce((n,r)=>n+(r.saving??0),0));
+ // Enough at home: the cheapest place per need is enough to show.
+ const coveredBest=new Map();
+ for(const r of covered){const prev=coveredBest.get(r.watchId);if(!prev||r.unitPrice<prev.unitPrice||r.unitPrice===prev.unitPrice&&r.reviewed&&!prev.reviewed)coveredBest.set(r.watchId,r);}
+ picks.sort((a,b)=>Number(b.reviewed)-Number(a.reviewed)||score(b)-score(a));
+ return {rows,stores:storeRows,minor:minorRows,covered:[...coveredBest.values()],total,hidden,top:picks[0]??null};
 }

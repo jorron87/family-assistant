@@ -215,6 +215,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     const undo=()=>act(()=>api('/bargain',{action:'undo',keys:row.hideKeys}),'Angret.');
     act(()=>api('/bargain',{action,keys:row.hideKeys,unitPrice:row.unitPrice}),action==='mismatch'?`${row.productName} vises ikke lenger for ${row.familyName}.`:'Skjult til prisen endrer seg.',undo);
   }
+  const bestAtText=row=>{const at=row.bestAt;return at.unitPrice<row.unitPrice?`${price(at.unitPrice)}/${row.unit} hos ${at.storeName}${at.reviewed?'':' (sjekk varianten)'}`:at.unitPrice===row.unitPrice?`samme pris hos ${at.storeName}`:`sjekket vare ${price(at.unitPrice)}/${row.unit} hos ${at.storeName}`;};
   function bargainCard(row) {
     const card=el('article',undefined,'shop-deal shop-bargain'+(row.reviewed?'':' check'));
     const option=rowOption(row);
@@ -247,7 +248,6 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     if(row.maxPacks)notes.push(`Maks ${row.maxPacks} per ${row.oda?'bestilling':'kunde'}.`);
     if(row.bundlePacks>1)notes.push(`Kjøp ${row.bundlePacks} og ${row.bundlePacks}.`);
     if(row.memberOnly)notes.push('Krever medlemskap.');
-    if(row.cheaperAt)notes.push(`Billigere hos ${row.cheaperAt.storeName}: ${price(row.cheaperAt.unitPrice)}/${row.unit}${row.cheaperAt.reviewed?'':' (varianten er ikke sjekket)'}.`);
     if(row.checkedAlternative)notes.push(`Sjekket vare: ${price(row.checkedAlternative.unitPrice)}/${row.unit} hos ${row.checkedAlternative.storeName}.`);
     if(!row.reviewed)notes.push('Samme varekategori, men varianten er ikke sjekket.');
     else if(row.kind!=='offer'&&!row.oda)notes.push('Kjedepris, så sjekk prisen i butikken.');
@@ -366,12 +366,11 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
   }
   // The best place for each need, or everything one store has, so a quick
   // visit or one Oda order can stock up on what is cheap right now.
-  // In one store's view the server's trip saving leaves out needs that a
-  // checked price elsewhere covers more cheaply.
-  function bargainStoreSection(store,rows,tripSaving=null) {
+  // Only the needs a store is the best place for; the server decides.
+  function bargainStoreSection(store,rows) {
     const section=el('section',undefined,'shop-store'),head=el('div',undefined,'shop-store-head');
     const sure=rows.filter(r=>r.reviewed),check=rows.filter(r=>!r.reviewed);
-    const saving=tripSaving??sure.reduce((n,r)=>n+(r.saving??0),0),checkSaving=check.reduce((n,r)=>n+(r.saving??0),0);
+    const saving=sure.reduce((n,r)=>n+(r.saving??0),0),checkSaving=check.reduce((n,r)=>n+(r.saving??0),0);
     const trip=store.oda?(saving>0?'med neste levering':null):saving>0&&store.minSavings!=null?(saving>=store.minSavings?'verdt en egen tur':`under turgrensen på ${kr(store.minSavings)}`):null;
     const parts=[saving>0?`Spar ${kr(saving)}`:null,trip,checkSaving>0?`opptil ${kr(checkSaving)} til hvis variantene passer`:null].filter(Boolean);
     head.append(el('h3',store.name),el('span',parts.join(' · '),'shop-sub'));
@@ -400,7 +399,12 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
         for(const store of places){const rows=picked.filter(r=>r.storeKey===store.key);if(rows.length)root.append(bargainStoreSection(store,rows));}
       }else{
         const store=b.stores.find(s=>s.key===selectedStore);
-        root.append(bargainStoreSection(store,b.rows.filter(r=>r.storeKey===store.key),store.saving));
+        root.append(bargainStoreSection(store,[...b.rows,...b.minor].filter(r=>r.best&&r.storeKey===store.key)));
+        // Also low here, but another place is the better buy: named, never offered.
+        const dearer=b.rows.filter(r=>!r.best&&r.storeKey===store.key&&r.bestAt);
+        if(dearer.length)root.append(details('dearer-'+store.key,`Billigere et annet sted (${dearer.length})`,node=>{
+          for(const row of dearer){const line=el('div',undefined,'shop-row');line.append(el('span',`${row.familyName}: ${price(row.unitPrice)}/${row.unit} her`),el('span',bestAtText(row),'shop-sub'));node.append(line);}
+        },'shop-fold'));
       }
     }
     const low=data.items.filter(x=>x.enabled&&x.stock.known&&x.stock.months!=null&&x.stock.months<1).slice(0,8);
@@ -424,7 +428,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
       }
       root.append(card);
     }
-    const minor=b.minor.filter(r=>!r.best);
+    const minor=b.minor.filter(r=>r.cheapest&&!r.best);
     if(minor.length)root.append(details('minor',`Små besparelser (${minor.length})`,node=>{
       for(const row of minor){const line=el('div',undefined,'shop-row');line.append(el('span',`${row.familyName} hos ${row.storeName}: ${price(row.unitPrice)}/${row.unit}${row.reviewed?'':' · sjekk varianten'}`),el('span',row.saving>0?`spar ${kr(row.saving)}`:`${nf(0).format(row.discountPct)} % lavere`,'shop-sub'));node.append(line);}
     },'shop-fold'));
