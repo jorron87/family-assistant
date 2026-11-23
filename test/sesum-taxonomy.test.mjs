@@ -294,6 +294,12 @@ test('the family follows a native leaf category from Varer and can stop followin
  shop.followCategory({groupId:'sesum-category:284',action:'follow'});
  assert.equal(state.shopping.watches['category-284'].enabled,true,'following again restores the same family');
  assert.throws(()=>shop.followCategory({groupId:'sesum-category:2112',action:'unfollow'}),/ikke laget fra Varer/,'a family made elsewhere is changed in its own settings');
+ // A shelf with no products read yet is found by name and can still be followed.
+ const read=shop.taxonomy.reader(),{data}=buildExplorerData(read.index(),{imageRef:()=>null,chainName:x=>x,active:read.active,horizonDays:14}),model=prepareExplorer(data);
+ const found=familySummaries(model,explore(model,{...emptyFilters(),q:'andefet'},Date.parse(at)));
+ assert.deepEqual(found.map(r=>[r.family.id,r.count]),[['sesum-category:2112',0]]);
+ assert.deepEqual(shop.followCategory({groupId:'sesum-category:2112',action:'follow'}).watchIds,['category-2112']);
+ assert.equal(state.shopping.watches['category-2112'].unit,'kg','an unread shelf gets a first unit guess');
 });
 test('a variant chosen away leaves the Varer card, and a newly followed uncounted family is marked for Handel',()=>{
  const state={},shop=shoppingStore(state,{save(){},now:()=>new Date(at),assortmentConfig:config});

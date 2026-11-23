@@ -875,10 +875,11 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     if(!existing&&linked().length)return {saved:false,following:true,watchIds:linked()};
     const category=taxonomy.definition(categoryId),reader=taxonomy.reader();
     const counts=new Map();for(const row of reader?.members?.(groupId)??[]){const u=row.product?.unit;if(['kg','l','stk'].includes(u))counts.set(u,(counts.get(u)??0)+1);}
-    const unit=[...counts].sort((a,b)=>b[1]-a[1])[0]?.[0];
-    if(!unit)throw Error('Kategorien har ingen felles enhet å sammenligne i.');
     const path=[];for(let c=category;c;c=c.parentId?taxonomy.definition(c.parentId):null)path.unshift(c.name);
     const text=path.join(' ').toLocaleLowerCase('nb-NO');
+    // A shelf not read yet has no products to count; liquids are guessed per litre.
+    const unit=[...counts].sort((a,b)=>b[1]-a[1])[0]?.[0]??(counts.size?null:/olje|melk|juice|saft|drikke|brus|vann|sjampo|såpe|vaskemiddel|eddik|saus/.test(text)?'l':'kg');
+    if(!unit)throw Error('Kategorien har ingen felles enhet å sammenligne i.');
     // A first guess the family can change: frozen and canned shelves first, then fresh ones.
     const storage=/frys|frossen|frosne/.test(text)?'frozen':/hermetisk|hermetikk|tørr|boks|glass|krydder|bakevarer|hus & hjem|personlige/.test(text)?'pantry':/meieri|\bost|kjøtt|fisk|pålegg|kjøl|\begg|fersk|frukt|grønt|yoghurt|melk/.test(text)?'chilled':'pantry';
     if(!existing)watch({id,name:category.name,unit,storage,maxPacks:100});

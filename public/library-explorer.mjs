@@ -465,7 +465,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     card.append(main,footer,pick);
     return card;
   }
-  const reachText=row=>[row.brands?`${row.brands} ${row.brands===1?'merke':'merker'}`:null,`${row.chains} ${row.chains===1?'butikk':'butikker'}`,row.count?`${whole(row.count)} ${row.count===1?'vare':'varer'}`:null,row.campaigns.length?`${row.campaigns.length} ${row.campaigns.length===1?'tilbud':'tilbud'}`:null].filter(Boolean).join(' · ');
+  const reachText=row=>[row.brands?`${row.brands} ${row.brands===1?'merke':'merker'}`:null,row.chains?`${row.chains} ${row.chains===1?'butikk':'butikker'}`:null,row.count?`${whole(row.count)} ${row.count===1?'vare':'varer'}`:null,row.campaigns.length?`${row.campaigns.length} ${row.campaigns.length===1?'tilbud':'tilbud'}`:null].filter(Boolean).join(' · ');
   const storeName=index=>index===null||index===undefined?'':model.stores[index].name;
   const offerName=offer=>offer.item?.name??offer.campaign.name;
   const followedText=fam=>'Dere følger'+(fam.stock.known?` · ${short(fam.stock.amount)} ${fam.unit} på lager`:'');
@@ -511,6 +511,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
   }
   function priceTrack(row) {
     const box=el('span',undefined,'lx-track');
+    if(row.min===null&&!row.count&&row.family.sourceCategory&&row.family.leaf){box.append(el('span',row.followed?'Varene hentes fra Sesum nå. Kom tilbake om litt.':'Ikke hentet ennå. Følg kategorien, så henter vi varer og priser.','lx-muted'));return box;}
     if(row.min===null){box.append(el('span',row.family.sourceCategory&&row.family.parentId===null?'Åpne en underkategori for prissammenligning':'Ingen ferske priser å sammenligne','lx-muted'));return box;}
     const line=el('span',undefined,'lx-track-line');
     if(row.max>row.min)for(const p of row.prices){const dot=el('i');dot.style.left=((p-row.min)/(row.max-row.min)*100)+'%';line.append(dot);}

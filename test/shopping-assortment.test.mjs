@@ -340,3 +340,20 @@ test('the selected shelves are read again a day after the previous sweep started
  time=new Date(Date.parse(done.startedAt)+86400000+1);f.api.refreshSelected(()=>['12']);
  const next=f.api.status().bootstrap;assert.equal(next.status,'collecting');assert.notEqual(next.startedAt,done.startedAt);
 });
+test('a newly followed category is read at once without moving the daily sweep',async t=>{
+ let time=new Date(at);const f=collectionFixture(t,{now:()=>time,config:{...config,familySource:'sesum',reviewedPriceRefreshEnabled:true},receiveCategories:async()=>{}});
+ const categoriesOf=w=>w.jobs.filter(j=>j.kind==='catalogue').map(j=>new URL(j.url).pathname);
+ const sweep=async(seen=[])=>{for(let round=0;round<8;round++){const w=f.api.work();if(!w.jobs?.length)break;seen.push(...categoriesOf(w));for(const j of w.jobs){time=new Date(+time+60000);
+  await f.api.receive({runId:w.runId,jobId:j.id,status:'ok',fetchedAt:time.toISOString(),result:j.kind==='catalogue'?{ok:true,kind:'catalogue',sourceUrl:j.url,categoryUrls:[],productUrls:['https://www.sesum.no/produkt/1-p'],nextUrls:[],endReached:true,filtersVerified:true,total:1,categories:[{id:'12',name:'A',parentId:null}]}:{ok:true,kind:'product',sourceUrl:j.url,product:{...sesum(),sourceUrl:j.url,categoryPathIds:['12']},prices:sesum().prices}});}}return seen;};
+ f.api.bootstrap({leafSelection:true,categoryUrls:['https://www.sesum.no/kategori/12']});
+ f.api.refreshSelected(()=>['12','14']);assert.ok(f.api.status().bootstrap.categoryIds.includes('14'),'joins a running sweep');
+ assert.ok((await sweep()).includes('/kategori/14'));
+ const done=f.api.status().bootstrap;assert.equal(done.status,'complete');
+ time=new Date(+time+60000);f.api.refreshSelected(()=>['12','14','13']);
+ const top=f.api.status().bootstrap;assert.equal(top.status,'collecting','no rest hour or daily wait for a new category');assert.equal(top.fullStartedAt,done.fullStartedAt??done.startedAt);
+ const read=await sweep();assert.ok(read.includes('/kategori/13'));assert.ok(!read.includes('/kategori/12'),'only the new category is read');
+ time=new Date(+time+60000);f.api.refreshSelected(()=>['12','14','13']);assert.equal(f.api.status().bootstrap.startedAt,top.startedAt,'a covered category is not read again');
+ time=new Date(Date.parse(done.startedAt)+86400000+3600000+1);f.api.refreshSelected(()=>['12','14','13']);
+ const full=f.api.status().bootstrap;assert.equal(full.status,'collecting');assert.deepEqual(full.categoryIds,['12','14','13']);assert.equal(full.fullStartedAt,full.startedAt);
+ f.api.pause();time=new Date(+time+60000);const paused=f.api.status().bootstrap.startedAt;f.api.refreshSelected(()=>['12','14','13','15']);assert.equal(f.api.status().bootstrap.categoryIds.includes('15'),false,'a manual pause is respected');assert.equal(f.api.status().bootstrap.startedAt,paused);
+});

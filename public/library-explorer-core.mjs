@@ -277,6 +277,13 @@ export function familySummaries(model,result) {
     if(buckets.has(index)||!(list.some(inScope)||family.followed&&!result.storeSet)||f.followedOnly&&!family.followed||f.food&&!f.followedOnly&&!shelf.food||f.shelves.length&&!f.shelves.includes(family.shelf)||!result.terms.every(term=>tokenScore(text,term)))continue;
     buckets.set(index,[]);
   }
+  // A searched Sesum shelf is found by its own name even before any of its
+  // products has been read, so the household can follow it from here.
+  if(model.familySource==='sesum'&&result.terms.length&&offerOnly&&!f.offersOnly)for(const family of model.families){
+    if(buckets.has(family.index)||!family.sourceCategory||!family.leaf||f.followedOnly&&!family.followed||f.food&&!f.followedOnly&&!model.shelves[family.shelf].food||f.shelves.length&&!f.shelves.includes(family.shelf))continue;
+    const text=low(family.name);
+    if(result.terms.every(term=>tokenScore(text,term)))buckets.set(family.index,[]);
+  }
   return [...buckets].flatMap(([index,items])=>{
     const family=model.families[index],stores=new Set(),brands=new Set(),offers=[],campaigns=(model.campaignsByFamily.get(index)??[]).filter(inScope);
     if(f.offersOnly&&!campaigns.length)return [];
