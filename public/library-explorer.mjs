@@ -6,8 +6,8 @@ const nf=digits=>new Intl.NumberFormat('nb-NO',{maximumFractionDigits:digits});
 const money=value=>nf(2).format(value)+' kr';
 const whole=value=>nf(0).format(value);
 const short=value=>nf(value<10?1:0).format(value);
-const norm=name=>String(name??'').toLocaleLowerCase('nb-NO').replace(/s+/g,' ').trim();
-const plain=ean=>ean?String(ean).replace(/D/g,'').replace(/^0+/,''):'';
+const norm=name=>String(name??'').toLocaleLowerCase('nb-NO').replace(/\s+/g,' ').trim();
+const plain=ean=>ean?String(ean).replace(/\D/g,'').replace(/^0+/,''):'';
 function el(tag,text,cls) {
   const node=document.createElement(tag);
   if(text!==undefined&&text!==null)node.textContent=text;
@@ -921,6 +921,8 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
         else await post('/unwanted',{action:'add',watchIds,keys:[...v.keys].slice(0,50),names:[...v.names].slice(0,20),ean:v.ean??null,label:v.label,brand:v.brand??null});
         found.unwanted=(await api('/explore-family?id='+encodeURIComponent(family.id))).family?.unwanted??[];
         changedShopping();
+        // The cards behind the drawer leave the variant out too.
+        api('/explore-offers').then(live=>{applyFollowed(model,live.followed??[]);applyCampaigns(model,live.offers??[]);refresh();}).catch(()=>{});
       }catch(error){if(body.isConnected){draw();list.prepend(el('p',error.message,'lx-note'));}return;}
       if(body.isConnected)draw();
     }

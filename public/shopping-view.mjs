@@ -380,6 +380,52 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     if(check.length)section.append(el('p','Sjekk at varianten passer','shop-group-label'),...check.map(bargainCard));
     return section;
   }
+  // Needs about to run out, and followed families nobody has counted yet. A family
+  // just followed from Varer comes first; the other uncounted ones wait in a fold.
+  function stockRow(b,item,{ask=false}={}) {
+    const row=el('div',undefined,'shop-low'+(ask?' ask':'')),text=el('div');
+    // The same prices as Kjøp nå: the cheapest good buy, else the cheapest reviewed price.
+    const deals=[...b.rows,...b.minor],deal=deals.find(r=>r.watchId===item.id&&r.best)??deals.filter(r=>r.watchId===item.id).sort((x,y)=>x.unitPrice-y.unitPrice)[0];
+    const useDeal=deal&&(!item.prices.current||deal.unitPrice<item.prices.current);
+    const where=useDeal?`Billigst nå: ${price(deal.unitPrice)}/${item.unit} hos ${deal.storeName}${deal.reviewed?'':' · sjekk varianten'}`:item.prices.current?`Billigst nå: ${price(item.prices.current)}/${item.unit} hos ${item.prices.currentChain}`:onCategory&&item.groupId?'Ingen sjekket vare ennå, se prisene i kategorien':'Ingen fersk pris ennå';
+    text.append(el('strong',item.name),el('span',where,'shop-sub'));
+    if(useDeal)text.append(el('span',deal.productName,'shop-sub'));
+    if(ask&&item.packs.length)text.append(el('span','Hvor mange har dere hjemme?','shop-sub'),stockEditor(item,async()=>{await load();render(true);},{confirm:true}));
+    row.append(text);
+    const actions=el('div',undefined,'shop-low-actions');
+    if(useDeal&&deal.onList)actions.append(el('span','På listen ✓','shop-onlist'));
+    else if(useDeal)actions.append(button(deal.kind!=='offer'&&deal.oda&&deal.odaProductId&&data.oda.connected?'Legg i Oda-kurven':'Legg på listen',()=>addBargain(deal,rowOption(deal))));
+    else if(item.packs.length)actions.append(button('Legg på listen',()=>act(()=>api('/list',{action:'add',watchId:item.id,packAmount:item.packs[0].amount}),'Lagt på handlelisten.')));
+    if(onCategory&&item.groupId)actions.append(button('Se priser',()=>onCategory(item.groupId)));
+    if(data.oda.connected&&!(useDeal&&deal.oda))actions.append(button('Finn i Oda',()=>{odaQuery=item.name;openSections.add('oda');render(true);panel.querySelector('.shop-oda')?.scrollIntoView({block:'center'});}));
+    row.append(actions);
+    return row;
+  }
+  function stockCard(b) {
+    const enabled=data.items.filter(x=>x.enabled);
+    const low=enabled.filter(x=>x.stock.known&&(x.stock.amount<=0||x.stock.months!=null&&x.stock.months<1)).sort((x,y)=>(x.stock.months??0)-(y.stock.months??0)).slice(0,8);
+    const uncounted=enabled.filter(x=>!x.stock.known),followed=uncounted.filter(x=>x.followedAt).sort((x,y)=>y.followedAt.localeCompare(x.followedAt)),rest=uncounted.filter(x=>!x.followedAt).sort((x,y)=>(y.spent??0)-(x.spent??0)||x.name.localeCompare(y.name,'nb'));
+    if(!low.length&&!uncounted.length)return null;
+    const card=el('section',undefined,'shop-card shop-stock-card');
+    card.append(el('h3',low.length?'Snart tomt':'Lager å telle'));
+    for(const item of low)card.append(stockRow(b,item));
+    if(followed.length){
+      if(low.length)card.append(el('p','Nye dere følger, uten telling','shop-group-label'));
+      card.append(el('p','Tell det dere har hjemme, så vet vi når det er på tide å kjøpe.','shop-sub'));
+      for(const item of followed.slice(0,8))card.append(stockRow(b,item,{ask:true}));
+    }
+    const more=[...followed.slice(8),...rest];
+    if(more.length){
+      // Built only when opened: most families start uncounted.
+      const fold=el('details',undefined,'shop-fold');
+      fold.append(el('summary',`${followed.length?'Andre':'Familier'} uten telling (${more.length})`));
+      const fill=()=>{if(fold.dataset.built)return;fold.dataset.built='1';for(const item of more)fold.append(stockRow(b,item,{ask:true}));};
+      fold.open=openSections.has('uncounted');if(fold.open)fill();
+      fold.ontoggle=()=>{if(!fold.isConnected)return;if(fold.open){openSections.add('uncounted');fill();}else openSections.delete('uncounted');};
+      card.append(fold);
+    }
+    return card;
+  }
   function renderBuy(root) {
     const b=data.bargains??{rows:[],stores:[],minor:[],covered:[],total:0};
     const hero=el('section',undefined,'shop-hero'),sure=b.rows.filter(r=>r.reviewed).length,check=b.rows.length-sure;
@@ -390,6 +436,8 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
       hero.append(el('div',data.monitoring?'Ingen gode kjøp akkurat nå':'Tilbudsovervåkning er av','shop-hero-number small'),el('p',[`${data.storesCheckedToday} butikker sjekket i dag`,data.saved.year?`${kr(data.saved.year)} spart i år`:null].filter(Boolean).join(' · '),'shop-sub'));
     }
     root.append(hero);
+    const stock=stockCard(b);
+    if(stock)root.append(stock);
     if(selectedStore!=='all'&&!b.stores.some(s=>s.key===selectedStore))selectedStore='all';
     if(b.stores.length){
       root.append(chips([['all','Beste sted for hver vare'],...b.stores.map(s=>[s.key,`${s.name} (${s.count+s.checkCount})`])],selectedStore,key=>{selectedStore=key;render(true);},'Velg butikk'));
@@ -408,27 +456,6 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
           for(const row of dearer){const line=el('div',undefined,'shop-row');line.append(el('span',`${row.familyName}: ${price(row.unitPrice)}/${row.unit} her`),el('span',bestAtText(row),'shop-sub'));node.append(line);}
         },'shop-fold'));
       }
-    }
-    const low=data.items.filter(x=>x.enabled&&x.stock.known&&x.stock.months!=null&&x.stock.months<1).slice(0,8);
-    if(low.length){
-      const card=el('section',undefined,'shop-card');
-      card.append(el('h3','Snart tomt'));
-      for(const item of low){
-        const row=el('div',undefined,'shop-low'),text=el('div');
-        // The same prices as the list above: the cheapest good buy, else the cheapest reviewed price.
-        const deal=[...b.rows,...b.minor].find(r=>r.watchId===item.id&&r.best)??[...b.rows,...b.minor].filter(r=>r.watchId===item.id).sort((x,y)=>x.unitPrice-y.unitPrice)[0];
-        const useDeal=deal&&(!item.prices.current||deal.unitPrice<item.prices.current);
-        const where=useDeal?`Billigst nå: ${price(deal.unitPrice)}/${item.unit} hos ${deal.storeName}${deal.reviewed?'':' · sjekk varianten'}`:item.prices.current?`Billigst nå: ${price(item.prices.current)}/${item.unit} hos ${item.prices.currentChain}`:'Ingen fersk pris';
-        text.append(el('strong',item.name),el('span',where,'shop-sub'));
-        if(useDeal)text.append(el('span',deal.productName,'shop-sub'));
-        row.append(text);
-        if(useDeal&&deal.onList)row.append(el('span','På listen ✓','shop-onlist'));
-        else if(useDeal)row.append(button(deal.kind!=='offer'&&deal.oda&&deal.odaProductId&&data.oda.connected?'Legg i Oda-kurven':'Legg på listen',()=>addBargain(deal,rowOption(deal))));
-        else row.append(button('Legg på listen',()=>act(()=>api('/list',{action:'add',watchId:item.id,packAmount:item.packs[0].amount}),'Lagt på handlelisten.')));
-        if(data.oda.connected&&!(useDeal&&deal.oda))row.append(button('Finn i Oda',()=>{odaQuery=item.name;openSections.add('oda');render(true);panel.querySelector('.shop-oda')?.scrollIntoView({block:'center'});}));
-        card.append(row);
-      }
-      root.append(card);
     }
     const minor=b.minor.filter(r=>r.cheapest&&!r.best);
     if(minor.length)root.append(details('minor',`Små besparelser (${minor.length})`,node=>{

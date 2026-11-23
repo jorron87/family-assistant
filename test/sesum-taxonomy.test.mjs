@@ -11,7 +11,7 @@ import {shoppingAgentJobs} from '../src/shopping-agent-jobs.mjs';
 import {agentManifest} from '../src/shopping-agent-context.mjs';
 import {applyWorkerProposal,planShoppingWorkers} from '../src/shopping-worker-contract.mjs';
 import {buildExplorerData} from '../src/library-explorer.mjs';
-import {prepareExplorer,explore,familySummaries,emptyFilters} from '../public/library-explorer-core.mjs';
+import {prepareExplorer,explore,familySummaries,emptyFilters,applyFollowed} from '../public/library-explorer-core.mjs';
 const at='2026-11-11T12:00:00Z';
 const categories=[{id:'46',name:'Kylling og fjærkre',parentId:null,sourceUrl:'https://www.sesum.no/kategori/46-kylling-og-fjaerkre'},{id:'283',name:'And',parentId:'46',sourceUrl:'https://www.sesum.no/kategori/283-and'},{id:'284',name:'And',parentId:'283',sourceUrl:'https://www.sesum.no/kategori/284-and'},{id:'2112',name:'Andefett',parentId:'283',sourceUrl:'https://www.sesum.no/kategori/2112-andefett'}];
 const config={enabled:true,familySource:'sesum',priceHorizonDays:14};
@@ -294,4 +294,16 @@ test('the family follows a native leaf category from Varer and can stop followin
  shop.followCategory({groupId:'sesum-category:284',action:'follow'});
  assert.equal(state.shopping.watches['category-284'].enabled,true,'following again restores the same family');
  assert.throws(()=>shop.followCategory({groupId:'sesum-category:2112',action:'unfollow'}),/ikke laget fra Varer/,'a family made elsewhere is changed in its own settings');
+});
+test('a variant chosen away leaves the Varer card, and a newly followed uncounted family is marked for Handel',()=>{
+ const state={},shop=shoppingStore(state,{save(){},now:()=>new Date(at),assortmentConfig:config});
+ shop.settings({monitoringEnabled:true,stores:[]});shop.taxonomy.receive({categories,fetchedAt:at});
+ shop.assortment.receiveSesum({products:[product(),product(2,{name:'Synthetic cheap duck',prices:[{storeCode:'KIWI',price:15,observedAt:at,source:'actual-native-receipt'}]})],fetchedAt:at});
+ shop.followCategory({groupId:'sesum-category:284',action:'follow'});
+ const item=shop.familyView().items.find(x=>x.id==='category-284');assert.equal(item.followedAt,at.replace('Z','.000Z'));assert.equal(item.stock.known,false);
+ const cardOffers=()=>{const read=shop.taxonomy.reader(),{data}=buildExplorerData(read.index(),{imageRef:()=>null,chainName:x=>x,active:read.active,horizonDays:14}),model=prepareExplorer(data);applyFollowed(model,shop.explorer.offers().followed);return familySummaries(model,explore(model,emptyFilters(),Date.parse(at))).find(f=>f.family.id==='sesum-category:284').offers.map(o=>o.item.name);};
+ assert.deepEqual(cardOffers(),['Synthetic cheap duck','Synthetic duck']);
+ shop.unwantedAction({action:'add',watchIds:['category-284'],keys:['sesum:KIWI:2'],names:['Synthetic cheap duck'],label:'Synthetic cheap duck'});
+ assert.deepEqual(shop.explorer.offers().followed.find(f=>f.id==='category-284').away.keys,['sesum:KIWI:2']);
+ assert.deepEqual(cardOffers(),['Synthetic duck'],'the cheapest visible alternative is no longer the variant chosen away');
 });

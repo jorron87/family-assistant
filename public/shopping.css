@@ -54,7 +54,7 @@
 .shop-ask { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--s-soft); }
 .shop-ask .shop-chips { margin-bottom: 0; }
 .shop-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-.shop .shop-actions button, .shop .shop-add, .shop .shop-low button, .shop-fold button, .shop .shop-check button { min-height: 46px; padding: 10px 18px; border: 1px solid var(--s-line); border-radius: 11px; background: transparent; color: var(--s-green); font: inherit; cursor: pointer; }
+.shop .shop-actions button, .shop .shop-add, .shop .shop-low-actions button, .shop-fold button, .shop .shop-check button { min-height: 46px; padding: 10px 18px; border: 1px solid var(--s-line); border-radius: 11px; background: transparent; color: var(--s-green); font: inherit; cursor: pointer; }
 .shop .shop-actions button.primary { flex: 1; border-color: var(--s-green); background: var(--s-green); color: #fff; font-weight: 600; }
 .shop button:disabled { opacity: .5; }
 .shop details > summary { min-height: 44px; padding: 11px 0; color: var(--s-green); font-size: 14px; cursor: pointer; }
@@ -151,7 +151,7 @@ body.kiosk .main-nav button { padding-left: 13px; padding-right: 13px; }
 .shop-draft-row { flex-wrap: wrap; }
 .shop-draft-status { flex-basis: 100%; font-size: 13px; color: var(--s-green); }
 .shop-draft-status:empty { display: none; }
-.shop .shop-low button { min-height: 44px; padding: 8px 12px; font-size: 14px; }
+.shop .shop-low-actions button { min-height: 44px; padding: 8px 12px; font-size: 14px; }
 .shop .shop-list-text + .shop-step button { width: 40px; height: 40px; }
 .shop-check button[type=submit] { flex-shrink: 0; }
 @media (max-width: 480px) { .shop .shop-tabs button { padding: 8px 2px; font-size: 14px; } }
@@ -240,3 +240,12 @@ body.kiosk .main-nav button { padding-left: 13px; padding-right: 13px; }
 .shop-bargain .shop-actions { flex-wrap: wrap; }
 .shop-bargain .shop-actions .primary { flex: 1 1 150px; }
 .shop-badge.switch { background: var(--s-soft); color: var(--s-green); border: 1px solid var(--s-green); }
+.shop-low > .shop-low-actions { flex: 0 0 auto; }
+.shop-low-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.shop-low.ask { flex-wrap: wrap; align-items: flex-start; }
+.shop-low.ask > div:first-child { flex-basis: 260px; }
+.shop-stock-card .shop-fold { margin-top: 8px; }
+@media (max-width: 600px) {
+  .shop-low { flex-wrap: wrap; }
+  .shop-low > .shop-low-actions { flex-basis: 100%; justify-content: flex-start; }
+}

@@ -72,10 +72,26 @@ export function prepareExplorer(data) {
   return model;
 }
 
+// Variants the household chose away for a family it follows: by product key,
+// exact normalized name or barcode, never by brand or a looser text match.
+const awayName=name=>String(name??'').toLocaleLowerCase('nb-NO').replace(/\s+/g,' ').trim();
+const awayEan=ean=>ean?String(ean).replace(/\D/g,'').replace(/^0+/,''):'';
+function joinAway(into,away) {
+  if(!away)return into;
+  into??={keys:new Set(),names:new Set(),eans:new Set()};
+  for(const k of away.keys??[])into.keys.add(k);
+  for(const n of away.names??[])into.names.add(awayName(n));
+  for(const e of away.eans??[])if(awayEan(e))into.eans.add(awayEan(e));
+  return into;
+}
+export function isAway(away,{posts=[],name=null,ean=null}={}) {
+  return !!away&&(posts.some(p=>away.keys.has(p.key))||away.names.has(awayName(name))||!!awayEan(ean)&&away.eans.has(awayEan(ean)));
+}
+
 /** Household numbers join their family. Several variants become one family. Safe to repeat. */
 export function applyFollowed(model,followed) {
   model.families.length=model.baseFamilies;
-  for(const family of model.families){family.items=family.baseItems;family.followed=null;family.mergedInto=null;}
+  for(const family of model.families){family.items=family.baseItems;family.followed=null;family.mergedInto=null;family.away=null;}
   for(const item of model.items){item.families=item.baseFamilies;item.familyLow=item.baseFamilyLow;}
   const byId=new Map(model.families.map(f=>[f.id,f]));
   for(const fam of followed){
@@ -83,19 +99,20 @@ export function applyFollowed(model,followed) {
     if(model.familySource==='sesum'){
       for(const group of groups){
         group.followed??=fam;
+        group.away=joinAway(group.away,fam.away);
         for(const item of group.items)item.familyLow+=' '+low(fam.name);
       }
       continue;
     }
     if(groups.length===1){
-      groups[0].followed=fam;
+      groups[0].followed=fam;groups[0].away=joinAway(null,fam.away);
       for(const item of groups[0].items)if(!item.familyLow.includes(low(fam.name)))item.familyLow+=' '+low(fam.name);
       continue;
     }
     const items=[...new Set([...groups.flatMap(g=>g.items),...fam.members.map(key=>model.byPost.get(key)).filter(Boolean)])];
     let shelf=groups[0]?.shelf??items.find(i=>i.shelves.length)?.shelves[0];
     if(shelf===undefined){shelf=model.shelves.findIndex(s=>s.name==='Deres egne');if(shelf<0){shelf=model.shelves.length;model.shelves.push({name:'Deres egne',food:true});}}
-    const index=model.families.length,family={id:'followed:'+fam.id,name:fam.name,shelf,unit:fam.unit,index,items,baseItems:items,followed:fam,mergedInto:null,variants:groups.map(g=>g.name)};
+    const index=model.families.length,family={id:'followed:'+fam.id,name:fam.name,shelf,unit:fam.unit,index,items,baseItems:items,followed:fam,away:joinAway(null,fam.away),mergedInto:null,variants:groups.map(g=>g.name)};
     model.families.push(family);
     for(const g of groups)g.mergedInto=index;
     for(const item of items){
@@ -268,9 +285,9 @@ export function familySummaries(model,result) {
       const view=result.views[item.index];
       for(const post of item.posts)if(!result.storeSet||result.storeSet.has(post.store))stores.add(model.stores[post.store].name);
       if(item.brandLow)brands.add(item.brandLow);
-      if(view.fresh&&view.unitPrice!==null&&view.unit===family.unit&&!(family.sourceCategory&&family.parentId===null))offers.push({item,price:view.unitPrice,store:view.unitStore});
+      if(view.fresh&&view.unitPrice!==null&&view.unit===family.unit&&!(family.sourceCategory&&family.parentId===null)&&!isAway(family.away,item))offers.push({item,price:view.unitPrice,store:view.unitStore});
     }
-    for(const campaign of campaigns){stores.add(campaign.storeName);offers.push({item:null,campaign,price:campaign.unitPrice,store:campaign.storeIndex});}
+    for(const campaign of campaigns){if(isAway(family.away,{name:campaign.name}))continue;stores.add(campaign.storeName);offers.push({item:null,campaign,price:campaign.unitPrice,store:campaign.storeIndex});}
     const regular=offers.filter(o=>o.item).reduce((low,o)=>Math.min(low,o.price),Infinity);
     const label=o=>o.item?.name??o.campaign.name;
     offers.sort((a,b)=>a.price-b.price||label(a).localeCompare(label(b),'nb'));
