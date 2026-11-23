@@ -55,7 +55,7 @@ export function splitCheaper(rows,saving=row=>row.savings?.annual??0) {
   return {cheaper:rows.filter(x=>x.places?.length).sort((a,b)=>saving(b)-saving(a)),rest:rows.filter(x=>!x.places?.length)};
 }
 
-export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=null,base='/api/shopping',compact=false,initialFindingsStore=null}) {
+export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=null,onCategory=null,base='/api/shopping',compact=false,initialFindingsStore=null}) {
   const draftEdits=new Map(),cartState=new Map(),cartIds=new Map();let cartBusy=false;
   const check={itemId:null,query:'',price:'',size:null,custom:'',customUnit:null};
   let listNeed='later',cart=null,cartHolder=null,draftSync=null;
@@ -273,6 +273,8 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
       actions.append(button('Ikke nå',()=>hideBargain(row,'snooze')));
       if(row.sourceUrl&&!isKiosk()){const source=link('Se varen ↗',row.sourceUrl);source.className='shop-source';actions.append(source);}
     }
+    // Every variant in the category's price grid, opened over this list.
+    if(onCategory&&row.groupId)actions.append(button('Alle varianter',()=>onCategory(row.groupId),'shop-source'));
     card.append(actions);
     card.append(details('why:'+row.key,'Slik er det regnet',node=>{
       const basis={usual:'Vanlig pris er medianen av de billigste sammenlignbare prisene over tid.',paid:'Det dere har betalt for samme vare er lavere enn vanlig markedspris, så det brukes.',alternative:'En annen butikk har nå en lavere pris enn vanlig, så besparelsen regnes mot den.',target:'Ingen markedspris ennå, så tilbudet holdes mot deres egen prisgrense.',oda:'Prisen er ikke lav i markedet, så den holdes mot Oda-varen dere vanligvis kjøper. Besparelsen gjelder bare mengden til neste tur.','chain-median':'Ingen gjennomgått pris finnes, så prisen holdes mot medianen av laveste pris i andre kjeder.'}[row.referenceBasis];
@@ -993,5 +995,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
   poll();
   setInterval(poll,60000);
   setInterval(()=>{if(tab==='list'&&visible()&&!cartBusy)loadCart();},20000);
+  // Choices made in the product library (follow, choose away) change this list.
+  window.addEventListener('familien:shopping-changed',()=>{if(data)load().then(()=>render(true)).catch(()=>{});});
   return {open};
 }

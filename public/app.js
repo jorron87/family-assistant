@@ -31,7 +31,7 @@ let state;
 let clarificationView;
 import('./clarifications-view.mjs').then(({installClarifications})=>{clarificationView=installClarifications({summary:$('#clarifications-summary'),dialog:$('#clarifications-dialog')});if(state)render();}).catch(()=>{});
 const findingsStore=new URLSearchParams(location.search).get('prisfunn');
-const shoppingView=installShoppingView({panel:document.querySelector('#shopping'),banner:document.querySelector('#shopping-banner'),initialFindingsStore:findingsStore,onOpen:()=>setTab('shopping'),onExplore:id=>{setTab('explore');if(id)explorerInstance().then(view=>view.openFamily(id));}});
+const shoppingView=installShoppingView({panel:document.querySelector('#shopping'),banner:document.querySelector('#shopping-banner'),initialFindingsStore:findingsStore,onOpen:()=>setTab('shopping'),onExplore:id=>{setTab('explore');if(id)explorerInstance().then(view=>view.openFamily(id));},onCategory:id=>explorerInstance().then(view=>view.openFamily(id))});
 let explorerReady=null;
 const explorerInstance=()=>explorerReady??=import("./library-explorer.mjs?v="+Date.now()).then(({installLibraryExplorer})=>installLibraryExplorer({panel:document.querySelector("#explore")}));
 const kiosk = new URLSearchParams(location.search).has("kiosk");

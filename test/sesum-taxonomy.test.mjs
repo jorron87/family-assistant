@@ -270,3 +270,22 @@ test('later compatible extension manifests retain catalogue work',async()=>{
  for(const v of ['1.9.1','1.9.2','1.10.0'])assert.ok(supportsSesumCatalogue(v));
  for(const v of [undefined,'1.8.9','1.9.0','1.9.2-beta','2.0.0'])assert.equal(supportsSesumCatalogue(v),false);
 });
+
+test('the family follows a native leaf category from Varer and can stop following it again',()=>{
+ const state={},shop=shoppingStore(state,{save(){},now:()=>new Date(at),assortmentConfig:config});
+ shop.settings({monitoringEnabled:true,stores:[]});shop.taxonomy.receive({categories,fetchedAt:at});shop.assortment.receiveSesum({products:[product()],fetchedAt:at});
+ assert.throws(()=>shop.followCategory({groupId:'sesum-category:283',action:'follow'}),/underkategori/,'a parent shelf is too broad');
+ const followed=shop.followCategory({groupId:'sesum-category:284',action:'follow'});
+ assert.deepEqual(followed.watchIds,['category-284']);
+ const w=state.shopping.watches['category-284'];
+ assert.equal(w.name,'And');assert.equal(w.unit,'kg');assert.equal(w.enabled,true);assert.equal(w.purchaseAmount,null,'the need stays unknown');
+ assert.deepEqual(shop.taxonomy.watchLinks([{familyId:'category-284',...shop.sesumFamilies('category-284')[0]}]).map(l=>l.categoryIds),[['284']]);
+ assert.equal(shop.explorer.offers().followed.find(f=>f.id==='category-284').fromCategory,true);
+ assert.equal(shop.followCategory({groupId:'sesum-category:284',action:'follow'}).following,true,'following twice is harmless');
+ shop.followCategory({groupId:'sesum-category:284',action:'unfollow'});
+ assert.equal(state.shopping.watches['category-284'].enabled,false);
+ assert.equal(shop.explorer.offers().followed.some(f=>f.id==='category-284'),false);
+ shop.followCategory({groupId:'sesum-category:284',action:'follow'});
+ assert.equal(state.shopping.watches['category-284'].enabled,true,'following again restores the same family');
+ assert.throws(()=>shop.followCategory({groupId:'sesum-category:2112',action:'unfollow'}),/ikke laget fra Varer/,'a family made elsewhere is changed in its own settings');
+});

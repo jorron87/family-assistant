@@ -276,6 +276,7 @@ async function handle(req, res) {
       if(path==='/api/shopping/deal')return send(res,200,store.shopping.dealAction(input));
       if(path==='/api/shopping/bargain')return send(res,200,store.shopping.bargainAction(input));
       if(path==='/api/shopping/unwanted')return send(res,200,store.shopping.unwantedAction(input));
+      if(path==='/api/shopping/follow')return send(res,200,store.shopping.followCategory(input));
       if(path==='/api/shopping/link')return send(res,200,store.shopping.link(input));
       if(path==='/api/shopping/watch')return send(res,200,store.shopping.watch(input));
       if(path==='/api/shopping/offer')return send(res,200,store.shopping.offer(input));
@@ -630,7 +631,7 @@ servers.push(createServer((req,res) => {
     return send(res,req.method==='GET'?403:405,{error:'Gjennomgang og bildeoriginaler er bare tilgjengelige på agentporten.'});
   }
   if(/^\/(?:api\/(?:resources|collector|google)(?:[/?]|$)|google-setup|shopping-setup|api\/shopping\/oda\/(?:connect|callback|tools|refresh(?:-plan)?)|api\/shopping\/(?:sesum\/|agent-(?:context|placement|worker)|market-refresh|orders|settings|offer|review|nutrition|catalog|link|feed|library-))/.test(req.url))return send(res,req.method==='GET'?403:405,{error:'Kildeoriginaler og integrasjonsoppsett er bare tilgjengelige lokalt på agentporten.'});
-  if (req.method !== "GET" && !(req.method === "POST" && /^(?:\/api\/shopping\/(?:watch|pantry|item|deal|bargain|unwanted|list|oda\/(?:sync|search|add|cart|probe|review|line|swap))|\/api\/home-assistant\/command|\/api\/doorbell\/frame|\/api\/profile\/edit|\/api\/events\/[a-f0-9]{24}\/(?:tasks\/[a-zA-Z0-9:_-]{1,100}|visibility)|\/api\/activities\/[a-f0-9]{24}\/reaction)$/.test(new URL(req.url,`http://${host}`).pathname))) return send(res,405,{error:"Handlingen er bare tilgjengelig lokalt på agentporten."});
+  if (req.method !== "GET" && !(req.method === "POST" && /^(?:\/api\/shopping\/(?:watch|pantry|item|deal|bargain|unwanted|follow|list|oda\/(?:sync|search|add|cart|probe|review|line|swap))|\/api\/home-assistant\/command|\/api\/doorbell\/frame|\/api\/profile\/edit|\/api\/events\/[a-f0-9]{24}\/(?:tasks\/[a-zA-Z0-9:_-]{1,100}|visibility)|\/api\/activities\/[a-f0-9]{24}\/reaction)$/.test(new URL(req.url,`http://${host}`).pathname))) return send(res,405,{error:"Handlingen er bare tilgjengelig lokalt på agentporten."});
   return handle(req,res);
 }));
 doorbell.attach(servers.at(-1));

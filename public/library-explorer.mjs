@@ -488,6 +488,9 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     return box;
   }
   function familyCard(row) {
+    return followable(row.family,row.followed,familyCardBody(row));
+  }
+  function familyCardBody(row) {
     const card=button('',()=>{stack.length=0;showFamily(row.family.index);},'lx-family');
     const head=el('span',undefined,'lx-family-head');
     head.append(el('span',model.shelves[row.family.shelf].name,'lx-eyebrow small'),el('span',row.family.name,'lx-family-name'),el('span',reachText(row),'lx-card-sub'));
@@ -867,7 +870,9 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
       const showGrid=entry.tab==='approved'&&entry.mode==='grid';
       modes.hidden=entry.tab!=='approved';
       sortRow.hidden=entry.tab!=='approved'||!found.sharedKey||showGrid;
-      if(showGrid){list.replaceChildren(priceGrid(groups.approved,found,entry,draw,now));return;}
+      // Every grid row is one physical product across chains; "Ikke for oss" there covers all of them.
+      const gridAway=followers.length?{of:row=>row.item?awayEntry(itemVariant(row.item)):null,toggle:(row,away)=>choose(itemVariant(row.item),away)}:null;
+      if(showGrid){list.replaceChildren(priceGrid(groups.approved,found,entry,draw,now,gridAway));return;}
       const scored=m=>m.quality?.key===found.sharedKey?m.quality.score:null;
       const rows=[...groups[entry.tab]].sort((a,b)=>{
         if(entry.byQuality){const x=scored(a),y=scored(b);if(x!==y)return x===null?1:y===null?-1:y-x;}
@@ -883,6 +888,11 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     function identity(m) {
       const item=model.byPost.get(m.key);
       return {keys:[m.key,...(item?.posts.map(p=>p.key)??[])].filter(Boolean),names:[m.name,item?.name].filter(Boolean),ean:item?.ean??m.ean??null,brand:m.brand??item?.brand??null,group:item?'i'+item.id:'n'+norm(m.name)};
+    }
+    function itemVariant(item) {
+      const keys=item.posts.map(p=>p.key),names=new Set([item.name]);
+      for(const m of found.members)if(keys.includes(m.key))names.add(m.name);
+      return {keys,names:[...names],ean:item.ean??null,label:item.name,brand:item.brand??null};
     }
     function awayEntry(id) {
       const keys=new Set(id.keys),names=new Set(id.names.map(norm)),ean=plain(id.ean);
@@ -910,6 +920,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
         if(away)await post('/unwanted',{action:'remove',watchIds,id:away.id});
         else await post('/unwanted',{action:'add',watchIds,keys:[...v.keys].slice(0,50),names:[...v.names].slice(0,20),ean:v.ean??null,label:v.label,brand:v.brand??null});
         found.unwanted=(await api('/explore-family?id='+encodeURIComponent(family.id))).family?.unwanted??[];
+        changedShopping();
       }catch(error){if(body.isConnected){draw();list.prepend(el('p',error.message,'lx-note'));}return;}
       if(body.isConnected)draw();
     }
@@ -950,7 +961,7 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     if(fam.kind==='own')box.append(el('p','Egen, smal familie med varer dere har godkjent én og én.','lx-note'));
     return box;
   }
-  function priceGrid(members,found,entry,draw,now) {
+  function priceGrid(members,found,entry,draw,now,away=null) {
     const grid=familyGrid(members,model.byPost,{order:entry.order,qualityKey:found.sharedKey,campaigns:found.offers??[]});
     const box=el('div',undefined,'lx-grid-wrap'),scroll=el('div',undefined,'lx-grid-scroll'),table=el('table',undefined,'lx-price-grid');
     const sortHead=(label,order,small)=>{
@@ -970,6 +981,13 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
       const text=el('span',undefined,'lx-grid-text');
       text.append(el('span',row.name,'lx-podium-name'),el('span',[row.campaign?`Tilbud til ${untilDay(row.campaign.validTo)}`:row.brand,row.mixed?'ulike pakninger':packText(row.pack,row.unit)].filter(Boolean).join(' · '),row.campaign?'lx-podium-store offer':'lx-podium-store'));
       open.append(photo(row.image,row.name,'lx-podium-photo'),text);name.append(open);tr.append(name);
+      if(away&&row.item){
+        const chosen=away.of(row);
+        if(chosen)tr.classList.add('away');
+        const toggle=button(chosen?'Angre':'Ikke for oss',()=>{toggle.disabled=true;away.toggle(row,chosen);},'lx-away-toggle'+(chosen?' on':''));
+        toggle.title=chosen?'Ta varen med igjen':'Vis aldri denne varen for familien, i noen butikk';
+        name.append(toggle);
+      }
       if(found.sharedKey)tr.append(el('td',row.score===null?'ukjent':whole(row.score),'lx-grid-score'));
       for(const column of grid.columns){
         const cell=row.cells.get(column.store),td=el('td');
@@ -1060,6 +1078,24 @@ export function installLibraryExplorer({panel,base='/api/shopping',compact=false
     document.body.append(box);box.showModal();
   }
 
+  // Tell the shopping list that a household choice changed.
+  function changedShopping() {try{window.dispatchEvent(new CustomEvent('familien:shopping-changed'));}catch{}}
+  // "Følg" a native leaf category right from the overview.
+  function followable(family,followed,card) {
+    if(model.familySource!=='sesum'||!family.sourceCategory||!family.leaf||followed&&!followed.fromCategory)return card;
+    const wrap=el('div',undefined,'lx-family-wrap');
+    const toggle=button(followed?'Følger ✓':'+ Følg',async()=>{
+      toggle.disabled=true;toggle.textContent=followed?'Slutter å følge …':'Følger …';
+      try{
+        await post('/follow',{groupId:family.id,action:followed?'unfollow':'follow'});
+        const live=await api('/explore-offers');applyFollowed(model,live.followed??[]);applyCampaigns(model,live.offers??[]);
+        changedShopping();refresh();
+      }catch(error){toggle.disabled=false;toggle.textContent=error.message;}
+    },'lx-follow'+(followed?' on':''));
+    toggle.title=followed?'Slutt å følge kategorien':'Følg kategorien: gode priser, lager og forslag';
+    wrap.append(card,toggle);
+    return wrap;
+  }
   let wantedFamily=null;
   function openWanted() {
     const family=wantedFamily&&model?.families.find(f=>f.id===wantedFamily);

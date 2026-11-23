@@ -363,3 +363,12 @@ body.lx-wide main { max-width: 1560px; }
 .lx-away-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 8px; border-radius: 12px; background: var(--lx-card); }
 .lx-away-row.away, .lx-member.away { opacity: .55; }
 .lx-away-row.away .lx-card-name, .lx-member.away .lx-card-name { text-decoration: line-through; }
+
+.lx-family-wrap { position: relative; display: grid; }
+.lx-follow { position: absolute; top: 10px; right: 10px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--lx-line); background: var(--lx-card); color: var(--lx-ink); font-size: 13px; cursor: pointer; }
+.lx-follow.on { background: var(--lx-green); color: #fff; border-color: var(--lx-green); }
+.lx-away-toggle { display: block; margin-top: 4px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--lx-line); background: transparent; color: var(--lx-ink); font-size: 12px; cursor: pointer; }
+.lx-away-toggle.on { background: var(--lx-green); color: #fff; border-color: var(--lx-green); }
+.lx-price-grid tr.away .lx-podium-name { text-decoration: line-through; }
+.lx-price-grid tr.away td, .lx-price-grid tr.away .lx-grid-name { opacity: .5; }
+.lx-family-wrap .lx-family-head { padding-right: 88px; }

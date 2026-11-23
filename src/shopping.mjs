@@ -415,6 +415,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     next.stockPacks=s.watches[id]?.stockPacks??null;
     if(s.watches[id]?.stockEvidence&&s.watches[id].stockAmount===next.stockAmount)next.stockEvidence=s.watches[id].stockEvidence;
     next.variants=s.watches[id]?.variants??[];
+    if(s.watches[id]?.followedCategory)next.followedCategory=s.watches[id].followedCategory;
     next.family=s.watches[id]?.family??null;
     if(next.purchaseAmount!==null&&next.monthlyUsage!==null)throw Error('Planlagt mengde kan ikke kombineres med månedsforbruk.');
     if(!['kg','l','stk'].includes(next.unit)||!['frozen','pantry','chilled','other'].includes(next.storage)||!Number.isInteger(next.maxPacks)||next.minDiscountPct>100||next.productKeys.some(k=>typeof k!=='string'||k.length>200))throw Error('Ugyldig overvåkning.');
@@ -791,8 +792,8 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     const stockReports=stockIntake.list().map(({baseStocks,appliedVersions,clientId,...item})=>({...item,result:item.result?{...item.result,changes:item.result.changes.map(({previous,...change})=>change)}:null}));
     const draft=odaDraft(a,today,at,found);
     const brandDeals=draft.items.flatMap(x=>{const place=x.places?.find(p=>p.sameBrand);return place?[{watchId:x.watchId,name:x.name,currentName:x.productName,currentUnit:x.unitPrice,unit:x.unit,place}]:[];}).sort((x,y)=>y.place.dropPct-x.place.dropPct);
-    const families=taxonomy?sesumFamilies():[],taxReader=taxonomy?taxonomy.reader():null;
-    const comparisons=taxonomy?subcategoryPrices({at,reader:taxReader,families,links:taxonomy.watchLinks(families),quotes:found.prices.quotes,nativeEntries:found.prices.reviewedNative,retainReviewed:(entry,key)=>{
+    const families=taxonomy?sesumFamilies():[],taxReader=taxonomy?taxonomy.reader():null,categoryLinks=taxonomy?taxonomy.watchLinks(families):[];
+    const comparisons=taxonomy?subcategoryPrices({at,reader:taxReader,families,links:categoryLinks,quotes:found.prices.quotes,nativeEntries:found.prices.reviewedNative,retainReviewed:(entry,key)=>{
       const original=reviewedReader()?.product(key);
       return !!original&&!nativeHoldsMember(original,key,entry.watchId,[entry]);
     },stores:s.settings.stores,choice:id=>s.odaChoices[id],excluded:(id,p,k)=>scopedProductHeld(found.prices[priceContextExclusions](s.watches[id]),p,k)||found.prices.excluded.has(id+'|'+k)||unwantedMatch(id)?.({key:k,name:p.name,ean:p.ean})===true,skipAlerts:new Set(main.map(d=>d.watchId)),planning:id=>{
@@ -801,7 +802,9 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       return {need,stock:estimateStock(w,rateOf(need),at),shelfMonths:shelfLifeMonths(w),excellentPrice:w.excellentPrice,maxPacks:w.maxPacks,minDiscountPct:w.minDiscountPct,referenceFor:p=>comparisonReference(w,a,p,found.prices),referenceCap:limits.length?Math.min(...limits):null};
     }}):{comparisons:[],alerts:[],signals:[],storeFindings:[]};
     const alerted=new Set(comparisons.alerts.map(d=>d.watchId));
-    const bargains=bargainView({a,at,found,comparisons,reader:taxReader,onList:listOpen()});
+    // The price grid a suggestion belongs to: the family's own leaf category, or its followed view.
+    const groupOf=new Map(categoryLinks.filter(l=>l.categories.length===1).map(l=>[l.watchId,l.categories[0].groupId]));
+    const bargains=bargainView({a,at,found,comparisons,reader:taxReader,onList:listOpen(),groupOf});
     const body={bargains,storeFindings:comparisons.storeFindings,subcategoryComparisons:comparisons.comparisons,priceAlerts:comparisons.alerts,categorySignals:comparisons.signals,brandDeals,stockReports,steady:steadyPrices(a,found,at).filter(d=>!alerted.has(d.watchId)),list:listView(today,found.prices,a),odaDraft:draft,monitoring:s.settings.monitoringEnabled===true,today,deals:main,smallDeals:small,belowTrip:found.belowTrip.map(d=>({...pick(d),alsoAt:[]})),covered:found.covered.map(pick),held:found.held,items,purchases:s.purchases.slice().reverse().slice(0,30).map(({previousStock,...p})=>p),saved:{year:sum(s.purchases.filter(p=>p.at.slice(0,4)===year)),all:sum(s.purchases)},stores,storesCheckedToday:stores.filter(x=>x.status==='ok'&&x.checkedAt&&shoppingDay(new Date(x.checkedAt))===today).length,analysis:{orderCount:a.orderCount,from:a.from,to:a.to,orderTotal:a.orderTotal,categories:a.categories,top:a.products.slice(0,15).map(p=>({name:p.name,spent:p.spent,orders:p.orders}))},nutrition:{spendPct:n.coverage.spendPct}};
     const top=bargains.top;
     return {...body,rev:hash(JSON.stringify(body)),summary:{...summaryOf(main,[...body.priceAlerts,...body.steady]),bargainCount:bargains.rows.filter(r=>r.reviewed).length,checkCount:bargains.rows.filter(r=>!r.reviewed).length,bargainSaving:bargains.total,topBargain:top?{watchId:top.watchId,familyName:top.familyName,storeName:top.storeName,unitPrice:top.unitPrice,unit:top.unit,discountPct:top.discountPct,reviewed:top.reviewed,saving:top.saving}:null,storeFindingCount:body.storeFindings.length,priceAlert:body.priceAlerts[0]??null,categorySignal:body.categorySignals[0]??null}};
@@ -851,6 +854,39 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       for(const w of watchIds){s.familyUnwanted[w]??={};s.familyUnwanted[w][id]={id,label,brand:typeof input.brand==='string'?input.brand.slice(0,100):null,keys,names:[...new Set(names)],ean,source:'library',at:now().toISOString()};}
       unwantedCache=null;return {saved:true,id};
     });
+  }
+  // "Følg" on a native Sesum category in Varer: the household's own choice to
+  // follow that shelf. It creates (or re-enables) a family linked to exactly
+  // that leaf category, with an unknown need, so it gets suggestions, prices
+  // and stock like any other family. Agents then refine it as usual.
+  function followCategory(input) {
+    if(!taxonomy)throw Error('Kategorier kan bare følges når Sesum er kategorikilden.');
+    const groupId=String(input?.groupId??''),categoryId=groupId.startsWith('sesum-category:')?groupId.slice(15):'';
+    if(!/^[1-9]\d{0,15}$/.test(categoryId)||!taxonomy.isLeaf(categoryId))throw Error('Velg en konkret underkategori.');
+    const linked=()=>taxonomy.watchLinks(sesumFamilies()).filter(l=>l.categories.some(c=>c.groupId===groupId)).map(l=>l.watchId);
+    const id='category-'+categoryId,existing=s.watches[id];
+    if(input.action==='unfollow'){
+      if(!existing?.followedCategory)throw Error('Denne familien ble ikke laget fra Varer. Endre den under familiens innstillinger.');
+      update(()=>{existing.enabled=false;});
+      return {saved:true,following:false};
+    }
+    if(input.action!=='follow')throw Error('Ugyldig valg.');
+    if(!existing&&linked().length)return {saved:false,following:true,watchIds:linked()};
+    const category=taxonomy.definition(categoryId),reader=taxonomy.reader();
+    const counts=new Map();for(const row of reader?.members?.(groupId)??[]){const u=row.product?.unit;if(['kg','l','stk'].includes(u))counts.set(u,(counts.get(u)??0)+1);}
+    const unit=[...counts].sort((a,b)=>b[1]-a[1])[0]?.[0];
+    if(!unit)throw Error('Kategorien har ingen felles enhet å sammenligne i.');
+    const path=[];for(let c=category;c;c=c.parentId?taxonomy.definition(c.parentId):null)path.unshift(c.name);
+    const text=path.join(' ').toLocaleLowerCase('nb-NO');
+    // A first guess the family can change: frozen and canned shelves first, then fresh ones.
+    const storage=/frys|frossen|frosne/.test(text)?'frozen':/hermetisk|hermetikk|tørr|boks|glass|krydder|bakevarer|hus & hjem|personlige/.test(text)?'pantry':/meieri|\bost|kjøtt|fisk|pålegg|kjøl|\begg|fersk|frukt|grønt|yoghurt|melk/.test(text)?'chilled':'pantry';
+    if(!existing)watch({id,name:category.name,unit,storage,maxPacks:100});
+    update(()=>{s.watches[id].enabled=true;s.watches[id].followedCategory={groupId,categoryId,path,at:now().toISOString()};});
+    if(!linked().includes(id)){
+      const family=sesumFamilies(id)[0];
+      taxonomy.linkWatch({familyId:id,requirementsFingerprint:family.requirementsFingerprint,categories:[{id:categoryId,fingerprint:category.fingerprint}],reviewed:true,evidence:`Familien valgte å følge kategorien «${path.join(' › ')}» fra Varer.`});
+    }
+    return {saved:true,following:true,watchIds:[id]};
   }
   function unwantedFor(watchIds) {
     return watchIds.flatMap(watchId=>Object.values(s.familyUnwanted[watchId]??{}).map(e=>({...e,watchId}))).sort((a,b)=>a.label.localeCompare(b.label,'nb'));
@@ -1364,7 +1400,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   // every store it uses: flyer offers, ordinary shelf prices and Oda alike.
   // Unreviewed shelf variants come from the subcategory comparison and stay
   // marked; they never count as reviewed savings.
-  function bargainView({a,at,found,comparisons,reader,onList=[]}) {
+  function bargainView({a,at,found,comparisons,reader,onList=[],groupOf=new Map()}) {
     const clean=name=>String(name).replace(/\s*[–-]\s*Kassal.*$/i,'');
     const shops=s.settings.stores.filter(x=>!x.facebookGroup),byChain=new Map(shops.filter(x=>x.chainCode).map(x=>[x.chainCode,x]));
     const storeOf=store=>!store?null:store.chainCode==='ODA_NO'?{key:'oda',name:'Oda',id:null}:{key:store.id,name:clean(store.name),id:store.id,online:/nettbutikk/i.test(store.name)};
@@ -1413,7 +1449,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
     for(const c of candidates)c.odaPrice=odaPrice.get(c.watchId)??null;
     const result=buildBargains({candidates,families,stores,hides:s.bargainHides,unwanted:c=>unwantedMatch(c.watchId)?.({key:c.productKey,name:c.productName})===true,at});
     const listed=onList.filter(e=>!e.checkedAt);
-    const mark=row=>({...row,hideKeys:bargainHideKeys(row),onList:listed.some(e=>row.offerId?e.offerId===row.offerId:e.watchId===row.watchId&&(row.oda?e.storeName==='Oda':e.storeName===row.storeName||e.storeId===row.storeId))});
+    const mark=row=>({...row,groupId:groupOf.get(row.watchId)??null,hideKeys:bargainHideKeys(row),onList:listed.some(e=>row.offerId?e.offerId===row.offerId:e.watchId===row.watchId&&(row.oda?e.storeName==='Oda':e.storeName===row.storeName||e.storeId===row.storeId))});
     return {...result,rows:result.rows.map(mark),minor:result.minor.map(mark)};
   }
   function odaDraft(a,today,at,found) {
@@ -1639,7 +1675,7 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
       return link?.categories.length===1?[{...o,groups:[link.categories[0].groupId]}]:[];
     });
   };
-  const rawExplorer=createLibraryExplorer({reader:taxonomy?taxonomy.reader:libReader,imageRef,chainName,ownStores:()=>['ODA_NO',...s.settings.stores.map(x=>x.chainCode).filter(Boolean)],status:()=>libraryPrices?.status?.()??'disabled',activeOffers:taxonomy?categoryOffers:explorerOffers,followed:taxonomy?()=>taxonomy.watchLinks(sesumFamilies()).filter(f=>f.categories.length).map(f=>({id:f.watchId,name:f.name,kind:'library',groups:f.categories.map(c=>c.groupId),members:[],stock:{known:false},prices:{}})):explorerFollowed,followedFamily:taxonomy?()=>null:followedFamily});
+  const rawExplorer=createLibraryExplorer({reader:taxonomy?taxonomy.reader:libReader,imageRef,chainName,ownStores:()=>['ODA_NO',...s.settings.stores.map(x=>x.chainCode).filter(Boolean)],status:()=>libraryPrices?.status?.()??'disabled',activeOffers:taxonomy?categoryOffers:explorerOffers,followed:taxonomy?()=>taxonomy.watchLinks(sesumFamilies()).filter(f=>f.categories.length).map(f=>({id:f.watchId,name:f.name,kind:'library',groups:f.categories.map(c=>c.groupId),members:[],stock:{known:false},prices:{},fromCategory:!!s.watches[f.watchId]?.followedCategory})):explorerFollowed,followedFamily:taxonomy?()=>null:followedFamily});
   // A family read also evaluates campaign exclusions. Those evaluations must
   // share the reader already selected for the family, rather than rebuilding
   // the complete catalogue once per source and watch. The context ends before
@@ -2160,5 +2196,5 @@ export function shoppingStore(state,{save,now=()=>new Date(),files,libraryPrices
   });
   return {assortment,taxonomy,taxonomyBootstrapPlan:()=>inReadContext(()=>{
       const families=sesumFamilies(),native=catalog.entries();return {familyCount:families.length,families:families.map(f=>({...f,products:f.products.filter(p=>p.reviewCurrent),odaTargets:native.filter(e=>e.watchId===f.familyId&&e.store==='ODA_NO'&&e.status==='approved').map(e=>({odaProductId:odaProductIdFromUrl(e.sourceUrl),name:e.name,sourceUrl:e.sourceUrl,productKey:catalogKey(e)})).filter(p=>p.odaProductId).map(p=>{const row=assortmentState.products?.['oda:ODA_NO:'+p.odaProductId];return {...p,imported:!!row,available:row?.available??null,actualReceiptAt:row?.prices?.[0]?.receiptAt??null};})})),watchLinks:taxonomy?.watchLinks(families)??[]};
-    }),agentGroupSearch:(query,options)=>inReadContext(()=>taxonomy?taxonomy.search(query,options):searchAssortmentFamilies(libReader()?.index(),query,options)),agentPlacement,agentPlacementAsync,agentProgressSince,agentContext,agentContexts,agentProduct,agentLibrarySearch,agentGroup:id=>inReadContext(()=>{const category=taxonomy&&String(id).startsWith('sesum-category:')?taxonomy.definition(String(id).slice(15)):null;const group=category?{...category,groupId:id,fingerprint:category.fingerprint}:libReader()?.group(id);return group?{groupId:id,...structuredClone(group)}:null;}),agentFamilyBasis:()=>inReadContext(()=>agentFamilyBasis(sesumPlacementFamilies().families)),marketRefreshPlan,odaRefreshPlan,odaRefreshReceive,sesumFamilies,sesumPlacement,sesumReceivePrices,sesumReceiveMetadata:input=>sesumCatalogue.ingest(input),sesumCandidates,sesumRegister,sesumPriceReview,sesumOfferCandidates,sesumOfferReview,sesumPriceStatus:()=>inReadContext(()=>({...sesumPrices.status(),discovery:discovery.status(),catalogue:sesumCatalogue.status()})),familyReopen,listFamily,listFamilyWork,explorer,productInfo,libraryAudit,libraryAuditAck,libraryLink,libraryLinkCandidates,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,bargainAction,unwantedAction,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
+    }),agentGroupSearch:(query,options)=>inReadContext(()=>taxonomy?taxonomy.search(query,options):searchAssortmentFamilies(libReader()?.index(),query,options)),agentPlacement,agentPlacementAsync,agentProgressSince,agentContext,agentContexts,agentProduct,agentLibrarySearch,agentGroup:id=>inReadContext(()=>{const category=taxonomy&&String(id).startsWith('sesum-category:')?taxonomy.definition(String(id).slice(15)):null;const group=category?{...category,groupId:id,fingerprint:category.fingerprint}:libReader()?.group(id);return group?{groupId:id,...structuredClone(group)}:null;}),agentFamilyBasis:()=>inReadContext(()=>agentFamilyBasis(sesumPlacementFamilies().families)),marketRefreshPlan,odaRefreshPlan,odaRefreshReceive,sesumFamilies,sesumPlacement,sesumReceivePrices,sesumReceiveMetadata:input=>sesumCatalogue.ingest(input),sesumCandidates,sesumRegister,sesumPriceReview,sesumOfferCandidates,sesumOfferReview,sesumPriceStatus:()=>inReadContext(()=>({...sesumPrices.status(),discovery:discovery.status(),catalogue:sesumCatalogue.status()})),familyReopen,listFamily,listFamilyWork,explorer,productInfo,libraryAudit,libraryAuditAck,libraryLink,libraryLinkCandidates,librarySearch,stockScan,stockIntake,feedFingerprint,completion,odaLimit:id=>s.odaLimits[id]?.max??null,imageSource,cartReview,recordOdaLimit,listRouteWork,listRouteAttempt,listRouteFinish,list,offerSource,feed,checklist,familyView,familySummary,pantry,item,dealAction,bargainAction,unwantedAction,followCategory,link,importOrders,settings,watch,offer,review,nutrition,market,catalogObserve,catalogReview,catalogEntries:watchId=>catalog.entries(watchId),analysis,queue,view,cartReceipt,receipt:id=>structuredClone(s.cartReceipts[id]??null)};
 }
