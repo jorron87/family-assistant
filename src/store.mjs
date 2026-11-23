@@ -813,7 +813,12 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
   function reviewDecision(entry, at = Date.now()) {
     if (outsideWindow(entry,at)) return "outside-window";
     if (!entry.reviewedAt) return "new";
-    if (entry.reviewedListingHash !== entry.listingHash) return "changed";
+    if (entry.relevanceBasis === 'post-text' && linkedFacebookPost(entry.externalId)) return 'changed';
+    if (entry.reviewedListingHash !== entry.listingHash) {
+      if (entry.source === 'facebook' && entry.relevance === 'irrelevant' && entry.relevanceBasis === 'post-text' &&
+          entry.postContentKey && entry.postContentKey === entry.reviewedPostContentKey && !linkedFacebookPost(entry.externalId)) return 'unchanged';
+      return "changed";
+    }
     if (entry.relevance === "irrelevant") return "unchanged";
     if (entry.lastSeenAt && entry.reviewedAt >= entry.lastSeenAt) return "unchanged";
     const policy = effectiveReviewPolicy(entry);
@@ -869,6 +874,9 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
         reviewedListingHash: previous?.reviewedListingHash ?? null,
         rawId: previous?.rawId ?? null,
         relevance: previous?.relevance ?? null,
+        relevanceBasis: previous?.relevanceBasis ?? null,
+        reviewedPostContentKey: previous?.reviewedPostContentKey ?? null,
+        postContentKey: opts.collector && input.source === 'facebook' ? item.postContentKey ?? null : null,
         reviewNote: previous?.reviewNote ?? null
       };
       entry.listingHash = hash(JSON.stringify([entry.title, entry.sourceExcerpt??entry.summary, entry.sourceUrl, entry.publishedAt, entry.updatedAt, entry.attachmentHint]));
@@ -923,10 +931,19 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
     const entry = matches[0];
     if (input.rawId && (state.rawItems[input.rawId]?.source !== input.source || state.rawItems[input.rawId]?.externalId !== input.externalId)) throw new Error("Råelementet matcher ikke kilde-ID.");
     if (!input.rawId && (input.relevance !== "irrelevant" || !words(input.reviewNote, 1000))) throw new Error("Irrelevant element krever begrunnelse.");
+    const post = state.collector.items[entry.externalId];
+    if (input.relevanceBasis !== undefined && input.relevanceBasis !== 'post-text') throw Error('Ukjent relevansgrunnlag.');
+    if (input.relevanceBasis === 'post-text' && (input.relevance !== 'irrelevant' || entry.source !== 'facebook' ||
+        entry.managedBy !== 'collector' || !post?.text?.trim() || post.kind !== 'post' || post.token !== entry.changeToken ||
+        words(input.reviewNote,1000).length < 40 || linkedFacebookPost(entry.externalId)))
+      throw Error('Posttekst-grunnlag krever aktuell full Facebook-posttekst, konkret irrelevant-begrunnelse og ingen tilknyttede forslag/funn.');
     entry.reviewedAt = now();
     entry.reviewedListingHash = entry.listingHash;
     entry.rawId = input.rawId ?? entry.rawId;
     entry.relevance = input.relevance === "irrelevant" ? "irrelevant" : "relevant";
+    entry.relevanceBasis = input.relevanceBasis ?? null;
+    entry.reviewedPostContentKey = input.relevanceBasis === 'post-text' ? facebookPostContentKey(post) : null;
+    if (input.relevanceBasis === 'post-text') entry.postContentKey = entry.reviewedPostContentKey;
     entry.reviewNote = words(input.reviewNote, 1000) || null;
     const surface = state.surfaces[`${entry.source}:${entry.surface}`];
     if (surface?.resumeCurrentCoverage && surface.health === 'partial' && surface.historicalGap &&
@@ -1047,8 +1064,21 @@ export function createStore(dataDir = DATA_DIR,{libraryPrices,sesumCollectionSta
     sourceUrl, publishedAt: item.postedAt, updatedAt: item.updatedAt,
     attachmentHint: item.attachments.map((file) => file.name).filter(Boolean).join('; '),
     changeTracking: item.source === 'vigilo' && item.kind === 'news' ? 'reliable' : 'unknown', changeToken: item.token, latestActivityAt: item.latestActivityAt ?? null,
+    postContentKey: facebookPostContentKey(item),
     retainUntil: item.retainUntil ?? (item.kind === 'event' ? item.endAt ?? item.startAt : undefined)
   });
+
+  function facebookPostContentKey(item) {
+    if (item?.source !== 'facebook' || item.kind !== 'post' || !item.text?.trim()) return null;
+    return hash(JSON.stringify([item.externalId,item.groupId,item.url,item.title,item.text,item.author,item.postedAt,item.attachments]));
+  }
+
+  function linkedFacebookPost(externalId) {
+    const nativeId = externalId.match(/^facebook:post:(\d+)$/)?.[1];
+    return Object.values(state.rawItems).some(raw=>raw.externalId===externalId && raw.findingIds?.length) ||
+      Object.values(state.activities).some(a=>!a.mergedInto && nativeId &&
+        new RegExp('(?:(?:posts|permalink)/'+nativeId+'(?:[/?#]|$)|[?&](?:story_fbid|post_id)='+nativeId+'(?:[&#]|$))').test(a.sourceUrl??''));
+  }
 
   function storeCollected(item, surface) {
     const items = state.collector.items;

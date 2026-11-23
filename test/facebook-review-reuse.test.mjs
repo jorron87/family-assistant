@@ -9,7 +9,7 @@ import {normalizeFacebookPosts,mergeFacebookPost} from '../src/collector.mjs';
 const group='951081777302696', surface=`group-${group}:posts`, externalId='facebook:post:9091057070884730';
 const post=(over={})=>({postId:'9091057070884730',created:Math.floor(Date.now()/1000),text:'Felles beskjed',groupId:group,groupProof:'target_group',url:`https://www.facebook.com/groups/${group}/posts/9091057070884730/`,attachments:[],commentCount:2,comments:[{id:'c1',text:'',time:1700000000,replies:0},{id:'c2',text:'',time:1700000000,replies:0}],...over});
 const normalized=p=>normalizeFacebookPosts([p])[0];
-function fixture(fn){const dir=mkdtempSync(join(tmpdir(),'familien-fb-reuse-'));try{return fn(createStore(dir));}finally{assert.ok(resolve(dir).startsWith(resolve(tmpdir())+'\\'));rmSync(dir,{recursive:true,force:true});}}
+function fixture(fn){const dir=mkdtempSync(join(tmpdir(),'familien-fb-reuse-'));try{return fn(createStore(dir),dir);}finally{assert.ok(resolve(dir).startsWith(resolve(tmpdir())+'\\'));rmSync(dir,{recursive:true,force:true});}}
 const ingest=(s,p)=>s.collectorIngest({source:'facebook',kind:'posts',groupId:group,items:[p],complete:false});
 const reviewed=s=>s.markReviewed({source:'facebook',surface,externalId,relevance:'irrelevant',reviewNote:'Alle detaljer lest.'});
 
@@ -58,6 +58,36 @@ test('unknown reply count and missing text cannot establish completeness',()=>{
  assert.equal(normalized(post({commentCount:1,comments:[{id:'c1',text:'',textObserved:false,replies:0}]})).commentsComplete,false);
  assert.equal(normalized(post({commentCount:0,comments:[]})).commentsComplete,true);
 });
+
+test('explicit post-text irrelevance survives comment changes and restart, but actual post changes reopen it',()=>fixture((s,dir)=>{
+ const base=post({text:'Invitation only for a different school class. '.repeat(12),comments:[],commentCount:0});
+ ingest(s,base);
+ s.markReviewed({source:'facebook',surface,externalId,relevance:'irrelevant',relevanceBasis:'post-text',reviewNote:'Read the complete post: explicitly addressed to another class, with no family invite or action.'});
+ const receipt=()=>Object.values(s.snapshot().reviewLedger).find(e=>e.externalId===externalId);
+ const reviewedAt=receipt().reviewedAt;
+ assert.ok(reviewedAt);
+ const changed={...base,commentCount:4,comments:[{id:'new-comment',text:'Another household accepts',replies:null}]};
+ assert.equal(ingest(s,changed).results[0].needsReview,0);
+ s=createStore(dir);
+ assert.equal(receipt().reviewedAt,reviewedAt);
+ assert.equal(ingest(s,changed).results[0].needsReview,0);
+ assert.equal(s.collectedItem(externalId).commentsComplete,false);
+ assert.equal(s.completionReport().pendingItems.length,0);
+ assert.equal(ingest(s,{...changed,attachments:['new flyer']}).results[0].needsReview,1);
+ assert.equal(ingest(s,{...changed,text:base.text+' The household class is now invited too.'}).results[0].needsReview,1);
+ assert.equal(receipt().reviewedAt,reviewedAt,'collection never manufactures another reading receipt');
+}));
+
+test('post-text irrelevance cannot hide linked work or an empty post',()=>fixture(s=>{
+ ingest(s,post({text:''}));
+ const input={source:'facebook',surface,externalId,relevance:'irrelevant',relevanceBasis:'post-text',reviewNote:'A detailed reason cannot replace the missing actual full post body.'};
+ assert.throws(()=>s.markReviewed(input),/Posttekst-grunnlag/);
+ ingest(s,post());
+ s.markReviewed(input);
+ s.upsertActivity({canonicalKey:'linked-example',sourceId:'activity-1',sourceUrl:`https://www.facebook.com/groups/${group}/posts/9091057070884730/`,title:'Family activity',start:'2026-12-01T10:00:00Z',end:'2026-12-01T12:00:00Z',checkedAt:new Date().toISOString(),members:['child1'],reason:'Actual family plan',evidence:'Source confirms date and activity.'});
+ assert.equal(s.completionReport().pendingItems.length,1,'new linked work reopens even without a new collection');
+ assert.throws(()=>s.markReviewed(input),/Posttekst-grunnlag/);
+}));
 
 test('only a prior verified historical checkpoint resumes after all changed details are reviewed',()=>fixture(s=>{
  ingest(s,post());reviewed(s);
