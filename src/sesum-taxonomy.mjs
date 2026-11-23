@@ -130,7 +130,9 @@ export function createSesumTaxonomy(state,{persist=null,save=()=>{},now=()=>new 
     const amount=product.pack,unitPrice=price&&product.packKnown&&typeof amount==='number'&&amount>0&&quote.grossPackPrice?quote.grossPackPrice/amount:price&&quote.directUnitVerified?quote.grossUnitPrice:null;
     for(const category of path(categoryId))out.members[key(category.id)].push({k:productKey,s:'approved',r:true,u:unitPrice,q:null,n:null,e:'Sesums native kategori eller eksplisitt plassering av en Oda-vare; ingen automatisk husholdningserstatning.'});
    }
-   for(const [id,members]of Object.entries(out.members)){const units=new Set(members.map(m=>out.products[m.k].unit??out.products[m.k].quote.unit).filter(Boolean));out.groups[id].unit=units.size===1?[...units][0]:null;if(units.size>1)for(const member of members)member.u=null;}
+   // A category compares one unit. When one unit clearly dominates, only the
+   // few rows measured otherwise lose their unit price; an even split compares none.
+   for(const [id,members]of Object.entries(out.members)){const unitOf=m=>out.products[m.k].unit??out.products[m.k].quote.unit??null,counts=new Map();for(const m of members){const u=unitOf(m);if(u)counts.set(u,(counts.get(u)??0)+1);}const ranked=[...counts].sort((a,b)=>b[1]-a[1]),unit=ranked.length&&(ranked.length===1||ranked[0][1]>ranked[1][1])?ranked[0][0]:null;out.groups[id].unit=unit;for(const member of members){const u=unitOf(member);if(u&&u!==unit)member.u=null;}}
    cachedRevision=state.revision;cachedBase=index;cached=createIndexReader(out,{horizonDays:priceHorizonDays});
   }return {...cached(clock()),odaNative:id=>index.products['oda:ODA_NO:'+id],cacheKey:`sesum-taxonomy:${state.revision}:${base.cacheKey??''}`};
  }

@@ -48,6 +48,12 @@ test('same category with mixed measurement units never ranks kilograms against l
  const f=fixture();f.catalogue.receiveSesum({products:[product(),product(2,{weight:500,weightUnit:'ml',prices:[{storeCode:'KIWI',price:10,observedAt:at,source:'actual-native-receipt'}]})],fetchedAt:at});const read=f.taxonomy.reader();assert.equal(read.group('sesum-category:284').unit,null);assert.ok(read.members('sesum-category:284').every(m=>m.unitPrice===null));
  const {data}=buildExplorerData(read.index(),{imageRef:()=>null,chainName:x=>x,active:read.active,horizonDays:14}),model=prepareExplorer(data);assert.equal(model.familySource,'sesum');const result=explore(model,emptyFilters(),Date.parse(at)),family=familySummaries(model,result).find(f=>f.family.id==='sesum-category:284');assert.equal(family.min,null);assert.equal(family.offers.length,0);
 });
+test('one odd unit in a category drops only its own unit price, never the whole category',()=>{
+ const f=fixture(),odd=product(3,{weight:12,weightUnit:'ml',prices:[{storeCode:'KIWI',price:15,observedAt:at,source:'actual-native-receipt'}]}),loose=product(4,{weight:null,weightUnit:null});
+ f.catalogue.receiveSesum({products:[product(),product(2,{weight:600,weightUnit:'g'}),odd,loose],fetchedAt:at});const read=f.taxonomy.reader();
+ assert.equal(read.group('sesum-category:284').unit,'kg');const price=new Map(read.members('sesum-category:284').map(m=>[m.productKey,m.unitPrice]));
+ assert.equal(price.get('sesum:KIWI:1'),100);assert.equal(price.get('sesum:KIWI:2'),50);assert.equal(price.get('sesum:KIWI:3'),null);assert.equal(price.get('sesum:KIWI:4'),null);
+});
 test('scoped workers receive only an Oda placement and on-demand native category search, without the 91 family matrix',()=>{
  const state={},shop=shoppingStore(state,{save(){},now:()=>new Date(at),assortmentConfig:config});shop.settings({monitoringEnabled:true,stores:[]});shop.taxonomy.receive({categories,fetchedAt:at});
  for(let i=0;i<91;i++)shop.watch({id:'basic-'+i,name:'Synthetic staple '+i,unit:'kg',storage:'pantry'});
