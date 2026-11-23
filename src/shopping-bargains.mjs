@@ -18,6 +18,8 @@ export const MIN_SAVING=15;
 // Cheaper than the household's own Oda product, without being a market low.
 export const SWITCH_MIN_PCT=10;
 export const CHECK_SWITCH_PCT=20;
+// An unchecked variant replaces a checked price as the best place only when clearly cheaper.
+export const CHECK_CLEARLY_CHEAPER_PCT=3;
 
 const round=n=>Math.round((n+Number.EPSILON)*100)/100;
 const TIER_WEIGHT={excellent:1.5,good:1,switch:.7,small:.2};
@@ -134,9 +136,38 @@ export function buildBargains({candidates,families,stores,hides={},at=Date.now()
   if(!prev||score(row)>score(prev))byProduct.set(k,row);
  }
  const rows=[...byProduct.values()].sort((a,b)=>Number(b.reviewed)-Number(a.reviewed)||score(b)-score(a));
+ const minorBest=new Map();
+ for(const row of minor){const k=row.storeKey+'|'+row.watchId,prev=minorBest.get(k);if(!best.has(k)&&(!prev||score(row)>score(prev)))minorBest.set(k,row);}
+ const minorRows=[...minorBest.values()].sort((a,b)=>(b.saving??0)-(a.saving??0)||b.discountPct-a.discountPct);
+ // The overview names one place per need, and the lowest price wins: nobody
+ // is sent to one store when the same need is cheaper in another. A small
+ // saving elsewhere still competes, because it is the cheaper place. An
+ // unchecked variant must be clearly cheaper than the cheapest checked one,
+ // which then stays named beside it.
+ const byFamily=new Map(),cheapestChecked=new Map();
+ for(const r of [...rows,...minorRows]){
+  if(!byFamily.has(r.watchId))byFamily.set(r.watchId,[]);
+  byFamily.get(r.watchId).push(r);
+  if(r.reviewed&&!(cheapestChecked.get(r.watchId)?.unitPrice<=r.unitPrice))cheapestChecked.set(r.watchId,r);
+ }
+ const shownFamilies=new Set(rows.map(r=>r.watchId));
+ // At the same price, the store with more to gain anyway wins, so trips gather.
+ const pull=new Map();for(const r of rows)if(r.reviewed)pull.set(r.storeKey,(pull.get(r.storeKey)??0)+(r.saving??0));
+ for(const [watchId,list] of byFamily){
+  list.sort((a,b)=>a.unitPrice-b.unitPrice||Number(b.reviewed)-Number(a.reviewed)||(pull.get(b.storeKey)??0)-(pull.get(a.storeKey)??0)||score(b)-score(a));
+  const checked=cheapestChecked.get(watchId);
+  const winner=!list[0].reviewed&&checked&&checked.unitPrice<=list[0].unitPrice*(1+CHECK_CLEARLY_CHEAPER_PCT/100)?checked:list[0];
+  for(const r of list){
+   r.best=r===winner&&shownFamilies.has(watchId);
+   if(r!==winner&&winner.unitPrice<r.unitPrice)r.cheaperAt={storeName:winner.storeName,unitPrice:winner.unitPrice,reviewed:winner.reviewed};
+  }
+  if(!winner.reviewed&&checked)winner.checkedAlternative={storeName:checked.storeName,unitPrice:checked.unitPrice,productName:checked.productName};
+ }
+ // A store's trip saving leaves out needs a checked price elsewhere covers more cheaply.
+ const tripSaving=r=>r.reviewed&&!(cheapestChecked.get(r.watchId)?.unitPrice<r.unitPrice&&cheapestChecked.get(r.watchId).storeKey!==r.storeKey)?r.saving??0:0;
  const storeRows=stores.map(s=>{
   const list=rows.filter(r=>r.storeKey===s.key),sure=list.filter(r=>r.reviewed),check=list.filter(r=>!r.reviewed);
-  const saving=round(sure.reduce((n,r)=>n+(r.saving??0),0)),checkSaving=round(check.reduce((n,r)=>n+(r.saving??0),0));
+  const saving=round(sure.reduce((n,r)=>n+tripSaving(r),0)),checkSaving=round(check.reduce((n,r)=>n+(r.saving??0),0));
   return {key:s.key,name:s.name,oda:s.oda===true,online:s.online===true,minSavings:s.minSavings??0,count:sure.length,checkCount:check.length,saving,checkSaving,
    worthTrip:s.oda?null:saving>0&&saving>=(s.minSavings??0)};
  }).filter(s=>s.count||s.checkCount).sort((a,b)=>b.saving-a.saving||b.checkSaving-a.checkSaving||a.name.localeCompare(b.name,'nb'));
@@ -144,7 +175,6 @@ export function buildBargains({candidates,families,stores,hides={},at=Date.now()
  const perFamily=new Map();
  for(const r of rows)if(r.reviewed&&(r.saving??0)>(perFamily.get(r.watchId)??0))perFamily.set(r.watchId,r.saving);
  const total=round([...perFamily.values()].reduce((n,x)=>n+x,0));
- const minorBest=new Map();
- for(const row of minor){const k=row.storeKey+'|'+row.watchId,prev=minorBest.get(k);if(!best.has(k)&&(!prev||score(row)>score(prev)))minorBest.set(k,row);}
- return {rows,stores:storeRows,minor:[...minorBest.values()].sort((a,b)=>(b.saving??0)-(a.saving??0)||b.discountPct-a.discountPct),covered,total,hidden};
+ const picks=[...rows,...minorRows].filter(r=>r.best).sort((a,b)=>Number(b.reviewed)-Number(a.reviewed)||score(b)-score(a));
+ return {rows,stores:storeRows,minor:minorRows,covered,total,hidden,top:picks[0]??null};
 }

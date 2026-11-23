@@ -5,7 +5,7 @@ import {shoppingStore} from '../src/shopping.mjs';
 
 const AT=Date.parse('2026-11-22T12:00:00Z');
 const family=(extra={})=>({name:'Kjøttdeig av storfe',unit:'kg',storage:'frozen',need:{amount:24,basis:'planned-amount'},stock:{known:true,amount:0,months:0},shelfMonths:4,excellentPrice:null,maxPacks:100,minDiscountPct:0,terms:['kjøttdeig av storfe'],variants:[],...extra});
-const stores=[{key:'oda',name:'Oda',oda:true,minSavings:0},{key:'kiwi',name:'KIWI',minSavings:25},{key:'rema',name:'REMA 1000',minSavings:50}];
+const stores=[{key:'oda',name:'Oda',oda:true,minSavings:0},{key:'kiwi',name:'KIWI',minSavings:25},{key:'rema',name:'REMA 1000',minSavings:50},{key:'europris',name:'Europris',minSavings:0}];
 const row=extra=>({kind:'price',reviewed:true,watchId:'mince',storeKey:'kiwi',storeName:'KIWI',productKey:'p1',productName:'Kjøttdeig 400 g',unitPrice:100,packAmount:.4,packPrice:40,reference:{price:160,basis:'paid'},...extra});
 const build=(candidates,families=new Map([['mince',family()]]),hides={})=>buildBargains({candidates,families,stores,hides,at:AT});
 
@@ -120,4 +120,30 @@ test('a price clearly below the household Oda product is a cheaper place for the
  assert.equal(build([{...shelf,storeKey:'oda',odaPrice:349.5}],families).rows.length,0,'Oda is never cheaper than itself');
  const market=build([{...shelf,unitPrice:140,packPrice:28}],families).rows[0];
  assert.equal(market.tier,'excellent','a real market low stays a good buy with a stock-up plan');assert.equal(market.referenceBasis,'usual');
+});
+
+test('the overview sends each need to the cheapest place, not to a checked but dearer one',()=>{
+ const families=new Map([['mince',family({name:'Kaffe – hele bønner',storage:'pantry',shelfMonths:12,need:{amount:12,basis:'planned-amount'},terms:['kaffe – hele bønner']})]]);
+ const europris=row({storeKey:'europris',storeName:'Europris',productKey:'e1',productName:'Kaffebønner 1000 g',unitPrice:189,packAmount:1,packPrice:189,reference:{price:189,basis:'usual'},odaPrice:241});
+ const kiwi=row({reviewed:false,productKey:'k1',productName:'Evergood Classic Hele Bønner 500g',unitPrice:155.8,packAmount:.5,packPrice:77.9,reference:{price:189,basis:'usual'}});
+ const result=build([europris,kiwi],families);
+ const picked=[...result.rows,...result.minor].filter(r=>r.best);
+ assert.equal(picked.length,1);assert.equal(picked[0].storeKey,'kiwi');
+ assert.deepEqual(picked[0].checkedAlternative,{storeName:'Europris',unitPrice:189,productName:'Kaffebønner 1000 g'});
+ const dear=result.rows.find(r=>r.storeKey==='europris');
+ assert.equal(dear.best,false);assert.deepEqual(dear.cheaperAt,{storeName:'KIWI',unitPrice:155.8,reviewed:false});
+ assert.equal(result.top.storeKey,'kiwi','the banner names the cheapest place too');
+ // An unchecked variant only a little cheaper does not displace a checked price.
+ const close=build([europris,{...kiwi,unitPrice:185,packPrice:92.5}],families);
+ assert.equal([...close.rows,...close.minor].find(r=>r.best).storeKey,'europris');
+ // A store's trip saving leaves out a need that a checked price elsewhere covers more cheaply.
+ const checked=build([europris,{...kiwi,reviewed:true}],families);
+ assert.equal(checked.stores.find(s=>s.key==='europris').saving,0);
+ assert.ok(checked.stores.find(s=>s.key==='kiwi').saving>0);
+});
+
+test('at the same chain price the store with more to gain anyway is the best place',()=>{
+ const families=new Map([['mince',family()],['other',family({name:'Pølser',terms:['pølser']})]]);
+ const result=build([row(),row({storeKey:'rema',storeName:'REMA 1000',productKey:'r1'}),row({watchId:'other',storeKey:'rema',storeName:'REMA 1000',productKey:'r2',productName:'Grillpølser'})],families);
+ assert.equal(result.rows.find(r=>r.watchId==='mince'&&r.best).storeKey,'rema');
 });

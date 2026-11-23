@@ -247,6 +247,8 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     if(row.maxPacks)notes.push(`Maks ${row.maxPacks} per ${row.oda?'bestilling':'kunde'}.`);
     if(row.bundlePacks>1)notes.push(`Kjøp ${row.bundlePacks} og ${row.bundlePacks}.`);
     if(row.memberOnly)notes.push('Krever medlemskap.');
+    if(row.cheaperAt)notes.push(`Billigere hos ${row.cheaperAt.storeName}: ${price(row.cheaperAt.unitPrice)}/${row.unit}${row.cheaperAt.reviewed?'':' (varianten er ikke sjekket)'}.`);
+    if(row.checkedAlternative)notes.push(`Sjekket vare: ${price(row.checkedAlternative.unitPrice)}/${row.unit} hos ${row.checkedAlternative.storeName}.`);
     if(!row.reviewed)notes.push('Samme varekategori, men varianten er ikke sjekket.');
     else if(row.kind!=='offer'&&!row.oda)notes.push('Kjedepris, så sjekk prisen i butikken.');
     if(notes.length)card.append(el('p',notes.join(' '),'shop-sub'));
@@ -364,11 +366,13 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
   }
   // The best place for each need, or everything one store has, so a quick
   // visit or one Oda order can stock up on what is cheap right now.
-  function bargainStoreSection(store,rows) {
+  // In one store's view the server's trip saving leaves out needs that a
+  // checked price elsewhere covers more cheaply.
+  function bargainStoreSection(store,rows,tripSaving=null) {
     const section=el('section',undefined,'shop-store'),head=el('div',undefined,'shop-store-head');
     const sure=rows.filter(r=>r.reviewed),check=rows.filter(r=>!r.reviewed);
-    const saving=sure.reduce((n,r)=>n+(r.saving??0),0),checkSaving=check.reduce((n,r)=>n+(r.saving??0),0);
-    const trip=store.oda?(saving>0?'med neste levering':null):saving>0?(saving>=store.minSavings?'verdt en egen tur':`under turgrensen på ${kr(store.minSavings)}`):null;
+    const saving=tripSaving??sure.reduce((n,r)=>n+(r.saving??0),0),checkSaving=check.reduce((n,r)=>n+(r.saving??0),0);
+    const trip=store.oda?(saving>0?'med neste levering':null):saving>0&&store.minSavings!=null?(saving>=store.minSavings?'verdt en egen tur':`under turgrensen på ${kr(store.minSavings)}`):null;
     const parts=[saving>0?`Spar ${kr(saving)}`:null,trip,checkSaving>0?`opptil ${kr(checkSaving)} til hvis variantene passer`:null].filter(Boolean);
     head.append(el('h3',store.name),el('span',parts.join(' · '),'shop-sub'));
     section.append(head,...sure.map(bargainCard));
@@ -389,14 +393,14 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
     if(b.stores.length){
       root.append(chips([['all','Beste sted for hver vare'],...b.stores.map(s=>[s.key,`${s.name} (${s.count+s.checkCount})`])],selectedStore,key=>{selectedStore=key;render(true);},'Velg butikk'));
       if(selectedStore==='all'){
-        // Each need once, where it is cheapest to buy it well.
-        const bestByNeed=new Map();
-        for(const row of b.rows)if(!bestByNeed.has(row.watchId))bestByNeed.set(row.watchId,row);
-        const picked=[...bestByNeed.values()];
-        for(const store of b.stores){const rows=picked.filter(r=>r.storeKey===store.key);if(rows.length)root.append(bargainStoreSection(store,rows));}
+        // Each need once, in the store where it is cheapest (the server decides).
+        const picked=[...b.rows,...b.minor].filter(r=>r.best);
+        const places=[...b.stores];
+        for(const r of picked)if(!places.some(s=>s.key===r.storeKey))places.push({key:r.storeKey,name:r.storeName,oda:r.oda,minSavings:null});
+        for(const store of places){const rows=picked.filter(r=>r.storeKey===store.key);if(rows.length)root.append(bargainStoreSection(store,rows));}
       }else{
         const store=b.stores.find(s=>s.key===selectedStore);
-        root.append(bargainStoreSection(store,b.rows.filter(r=>r.storeKey===store.key)));
+        root.append(bargainStoreSection(store,b.rows.filter(r=>r.storeKey===store.key),store.saving));
       }
     }
     const low=data.items.filter(x=>x.enabled&&x.stock.known&&x.stock.months!=null&&x.stock.months<1).slice(0,8);
@@ -406,7 +410,7 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
       for(const item of low){
         const row=el('div',undefined,'shop-low'),text=el('div');
         // The same prices as the list above: the cheapest good buy, else the cheapest reviewed price.
-        const deal=[...b.rows,...b.minor].filter(r=>r.watchId===item.id).sort((x,y)=>x.unitPrice-y.unitPrice)[0];
+        const deal=[...b.rows,...b.minor].find(r=>r.watchId===item.id&&r.best)??[...b.rows,...b.minor].filter(r=>r.watchId===item.id).sort((x,y)=>x.unitPrice-y.unitPrice)[0];
         const useDeal=deal&&(!item.prices.current||deal.unitPrice<item.prices.current);
         const where=useDeal?`Billigst nå: ${price(deal.unitPrice)}/${item.unit} hos ${deal.storeName}${deal.reviewed?'':' · sjekk varianten'}`:item.prices.current?`Billigst nå: ${price(item.prices.current)}/${item.unit} hos ${item.prices.currentChain}`:'Ingen fersk pris';
         text.append(el('strong',item.name),el('span',where,'shop-sub'));
@@ -420,8 +424,9 @@ export function installShoppingView({panel,banner=null,onOpen=()=>{},onExplore=n
       }
       root.append(card);
     }
-    if(b.minor.length)root.append(details('minor',`Små besparelser (${b.minor.length})`,node=>{
-      for(const row of b.minor){const line=el('div',undefined,'shop-row');line.append(el('span',`${row.familyName} hos ${row.storeName}: ${price(row.unitPrice)}/${row.unit}${row.reviewed?'':' · sjekk varianten'}`),el('span',row.saving>0?`spar ${kr(row.saving)}`:`${nf(0).format(row.discountPct)} % lavere`,'shop-sub'));node.append(line);}
+    const minor=b.minor.filter(r=>!r.best);
+    if(minor.length)root.append(details('minor',`Små besparelser (${minor.length})`,node=>{
+      for(const row of minor){const line=el('div',undefined,'shop-row');line.append(el('span',`${row.familyName} hos ${row.storeName}: ${price(row.unitPrice)}/${row.unit}${row.reviewed?'':' · sjekk varianten'}`),el('span',row.saving>0?`spar ${kr(row.saving)}`:`${nf(0).format(row.discountPct)} % lavere`,'shop-sub'));node.append(line);}
     },'shop-fold'));
     if(b.covered.length)root.append(details('covered',`Godt kjøp, men dere har nok (${b.covered.length})`,node=>{for(const row of b.covered){const item=data.items.find(x=>x.id===row.watchId);node.append(el('p',`${row.familyName} hos ${row.storeName}: ${price(row.unitPrice)}/${row.unit}. Dere har ${item?stockSummary(item):'nok'}.`,'shop-sub'));}},'shop-fold'));
     if(data.held.length)root.append(details('held',`Tilbud vi ikke kan vise ennå (${data.held.length})`,node=>{for(const entry of data.held)node.append(el('p',`${entry.watchName} hos ${entry.storeName} ${HELD_TEXT[entry.reason]??'venter'}.`,'shop-sub'));},'shop-fold'));
