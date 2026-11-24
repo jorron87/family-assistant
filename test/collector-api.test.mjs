@@ -13,11 +13,18 @@ test('samler-API: krever lokal avsender, avviser fra kiosken, og gir agenten sta
   const dir = mkdtempSync(join(tmpdir(), 'familien-collector-api-'));
   const port = 14380;
   const api = `http://127.0.0.1:${port}`;
-  const child = spawn(process.execPath, ['src/server.mjs'], { cwd: resolve('.'), env: { ...process.env, FAMILIEN_PORT: String(port), FAMILIEN_DATA_DIR: dir, FAMILIEN_NO_DISPATCH: '1', CODEX_HOME: dir }, stdio: 'ignore' });
+  const child = spawn(process.execPath, ['src/server.mjs'], { cwd: resolve('.'), env: { ...process.env, FAMILIEN_PORT: String(port), FAMILIEN_DATA_DIR: dir, FAMILIEN_NO_DISPATCH: '1', CODEX_HOME: dir }, stdio: ['ignore','ignore','pipe'], windowsHide:true });
+  let stderr='';child.stderr.on('data',chunk=>{stderr=(stderr+chunk).slice(-2000);});
   const cli = async (...args) => JSON.parse((await run(process.execPath, ['src/cli.mjs', ...args], { cwd: resolve('.'), env: { ...process.env, FAMILIEN_API: api } })).stdout);
   const post = (path, body, headers = { 'Content-Type': 'application/json', 'X-Family-Request': '1' }, base = api) => fetch(base + path, { method: 'POST', headers, body: JSON.stringify(body) });
   try {
-    for (let i = 0; i < 100; i++) { try { if ((await fetch(`${api}/health`)).ok) break; } catch {} await new Promise((r) => setTimeout(r, 100)); }
+    const deadline=Date.now()+30000;let ready=false;
+    while(Date.now()<deadline){
+      assert.equal(child.exitCode,null,'Test server exited during startup: '+stderr);
+      try{if((await fetch(`${api}/health`,{signal:AbortSignal.timeout(1000)})).ok){ready=true;break;}}catch{}
+      await new Promise(r=>setTimeout(r,100));
+    }
+    assert.ok(ready,'Test server did not become healthy within 30 seconds: '+stderr);
     assert.equal((await post('/api/collector', { source: 'vigilo', kind: 'health', health: 'ok' }, { 'Content-Type': 'application/json' })).status, 403, 'uten X-Family-Request');
     assert.equal((await post('/api/collector', { source: 'vigilo', kind: 'health', health: 'ok' }, { 'Content-Type': 'text/plain', 'X-Family-Request': '1' })).status, 403, 'ikke JSON');
     assert.equal((await post('/api/collector', { source: 'vigilo', kind: 'health', health: 'ok' }, undefined, `http://127.0.0.1:${port + 1}`)).status, 405, 'kiosken kan ikke skrive');
@@ -37,6 +44,11 @@ test('samler-API: krever lokal avsender, avviser fra kiosken, og gir agenten sta
     assert.ok(next.work.some((entry) => entry.do === 'review' && entry.externalId.startsWith('vigilo:news:')));
     const item = await cli('collected', 'vigilo:news:c7ef9824-c72d-7341-4e1b-17b48bd2c02f');
     assert.ok(item.text.startsWith('Omgangssyke på skolen.') && item.text.endsWith('SLUTTEN-AV-TEKSTEN'), 'hele teksten, ikke bare utdraget');
+    const [lookup]=await cli('source-item','vigilo','NEWS:C7EF9824C72D73414E1B17B48BD2C02F');
+    assert.equal(lookup.reading.contentRead,false);
+    assert.equal(lookup.reading.current.changeToken,item.token);
+    const current=await cli(lookup.reading.current.command,...lookup.reading.current.args);
+    assert.equal(current.text,item.text,'the archive hint reaches the complete current native payload, including formatted aliases');
     const list = await cli('collected-list', 'vigilo', 'child3:news');
     assert.equal(list.length, 1);
     assert.equal(list[0].externalId, item.externalId);
@@ -50,9 +62,10 @@ test('samler-API: krever lokal avsender, avviser fra kiosken, og gir agenten sta
     const after = (await (await fetch(`${api}/api/collector/status`)).json()).refreshRequestedAt;
     assert.notEqual(after, before, 'begin-run bestiller ny observasjon');
   } finally {
-    const done = new Promise((r) => child.once('exit', r));
-    child.kill();
-    await done;
+    if(child.exitCode===null&&child.signalCode===null){
+      const done = new Promise((r) => child.once('exit', r));
+      child.kill();await done;
+    }
     assert.ok(dir.startsWith(join(tmpdir(), 'familien-collector-api-')));
     rmSync(dir, { recursive: true, force: true });
   }

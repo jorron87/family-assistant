@@ -59,6 +59,27 @@ test('unknown reply count and missing text cannot establish completeness',()=>{
  assert.equal(normalized(post({commentCount:0,comments:[]})).commentsComplete,true);
 });
 
+test('archive lookup routes to the actual current payload and leaves changed work unread',()=>fixture(s=>{
+ const original=post({text:'Original announcement'});
+ ingest(s,original);
+ const raw=s.upsertRaw({source:'facebook',externalId,title:'Original announcement',body:original.text}).item;
+ s.markReviewed({source:'facebook',surface,externalId,rawId:raw.id,relevance:'relevant'});
+ const before=Object.values(s.snapshot().reviewLedger)[0].reviewedAt;
+ ingest(s,{...original,text:'The meeting date has actually changed.'});
+ const row=s.sourceItems({source:'facebook',externalIds:[externalId]})[0];
+ assert.equal(row.raws[0].id,raw.id);
+ assert.equal(row.raws[0].revision,1,'a lookup does not rewrite the archived source');
+ assert.equal(row.reading.contentRead,false);
+ const current=s.collectedItem(row.reading.current.args[0]);
+ assert.equal(row.reading.current.command,'collected');
+ assert.equal(current.text,'The meeting date has actually changed.');
+ assert.equal(row.reading.current.changeToken,current.token);
+ assert.equal(s.completionReport().pendingItems.length,1,'neither lookup nor collected read certifies review');
+ assert.equal(Object.values(s.snapshot().reviewLedger)[0].reviewedAt,before);
+ const unknown=s.sourceItems({source:'facebook',externalIds:['facebook:post:9999999999999999']})[0];
+ assert.equal(unknown.known,false);assert.equal(unknown.reading.current,null);
+}));
+
 test('explicit post-text irrelevance survives comment changes and restart, but actual post changes reopen it',()=>fixture((s,dir)=>{
  const base=post({text:'Invitation only for a different school class. '.repeat(12),comments:[],commentCount:0});
  ingest(s,base);

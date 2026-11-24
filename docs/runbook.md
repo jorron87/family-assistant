@@ -2,6 +2,8 @@
 
 Les AGENTS.md og docs/setup.md før bruk. Alle lokale konfigurasjoner tilhører den nye familien. Eksempler er syntetiske; opprett aldri ekte hendelser fra eksempeldatoer.
 
+`source-item SOURCE EXTERNAL_ID` og `source-items FIL` viser arkiv-ID-er, dokumentkvitteringer og listeutdrag, ikke hele dagens kildeinnhold. Hvert svar har `reading.contentRead:false`. Når innsamlet innhold finnes, peker `reading.current.command` og `args` på den faktiske native ID-en for `collected`, med gjeldende endringstoken; ellers er `current:null`, uten løfte om at kilden er lest. Les hele det aktuelle innholdet før vurdering og `mark-reviewed`. Oppslag, tidligere råkort eller en tom arbeidsliste er ingen ny lesekvittering eller sluttrapport.
+
 ## Avklaringer fra familien
 
 Samle nødvendige valg under «Avklaringer» på hjemmeskjermen og i den tilknyttede mobilvisningen. Undersøk først om kode, profilen, kjøpsbelegg eller faktiske kilder allerede gir svaret. Familien skal ikke få spørsmål om ingredienser, pakninger, EAN eller priser som agenten selv kan undersøke. Ikke lag et spørsmål per vare når det egentlig mangler ett felles familievalg.
