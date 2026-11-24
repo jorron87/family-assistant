@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,writeFileSync,rmSync,utimesSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {shoppingStore} from '../src/shopping.mjs';
@@ -13,7 +13,10 @@ function fixture(t,{familyCount=3,sourceName='New organic whole beans 500g'}={})
   const g={id:'beans',name:'Plain organic whole beans',category:'Coffee',canonicalUnit:'kg',inclusionCriteria:'Plain whole roasted organic coffee beans; brand and household choices remain separate.',exclusions:['Ground coffee','Added flavourings'],qualityBasis:'Actual complete ingredient list, whole-bean form and organic declaration',comparisonBasis:'Per kg'};
   const p={productKey:'kassal:KIWI:71',source:'kassal',store:'KIWI',id:'71',name:'Baseline organic whole beans 500g',brand:'Baseline',ean:'1234567890123',ingredients:'Organic whole roasted coffee beans',description:'A plain reviewed organic roast',sourceUrl:'https://producer.example.test/baseline-beans',canonicalPackAmount:.5,unit:'kg',packEvidence:'Read one actual fixed 500g bag.',rawPack:{weight:500,weightUnit:'g'},attributes:{organic:true},nutrition:null};p.metadataFingerprint=productMetadataFingerprint(p);
   const data={schemaVersion:1,createdAt:NOW,updatedAt:NOW,groups:[g],products:[p],memberships:[{groupId:g.id,productKey:p.productKey,status:'approved',reviewedFingerprint:p.metadataFingerprint,reviewedGroupFingerprint:groupMetadataFingerprint(g),equivalenceEvidence:'Read the complete actual plain organic whole-bean label and same brewing use.',qualityEvidence:'Actual ingredients, whole-bean form and organic declaration read.',reviewedAt:NOW,sourceReceipts:[{url:p.sourceUrl,observedAt:NOW,evidence:'Read the original actual label and fixed package.'}]}],prices:[{productKey:p.productKey,grossPackPrice:30,receiptAt:NOW,availabilityScope:'chain',sourceUrl:p.sourceUrl}]};
-  const file=join(dir,'library.json'),write=()=>writeFileSync(file,JSON.stringify(data),'utf8');write();
+  // Same-sized fixture writes can share a Windows mtime on fast CI runners.
+  // Give each actual write its own stamp; receipt dates remain unchanged.
+  let fileRevision=0;
+  const file=join(dir,'library.json'),write=()=>{writeFileSync(file,JSON.stringify(data),'utf8');utimesSync(file,new Date(NOW),new Date(Date.parse(NOW)+ ++fileRevision*1000));};write();
   const clock={at:NOW};let state={},shop;const open=()=>{const libraryPrices=libraryPriceProvider(file,{now:()=>new Date(clock.at)});shop=shoppingStore(state,{save(){},now:()=>new Date(clock.at),libraryPrices});};open();
   shop.settings({monitoringEnabled:true,stores:[{id:'kiwi',name:'KIWI',chainCode:'KIWI',url:'https://shop.example.test/kiwi',minSavings:0}]});
   const target=shop.watch({id:'target-beans',name:'Organic whole coffee beans',unit:'kg',storage:'pantry',purchaseAmount:10,stockAmount:2,targetPrice:50,note:'Plain whole roasted organic beans; accepted brands are Baseline and New.'});
