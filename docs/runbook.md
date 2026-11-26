@@ -4,6 +4,8 @@ Les AGENTS.md og docs/setup.md før bruk. Alle lokale konfigurasjoner tilhører 
 
 `source-item SOURCE EXTERNAL_ID` og `source-items FIL` viser arkiv-ID-er, dokumentkvitteringer og listeutdrag, ikke hele dagens kildeinnhold. Hvert svar har `reading.contentRead:false`. Når innsamlet innhold finnes, peker `reading.current.command` og `args` på den faktiske native ID-en for `collected`, med gjeldende endringstoken; ellers er `current:null`, uten løfte om at kilden er lest. Les hele det aktuelle innholdet før vurdering og `mark-reviewed`. Oppslag, tidligere råkort eller en tom arbeidsliste er ingen ny lesekvittering eller sluttrapport.
 
+`node src/cli.mjs help mark-reviewed` gir den korte, faktiske skrivekontrakten uten nettverkskall. `mark-reviewed FIL` tar én UTF-8 JSON-fil (objekt eller liste) med `source`, `surface`, `externalId`, `relevance` og faktisk importert `rawId` for relevante elementer. `mark-reviewed SOURCE ID` er ugyldig; `mark-reviewed - JSON` sender heller ikke JSON til stdin. Bruk fil på PowerShell. Rett en formatfeil og fortsett arbeidet; den er ikke en ekstern kildeblokkering. `help begin-run`, `help renew-run` og `help end-run` er også skrivefrie, inkludert i batch. Har kjøringen startet med en lokal lease-helper, bruk den samme helperen ved fornyelse/avslutning; direkte `end-run` kjører ikke helperens rapportkontroll.
+
 ## Avklaringer fra familien
 
 Samle nødvendige valg under «Avklaringer» på hjemmeskjermen og i den tilknyttede mobilvisningen. Undersøk først om kode, profilen, kjøpsbelegg eller faktiske kilder allerede gir svaret. Familien skal ikke få spørsmål om ingredienser, pakninger, EAN eller priser som agenten selv kan undersøke. Ikke lag et spørsmål per vare når det egentlig mangler ett felles familievalg.

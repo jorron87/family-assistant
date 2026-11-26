@@ -40,6 +40,32 @@ const sourceItemHelp = () => ({
   example:'node src/cli.mjs source-item spond spond:post:NATIVE_ID'
 });
 
+const reviewHelp = () => ({
+  usage:'node src/cli.mjs mark-reviewed FILE',
+  reviewSaved:false,
+  input:'One UTF-8 JSON file containing an object or array. FILE=- reads actual stdin; a JSON argument after - is not stdin. Prefer a file on PowerShell.',
+  required:['source','surface','externalId','relevance'],
+  relevant:'Import and review the actual source first, including every new document page, profile assessment and required publication receipts. Supply its matching rawId. Do not mark a relevant item irrelevant to avoid this work.',
+  irrelevant:'Use relevance:"irrelevant" and a concrete reviewNote; rawId may be omitted.',
+  current:'Read collected EXTERNAL_ID and verify its current token before acknowledging. This command acknowledges a reading; it does not perform that reading.',
+  example:{source:'vigilo',surface:'child-example:news',externalId:'vigilo:news:NATIVE_ID',rawId:'ACTUAL_IMPORTED_RAW_ID',relevance:'relevant',reviewNote:'Concrete result of the actual reading and saved receipts.'},
+  completion:'Verify the returned receipt. Help saves nothing. Continue available work, save a run report and release only your own lease in finally.'
+});
+
+const leaseHelp = command => ({
+  usage:'node src/cli.mjs '+command+(command==='begin-run'?'':' TOKEN'),
+  leaseChanged:false,
+  operation:command==='begin-run'?'Acquire a lease; read acquired and preserve the returned token privately. Busy grants no ownership.':command==='renew-run'?'Renew only your own still-active lease using its exact token.':'Release only your own still-active lease using its exact token, after saving and verifying the actual run report.',
+  safety:'Never read or reuse another invocation\'s token. A raw end-run does not execute an installation-specific report guard. If your invocation started with a deployment lease helper, use that same helper for renewal and finally cleanup.',
+  completion:'Help is read-only and is not a lease, report, review or coverage receipt.'
+});
+
+const commandHelp = command => command==='run'?runHelp():command==='source-item'?sourceItemHelp():command==='mark-reviewed'?reviewHelp():['begin-run','renew-run','end-run'].includes(command)?leaseHelp(command):null;
+function reviewInput(args) {
+  if(args.length!==1)throw Error('Bruk: node src/cli.mjs mark-reviewed FILE. Ett UTF-8 JSON-dokument; source/surface/externalId/rawId/relevance ligger i filen. FILE=- krever faktisk stdin. Se help mark-reviewed.');
+  try{return json(args[0]);}catch(error){throw Error(error.message+' Bruk en UTF-8 JSON-fil og se node src/cli.mjs help mark-reviewed; - leser bare faktisk stdin.');}
+}
+
 function datedFinding(finding) {
   if (!finding || !Number.isFinite(Date.parse(finding.start)) || !Number.isFinite(Date.parse(finding.end)) || Date.parse(finding.end) <= Date.parse(finding.start)) {
     throw new Error("Hvert funn må ha gyldig start og end. Bruk en tydelig merket oppfølgingsdato når hendelsesdatoen er ukjent.");
@@ -94,8 +120,7 @@ async function execute(command, args, flags) {
   }
   for(const name of valueOptions)if(flags.has(name)&&!options.has(name))throw Error(name+' requires one value in command args.');
   args=positionals;const option=name=>options.get(name)??null;
-  if(command==='run'&&flags.has('--help'))return runHelp();
-  if(command==='source-item'&&flags.has('--help'))return sourceItemHelp();
+  if(flags.has('--help')){const help=commandHelp(command);if(help)return help;}
   let result;
   switch (command) {
     case 'finance-digest': result=await financeRequest('/digest');break;
@@ -326,7 +351,7 @@ async function execute(command, args, flags) {
       }
       break;
     }
-    case "mark-reviewed": result = await postEach("/api/mark-reviewed", json(args[0])); break;
+    case "mark-reviewed": result = await postEach("/api/mark-reviewed", reviewInput(args)); break;
     case "surface": result = await postEach("/api/surface-status", json(args[0])); break;
     case "intake": {
       // markReviewed (liste) og profileReview kan følge med og utføres rett etter at råelementet er lagret.
@@ -383,8 +408,7 @@ const print = (value) => console.log(flags.has('--pretty') ? JSON.stringify(valu
 // batch: flere kommandoer i ett kall (hver runde til modellen koster hele konteksten på nytt). Kjøres i rekkefølge og stopper ved første feil.
 // Eksempel: batch '[{"cmd":"drive","args":["RAW","-","URL"]},{"cmd":"calendar","args":["EVENT"],"input":{...}}]'
 async function main() {
-  if((command==='run'&&flags.has('--help'))||(command==='help'&&args[0]==='run')){print(runHelp());return;}
-  if((command==='source-item'&&flags.has('--help'))||(command==='help'&&args[0]==='source-item')){print(sourceItemHelp());return;}
+  if(command==='help'||flags.has('--help')){const help=commandHelp(command==='help'?args[0]:command);if(help){print(help);return;}}
   if(command==='help'||flags.has('--help')||!command){
     const source=readFileSync(new URL(import.meta.url),'utf8');
     const commands=[...new Set([...source.matchAll(/case\s+["']([a-z][a-z0-9-]*)["']\s*:/g)].map(m=>m[1]).concat(['batch','help']))].sort();

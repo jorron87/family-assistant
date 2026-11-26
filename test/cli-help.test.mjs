@@ -1,5 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';
 import {execFile} from 'node:child_process';import {promisify} from 'node:util';import {createServer} from 'node:http';
+import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';
 test('CLI help succeeds offline and advertises installed shopping interfaces to unattended agents',()=>{
  for(const args of [['--help'],['help'],[]]){const r=spawnSync(process.execPath,['src/cli.mjs',...args],{encoding:'utf8',windowsHide:true,env:{...process.env,FAMILIEN_API:'http://127.0.0.1:1'}});assert.equal(r.status,0,r.stderr);const h=JSON.parse(r.stdout);for(const command of ['shopping-agent-context','shopping-agent-guide','shopping-catalog','shopping-catalog-review','shopping-sesum-register','next','begin-run','run'])assert.ok(h.commands.includes(command),command);assert.ok(h.shoppingCommands.length>20);assert.match(h.shoppingStart,/commands are installed/);}
 });
@@ -37,4 +38,28 @@ test('source-item distinguishes archived raw reads from collected contents and r
   await cli(process.execPath,['src/cli.mjs','source-item','spond','spond:post:sample'],{env,windowsHide:true});
   assert.deepEqual(requests,[{url:'/api/source-items',body:{source:'spond',externalIds:['spond:post:sample']}}]);
  }finally{await new Promise(resolve=>server.close(resolve));}
+});
+
+test('review and lease help are read-only, and malformed review invocations cannot acknowledge work',async()=>{
+ const requests=[];
+ const server=createServer(async(req,res)=>{let body='';for await(const chunk of req)body+=chunk;requests.push({method:req.method,url:req.url,body:body?JSON.parse(body):null});res.setHeader('Content-Type','application/json');res.end(JSON.stringify({id:'actual-review-receipt'}));});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const cli=promisify(execFile),env={...process.env,FAMILIEN_API:'http://127.0.0.1:'+server.address().port},dir=mkdtempSync(join(tmpdir(),'family-cli-review-'));
+ try{
+  for(const cmd of ['mark-reviewed','begin-run','renew-run','end-run']){
+   for(const args of [[cmd,'--help'],['help',cmd]]){
+    const h=JSON.parse((await cli(process.execPath,['src/cli.mjs',...args],{env,windowsHide:true})).stdout);
+    assert.match(h.usage,new RegExp(cmd));assert.equal(h.commands,undefined);assert.equal(h.id,undefined);
+    assert.equal(cmd==='mark-reviewed'?h.reviewSaved:h.leaseChanged,false);
+   }
+   const b=JSON.parse((await cli(process.execPath,['src/cli.mjs','batch',JSON.stringify([{cmd,args:['--help']}])],{env,windowsHide:true})).stdout);
+   assert.equal(b.ok,true);assert.equal(cmd==='mark-reviewed'?b.results[0].result.reviewSaved:b.results[0].result.leaseChanged,false);
+  }
+  for(const args of [[],['vigilo','vigilo:news:example'],['-','{"source":"vigilo"}'],['missing.json']])await assert.rejects(cli(process.execPath,['src/cli.mjs','mark-reviewed',...args],{env,windowsHide:true}),e=>/help mark-reviewed/.test(e.stderr));
+  assert.equal(requests.length,0);
+  const item={source:'vigilo',surface:'example:news',externalId:'vigilo:news:example',rawId:'example-raw',relevance:'relevant',reviewNote:'Actually read and imported synthetic source.'},file=join(dir,'review.json');
+  writeFileSync(file,'\uFEFF'+JSON.stringify([item]),'utf8');
+  const receipt=JSON.parse((await cli(process.execPath,['src/cli.mjs','mark-reviewed',file],{env,windowsHide:true})).stdout);
+  assert.equal(receipt[0].id,'actual-review-receipt');assert.deepEqual(requests,[{method:'POST',url:'/api/mark-reviewed',body:item}]);
+ }finally{rmSync(dir,{recursive:true,force:true});await new Promise(resolve=>server.close(resolve));}
 });
