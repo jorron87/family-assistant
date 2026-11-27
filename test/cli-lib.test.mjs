@@ -5,6 +5,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readJsonArg, slimCompletion, slimReviewQueue, slimResult, slimProfile, slimPhone, buildNext, shoppingOverview } from '../src/cli-lib.mjs';
 
+test('new review items explain the import step without changing their identity or certifying work',()=>{
+ const first={source:'vigilo',surface:'example:news',externalId:'vigilo:news:example',title:'Example',reason:'new',rawId:null};
+ const known={...first,externalId:'vigilo:news:known',rawId:'known-raw'};
+ const result=buildNext({completion:{complete:false},queue:{items:[first,known]}}),fresh=result.work.find(x=>x.externalId===first.externalId),saved=result.work.find(x=>x.externalId===known.externalId);
+ assert.equal(fresh.rawId,null);assert.equal(fresh.surface,first.surface);assert.match(fresh.importHint,/help intake/);assert.match(fresh.importHint,/assess relevance/);assert.equal(saved.rawId,'known-raw');assert.equal(saved.importHint,undefined);assert.equal(result.complete,false);assert.equal(first.importHint,undefined);
+});
+
 test('large shopping queues stay bounded without losing counts, priority or export access', () => {
   const shopping = Object.freeze(Array.from({ length: 10000 }, (_, i) => Object.freeze({ do: i % 2 ? 'shopping-review' : 'shopping-product-review', id: 'item-' + i })));
   const view = shoppingOverview(shopping);

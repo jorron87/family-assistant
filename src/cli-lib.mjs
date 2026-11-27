@@ -65,7 +65,8 @@ export function buildNext({ phone, calendarActions, completion, queue, activitie
   for(const item of clarificationAnswers)work.push({do:'clarification-answer',id:item.id,answerFingerprint:item.answerFingerprint,subject:item.subject,question:item.question});
   const soon = now + 14 * 86400000;
   const queueItems = [...(queue?.items ?? [])].sort((a, b) => String(a.reason).localeCompare(String(b.reason)));
-  for (const item of queueItems) work.push({ do: "review", source: item.source, surface: item.surface, externalId: item.externalId, title: item.title, reason: item.reason, rawId: item.rawId });
+  for (const item of queueItems) work.push({ do: "review", source: item.source, surface: item.surface, externalId: item.externalId, title: item.title, reason: item.reason, rawId: item.rawId,
+    ...(!item.rawId ? {importHint:'For a relevant new item, read collected EXTERNAL_ID, then help intake and intake FILE. Use the returned rawId for profile/publication and mark-reviewed FILE. Missing rawId is ordinary work, not a source blocker; assess relevance before importing.'} : {}) });
   for (const raw of completion?.profileReviews ?? []) if (raw.rawId) work.push({ do: "profile-review", rawId: raw.rawId, title: raw.title });
   for (const item of completion?.missingDrive ?? []) if (item.rawId) work.push({ do: "drive", rawId: item.rawId, kind: item.kind, attachmentId: item.attachmentId, fileName: item.fileName, title: item.title });
   for (const event of completion?.unsyncedCalendar ?? []) if (event.eventId) work.push({ do: "calendar", eventId: event.eventId, title: event.title });

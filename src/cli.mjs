@@ -46,10 +46,22 @@ const reviewHelp = () => ({
   input:'One UTF-8 JSON file containing an object or array. FILE=- reads actual stdin; a JSON argument after - is not stdin. Prefer a file on PowerShell.',
   required:['source','surface','externalId','relevance'],
   relevant:'Import and review the actual source first, including every new document page, profile assessment and required publication receipts. Supply its matching rawId. Do not mark a relevant item irrelevant to avoid this work.',
+  missingRaw:'rawId:null for a new relevant source is normal import work, not an external blocker. Read help intake, import the actual read source with its stable externalId, and use the returned item.id.',
   irrelevant:'Use relevance:"irrelevant" and a concrete reviewNote; rawId may be omitted.',
   current:'Read collected EXTERNAL_ID and verify its current token before acknowledging. This command acknowledges a reading; it does not perform that reading.',
   example:{source:'vigilo',surface:'child-example:news',externalId:'vigilo:news:NATIVE_ID',rawId:'ACTUAL_IMPORTED_RAW_ID',relevance:'relevant',reviewNote:'Concrete result of the actual reading and saved receipts.'},
   completion:'Verify the returned receipt. Help saves nothing. Continue available work, save a run report and release only your own lease in finally.'
+});
+
+const intakeHelp = () => ({
+  usage:'node src/cli.mjs intake FILE',
+  rawSaved:false,
+  input:'One UTF-8 JSON file. Use the actual source and stable externalId after reading collected contents and every new attachment page. A missing rawId does not mean the source is unavailable.',
+  required:['source','externalId','title','body'],
+  example:{source:'vigilo',externalId:'vigilo:news:ACTUAL_NATIVE_ID',title:'Actual source title',body:'Actual completely read source text',sourceUrl:'Actual source URL',publishedAt:'Actual source timestamp',memberIds:['CONFIGURED_MEMBER_ID'],findings:[]},
+  findings:'Use findings:[] when there is no new actionable finding; preserve an existing equivalent family task instead of duplicating it. A finding requires concrete canonicalKey, members and valid start/end. Never copy example identifiers or invent dates.',
+  receipts:'The saved response contains item.id, also in compact CLI output. Keep that rawId, perform profile-review and required original/document/Drive/Calendar work, then mark-reviewed FILE with that rawId and the correct surface. Import alone does not prove reading or completed work.',
+  reuse:'For an existing source, use source-item to find its stable rawId and reuse unchanged receipts. Do not create another source ID or publish again merely because the agent has not seen it before.'
 });
 
 const leaseHelp = command => ({
@@ -60,7 +72,7 @@ const leaseHelp = command => ({
   completion:'Help is read-only and is not a lease, report, review or coverage receipt.'
 });
 
-const commandHelp = command => command==='run'?runHelp():command==='source-item'?sourceItemHelp():command==='mark-reviewed'?reviewHelp():['begin-run','renew-run','end-run'].includes(command)?leaseHelp(command):null;
+const commandHelp = command => command==='run'?runHelp():command==='source-item'?sourceItemHelp():command==='mark-reviewed'?reviewHelp():command==='intake'?intakeHelp():['begin-run','renew-run','end-run'].includes(command)?leaseHelp(command):null;
 function reviewInput(args) {
   if(args.length!==1)throw Error('Bruk: node src/cli.mjs mark-reviewed FILE. Ett UTF-8 JSON-dokument; source/surface/externalId/rawId/relevance ligger i filen. FILE=- krever faktisk stdin. Se help mark-reviewed.');
   try{return json(args[0]);}catch(error){throw Error(error.message+' Bruk en UTF-8 JSON-fil og se node src/cli.mjs help mark-reviewed; - leser bare faktisk stdin.');}

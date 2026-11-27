@@ -63,3 +63,15 @@ test('review and lease help are read-only, and malformed review invocations cann
   assert.equal(receipt[0].id,'actual-review-receipt');assert.deepEqual(requests,[{method:'POST',url:'/api/mark-reviewed',body:item}]);
  }finally{rmSync(dir,{recursive:true,force:true});await new Promise(resolve=>server.close(resolve));}
 });
+
+test('new-source intake guidance is offline and a real import returns the raw identity without implicit review',async()=>{
+ const requests=[];const server=createServer(async(req,res)=>{let body='';for await(const chunk of req)body+=chunk;requests.push({url:req.url,body:JSON.parse(body)});res.setHeader('Content-Type','application/json');res.end(JSON.stringify({item:{id:'imported-example',source:'vigilo',externalId:'vigilo:news:example',revision:1}}));});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const cli=promisify(execFile),env={...process.env,FAMILIEN_API:'http://127.0.0.1:'+server.address().port},dir=mkdtempSync(join(tmpdir(),'family-cli-intake-'));
+ try{
+  for(const args of [['help','intake'],['intake','--help']]){const h=JSON.parse((await cli(process.execPath,['src/cli.mjs',...args],{env,windowsHide:true})).stdout);assert.equal(h.rawSaved,false);assert.equal(h.commands,undefined);assert.match(h.receipts,/item.id/);assert.deepEqual(h.example.findings,[]);}
+  const b=JSON.parse((await cli(process.execPath,['src/cli.mjs','batch',JSON.stringify([{cmd:'intake',args:['--help']}])],{env,windowsHide:true})).stdout);assert.equal(b.ok,true);assert.equal(b.results[0].result.rawSaved,false);assert.equal(requests.length,0);
+  const item={source:'vigilo',externalId:'vigilo:news:example',title:'Synthetic reminder',body:'Completely read synthetic source text',findings:[]},file=join(dir,'intake.json');writeFileSync(file,'\uFEFF'+JSON.stringify(item),'utf8');
+  const saved=JSON.parse((await cli(process.execPath,['src/cli.mjs','intake',file],{env,windowsHide:true})).stdout);assert.equal(saved.item.id,'imported-example');assert.deepEqual(requests,[{url:'/api/raw',body:item}]);
+ }finally{rmSync(dir,{recursive:true,force:true});await new Promise(resolve=>server.close(resolve));}
+});
