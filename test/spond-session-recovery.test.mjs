@@ -21,6 +21,18 @@ function harness({health='unauthorized',page={},down=false,saved={},age=60000,pr
   return {...api,reloads,storage,current,updated,created,woken};
 }
 const tab={id:7,status:'complete'};
+
+test('real Spond home links qualify without accepting a login page or losing draft protection',()=>{
+ const element=(innerText,shown=true)=>({innerText,getClientRects:()=>shown?[{}]:[]});
+ const home=element('Hjem'),messages=element('Meldinger 2'),menu=element('account');
+ const inspect=({homeVisible=true,hasMessages=true,hasMenu=true,draft='',dialog=false}={})=>{
+  const document={readyState:'complete',hasFocus:()=>false,querySelectorAll:selector=>selector==='button'?(hasMessages?[messages]:[]):selector==='a,button'?[...(homeVisible?[home]:[element('Hjem',false)]),...(hasMessages?[messages]:[])]:selector==='[role="menu"]'?(hasMenu?[menu]:[]):selector==='[role="dialog"]'?(dialog?[element('dialog')]:[]):[{value:draft}]};
+  return runInNewContext(script+'\ninspectSpondPage()',{document,navigator:{onLine:true},chrome:{alarms:{onAlarm:{addListener(){}}},runtime:{onInstalled:{addListener(){}},onStartup:{addListener(){}},onMessage:{addListener(){}}},action:{onClicked:{addListener(){}}}},fetch:async()=>{},URL,AbortSignal,setTimeout,clearTimeout});
+ };
+ assert.equal(inspect().authenticated,true);
+ for(const options of [{homeVisible:false},{hasMessages:false},{hasMenu:false}])assert.equal(inspect(options).authenticated,false);
+ assert.equal(inspect({draft:'unfinished family message'}).drafts,true);assert.equal(inspect({dialog:true}).dialog,true);
+});
 test('one idle authenticated reload per rejected episode, even if retries change failure timestamp',async()=>{
   const app=harness();await app.recoverSpond(tab);
   app.current.sources.spond.health.at=new Date().toISOString();await app.recoverSpond(tab);

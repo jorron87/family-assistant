@@ -151,7 +151,11 @@ async function tick() {
 function inspectSpondPage() {
   const visible = element => !!element.getClientRects().length;
   const buttons = [...document.querySelectorAll('button')].filter(visible);
-  const authenticated = buttons.some(el => /Hjem/.test(el.innerText)) && buttons.some(el => /Meldinger/.test(el.innerText)) && [...document.querySelectorAll('[role="menu"]')].some(visible);
+  // Current Spond renders Home as a navigation link, not a button. Keep the
+  // independent message button and account menu checks: the logo/login page
+  // alone is not evidence of an authenticated app.
+  const navigation = [...document.querySelectorAll('a,button')].filter(visible);
+  const authenticated = navigation.some(el => /Hjem/.test(el.innerText)) && buttons.some(el => /Meldinger/.test(el.innerText)) && [...document.querySelectorAll('[role="menu"]')].some(visible);
   const drafts = [...document.querySelectorAll('input:not([type="hidden"]),textarea,[contenteditable="true"]')].some(el => String(el.value ?? el.textContent ?? '').trim());
   return {authenticated, ready:document.readyState === 'complete', online:navigator.onLine, focused:document.hasFocus(), drafts, dialog:[...document.querySelectorAll('[role="dialog"]')].some(visible)};
 }
